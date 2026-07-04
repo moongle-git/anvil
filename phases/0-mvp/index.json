@@ -21,7 +21,10 @@
     {
       "step": 2,
       "name": "run-store",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-04T11:55:02+0900",
+      "completed_at": "2026-07-04T11:58:30+0900",
+      "summary": "src/lib/runStore.ts에 RunStore 작성(TDD) — createRun(타임스탬프+slug+랜덤 runId, 전 step pending 초기화)/loadRun(스키마 검증, 미존재 시 명확한 에러)/saveRun(atomic write)/saveStepOutput·loadStepOutput(STEP_OUTPUT_FILES 상수 매핑, 손상·검증실패 시 null 반환으로 resume 재실행 유도)/saveReport(절대 경로 반환), 임시 디렉토리 실제 파일 I/O 테스트 19개 + tsconfig types:[node] 추가 (build/test/lint 통과)"
     },
     {
       "step": 3,
