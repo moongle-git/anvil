@@ -7,7 +7,7 @@
       "name": "project-setup",
       "status": "completed",
       "started_at": "2026-07-04T11:49:15+0900",
-      "completed_at": "2026-07-04T11:51:13+0900",
+      "completed_at": "2026-07-04T11:51:56+0900",
       "summary": "TypeScript strict 프로젝트 초기화 — package.json(build/test/lint/consult scripts), tsconfig(NodeNext/ES2022), ESLint flat config(typescript-eslint recommended), src/ 스캐폴드, .env.example, 스모크 테스트 (build/test/lint 모두 통과)"
     },
     {
