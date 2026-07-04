@@ -1,9 +1,29 @@
+# dependencies
 node_modules/
-.next/
-out/
-next-env.d.ts
+
+# environment variables (API keys)
+.env
+.env.local
+.env.*.local
+
+# build output
+dist/
 tsconfig.tsbuildinfo
+
+# pipeline run outputs
+runs/
+
+# test coverage
+coverage/
 
 # phase execution outputs
 phases/**/phase*-output.json
 phases/**/step*-output.json
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# logs
+*.log

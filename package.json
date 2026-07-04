@@ -1,0 +1,31 @@
+{
+  "name": "anvil",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI 서비스 기획 컨설팅 에이전트",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "consult": "tsx src/cli/index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moongle-git/anvil.git"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "eslint": "^10.6.0",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "@google/genai": "^2.10.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  }
+}
