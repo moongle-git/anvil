@@ -1,0 +1,15 @@
+{
+  "project": "anvil",
+  "phase": "0-mvp",
+  "steps": [
+    { "step": 0, "name": "project-setup", "status": "pending" },
+    { "step": 1, "name": "core-types", "status": "pending" },
+    { "step": 2, "name": "run-store", "status": "pending" },
+    { "step": 3, "name": "gemini-service", "status": "pending" },
+    { "step": 4, "name": "youtube-service", "status": "pending" },
+    { "step": 5, "name": "agent-context-hunter", "status": "pending" },
+    { "step": 6, "name": "agent-cold-critic", "status": "pending" },
+    { "step": 7, "name": "agent-solution-designer", "status": "pending" },
+    { "step": 8, "name": "pipeline-cli", "status": "pending" }
+  ]
+}
