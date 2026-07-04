@@ -31,7 +31,7 @@
       "name": "gemini-service",
       "status": "completed",
       "started_at": "2026-07-04T11:58:27+0900",
-      "completed_at": "2026-07-04T12:01:30+0900",
+      "completed_at": "2026-07-04T12:01:11+0900",
       "summary": "src/services/gemini.ts에 GeminiService 작성(TDD) — 생성자 클라이언트 주입(테스트 mock용), generateStructured: 비grounding 시 responseMimeType+responseJsonSchema(zod→JSON Schema) 구조화 출력, grounding 시 googleSearch tool+자유 텍스트에서 JSON 추출(```json 펜스/중괄호 매칭), zod 검증 실패 시 에러 피드백 교정 프롬프트로 최대 maxRetries(기본 3)회 재시도 후 예외, mock 테스트 11개 (build/test/lint 통과)"
     },
     {
