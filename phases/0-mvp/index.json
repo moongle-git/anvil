@@ -15,7 +15,7 @@
       "name": "core-types",
       "status": "completed",
       "started_at": "2026-07-04T11:51:56+0900",
-      "completed_at": "2026-07-04T11:54:32+0900",
+      "completed_at": "2026-07-04T11:55:02+0900",
       "summary": "src/types/에 파이프라인 공유 zod 스키마·타입 작성(TDD) — run.ts(PIPELINE_STEPS/StepState/RunState), marketContext.ts(CompetitorService/YoutubeVoice/MarketContext), criticism.ts(CriticismPoint 3축+verdict), solution.ts(Solution 5필드), index.ts re-export + 스키마별 유효/무효 테스트 46개 (build/test/lint 통과)"
     },
     {
