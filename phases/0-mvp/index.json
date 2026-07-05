@@ -53,7 +53,8 @@
     {
       "step": 6,
       "name": "agent-cold-critic",
-      "status": "pending"
+      "status": "pending",
+      "started_at": "2026-07-05T10:56:00+0900"
     },
     {
       "step": 7,
