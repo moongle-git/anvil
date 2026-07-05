@@ -18,6 +18,35 @@ export const STEP_OUTPUT_FILES: Record<PipelineStepName, string> = {
 const STATE_FILE = "state.json";
 const REPORT_FILE = "report.md";
 
+// state.json이 이 시간보다 오래 갱신되지 않으면 실행 프로세스가 죽은 것으로 간주한다 (PRD "run 상태 파생 규칙")
+const STALLED_THRESHOLD_MS = 10 * 60 * 1000;
+
+export type RunDisplayStatus = "completed" | "error" | "running" | "stalled";
+
+export interface RunSummary {
+  runId: string;
+  idea: string;
+  createdAt: string;
+  completedAt?: string;
+  status: RunDisplayStatus;
+}
+
+export function deriveRunStatus(
+  state: RunState,
+  stateFileMtimeMs: number,
+  nowMs: number = Date.now(),
+): RunDisplayStatus {
+  if (state.completedAt) {
+    return "completed";
+  }
+  if (state.steps.some((step) => step.status === "error")) {
+    return "error";
+  }
+  return nowMs - stateFileMtimeMs <= STALLED_THRESHOLD_MS
+    ? "running"
+    : "stalled";
+}
+
 function slugify(idea: string): string {
   return idea
     .toLowerCase()
@@ -101,6 +130,45 @@ export class RunStore {
     }
     const result = schema.safeParse(parsed);
     return result.success ? result.data : null;
+  }
+
+  listRuns(nowMs?: number): RunSummary[] {
+    if (!fs.existsSync(this.baseDir)) {
+      return [];
+    }
+
+    const summaries: RunSummary[] = [];
+    for (const entry of fs.readdirSync(this.baseDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const statePath = path.join(this.runDir(entry.name), STATE_FILE);
+
+      // 손상된 run 하나가 목록 전체를 죽이면 안 되므로, 읽기/파싱/검증 실패는 skip한다
+      let mtimeMs: number;
+      let parsed: unknown;
+      try {
+        mtimeMs = fs.statSync(statePath).mtimeMs;
+        parsed = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      } catch {
+        continue;
+      }
+      const result = RunStateSchema.safeParse(parsed);
+      if (!result.success) {
+        continue;
+      }
+
+      const state = result.data;
+      summaries.push({
+        runId: state.runId,
+        idea: state.idea,
+        createdAt: state.createdAt,
+        completedAt: state.completedAt,
+        status: deriveRunStatus(state, mtimeMs, nowMs),
+      });
+    }
+
+    return summaries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   saveReport(runId: string, markdown: string): string {

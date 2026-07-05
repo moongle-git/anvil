@@ -11,9 +11,10 @@ import {
   SolutionSchema,
   type Criticism,
   type MarketContext,
+  type RunState,
   type Solution,
 } from "../types/index.js";
-import { RunStore, STEP_OUTPUT_FILES } from "./runStore.js";
+import { RunStore, STEP_OUTPUT_FILES, deriveRunStatus } from "./runStore.js";
 
 const validMarketContext: MarketContext = {
   ideaTitle: "AI 반려식물 관리 서비스",
@@ -233,6 +234,133 @@ describe("RunStore", () => {
     });
   });
 
+  describe("listRuns", () => {
+    const MINUTE_MS = 60 * 1000;
+
+    it("returns an empty array when baseDir does not exist", () => {
+      const missing = new RunStore(path.join(baseDir, "does-not-exist"));
+
+      expect(missing.listRuns()).toEqual([]);
+    });
+
+    it("returns an empty array when baseDir has no runs", () => {
+      expect(store.listRuns()).toEqual([]);
+    });
+
+    it("summarizes a run with its runId, idea, createdAt and derived status", () => {
+      const state = store.createRun("AI 반려식물 관리 서비스");
+
+      const runs = store.listRuns();
+
+      expect(runs).toEqual([
+        {
+          runId: state.runId,
+          idea: "AI 반려식물 관리 서비스",
+          createdAt: state.createdAt,
+          completedAt: undefined,
+          status: "running",
+        },
+      ]);
+    });
+
+    it("derives completed status and exposes completedAt", () => {
+      const state = store.createRun("아이디어");
+      const completedAt = new Date().toISOString();
+      store.saveRun({ ...state, completedAt });
+
+      const runs = store.listRuns();
+
+      expect(runs[0]?.status).toBe("completed");
+      expect(runs[0]?.completedAt).toBe(completedAt);
+    });
+
+    it("derives error status when any step has errored", () => {
+      const state = store.createRun("아이디어");
+      store.saveRun({
+        ...state,
+        steps: state.steps.map((s, i) =>
+          i === 1 ? { ...s, status: "error" as const, errorMessage: "boom" } : s,
+        ),
+      });
+
+      expect(store.listRuns()[0]?.status).toBe("error");
+    });
+
+    it("derives stalled status when state.json mtime is older than 10 minutes", () => {
+      const state = store.createRun("아이디어");
+      const statePath = path.join(baseDir, state.runId, "state.json");
+      const old = new Date(Date.now() - 11 * MINUTE_MS);
+      fs.utimesSync(statePath, old, old);
+
+      expect(store.listRuns()[0]?.status).toBe("stalled");
+    });
+
+    it("derives stalled via injected nowMs without touching the file", () => {
+      store.createRun("아이디어");
+
+      expect(store.listRuns(Date.now() + 11 * MINUTE_MS)[0]?.status).toBe(
+        "stalled",
+      );
+    });
+
+    it("skips directories without state.json instead of throwing", () => {
+      const state = store.createRun("아이디어");
+      fs.mkdirSync(path.join(baseDir, "not-a-run"));
+
+      const runs = store.listRuns();
+
+      expect(runs.map((r) => r.runId)).toEqual([state.runId]);
+    });
+
+    it("skips runs whose state.json is corrupted JSON", () => {
+      const state = store.createRun("아이디어");
+      const broken = store.createRun("깨진 run");
+      fs.writeFileSync(
+        path.join(baseDir, broken.runId, "state.json"),
+        "{ not json",
+      );
+
+      const runs = store.listRuns();
+
+      expect(runs.map((r) => r.runId)).toEqual([state.runId]);
+    });
+
+    it("skips runs whose state.json fails schema validation", () => {
+      const state = store.createRun("아이디어");
+      const invalid = store.createRun("스키마 위반 run");
+      fs.writeFileSync(
+        path.join(baseDir, invalid.runId, "state.json"),
+        JSON.stringify({ runId: invalid.runId }),
+      );
+
+      const runs = store.listRuns();
+
+      expect(runs.map((r) => r.runId)).toEqual([state.runId]);
+    });
+
+    it("ignores plain files in baseDir", () => {
+      const state = store.createRun("아이디어");
+      fs.writeFileSync(path.join(baseDir, "stray.txt"), "noise");
+
+      expect(store.listRuns().map((r) => r.runId)).toEqual([state.runId]);
+    });
+
+    it("sorts runs by createdAt descending (newest first)", () => {
+      const a = store.createRun("첫 번째");
+      const b = store.createRun("두 번째");
+      const c = store.createRun("세 번째");
+      store.saveRun({ ...a, createdAt: "2026-07-01T00:00:00.000Z" });
+      store.saveRun({ ...b, createdAt: "2026-07-03T00:00:00.000Z" });
+      store.saveRun({ ...c, createdAt: "2026-07-02T00:00:00.000Z" });
+
+      expect(store.listRuns().map((r) => r.runId)).toEqual([
+        b.runId,
+        c.runId,
+        a.runId,
+      ]);
+    });
+  });
+
   describe("saveReport", () => {
     it("writes report.md and returns its absolute path", () => {
       const { runId } = store.createRun("아이디어");
@@ -254,5 +382,84 @@ describe("RunStore", () => {
 
       expect(fs.readFileSync(reportPath, "utf-8")).toBe(markdown);
     });
+  });
+});
+
+describe("deriveRunStatus", () => {
+  const MINUTE_MS = 60 * 1000;
+  const NOW_MS = Date.parse("2026-07-06T12:00:00.000Z");
+
+  function makeState(overrides: Partial<RunState> = {}): RunState {
+    return {
+      runId: "run-1",
+      idea: "아이디어",
+      createdAt: "2026-07-06T00:00:00.000Z",
+      steps: PIPELINE_STEPS.map((name) => ({
+        name,
+        status: "pending" as const,
+      })),
+      ...overrides,
+    };
+  }
+
+  it("returns completed when completedAt is set, regardless of mtime", () => {
+    const state = makeState({ completedAt: "2026-07-06T01:00:00.000Z" });
+
+    expect(deriveRunStatus(state, NOW_MS - 60 * MINUTE_MS, NOW_MS)).toBe(
+      "completed",
+    );
+  });
+
+  it("prefers completed over error when both apply", () => {
+    const state = makeState({
+      completedAt: "2026-07-06T01:00:00.000Z",
+      steps: PIPELINE_STEPS.map((name) => ({
+        name,
+        status: "error" as const,
+      })),
+    });
+
+    expect(deriveRunStatus(state, NOW_MS - 60 * MINUTE_MS, NOW_MS)).toBe(
+      "completed",
+    );
+  });
+
+  it("returns error when any step has status error, regardless of mtime", () => {
+    const state = makeState({
+      steps: PIPELINE_STEPS.map((name, i) => ({
+        name,
+        status: i === 2 ? ("error" as const) : ("completed" as const),
+      })),
+    });
+
+    expect(deriveRunStatus(state, NOW_MS, NOW_MS)).toBe("error");
+    expect(deriveRunStatus(state, NOW_MS - 60 * MINUTE_MS, NOW_MS)).toBe(
+      "error",
+    );
+  });
+
+  it("returns running when mtime is within 10 minutes of now", () => {
+    expect(deriveRunStatus(makeState(), NOW_MS - 9 * MINUTE_MS, NOW_MS)).toBe(
+      "running",
+    );
+  });
+
+  it("treats exactly 10 minutes as still running (10분 이내)", () => {
+    expect(deriveRunStatus(makeState(), NOW_MS - 10 * MINUTE_MS, NOW_MS)).toBe(
+      "running",
+    );
+  });
+
+  it("returns stalled when mtime is older than 10 minutes", () => {
+    expect(
+      deriveRunStatus(makeState(), NOW_MS - 10 * MINUTE_MS - 1, NOW_MS),
+    ).toBe("stalled");
+  });
+
+  it("defaults nowMs to Date.now()", () => {
+    expect(deriveRunStatus(makeState(), Date.now())).toBe("running");
+    expect(deriveRunStatus(makeState(), Date.now() - 11 * MINUTE_MS)).toBe(
+      "stalled",
+    );
   });
 });

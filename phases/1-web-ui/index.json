@@ -13,7 +13,10 @@
     {
       "step": 1,
       "name": "run-index",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-06T00:13:06+0900",
+      "summary": "src/lib/runStore.ts에 표시용 상태 파생 순수 함수 deriveRunStatus(completedAt→completed, step error→error, mtime 10분 이내→running/초과→stalled — STALLED_THRESHOLD_MS 상수 한 곳 정의, nowMs 주입 가능)와 RunStore.listRuns(nowMs?) 추가: RunSummary(runId·idea·createdAt·completedAt·status) 배열을 createdAt 내림차순으로 반환, baseDir 부재 시 빈 배열, state.json 누락/JSON 파싱·스키마 검증 실패 run은 throw 없이 skip. 테스트는 기존 패턴대로 OS 임시 디렉토리 실제 파일 I/O + fs.utimesSync/nowMs 주입으로 19개 케이스 TDD 검증.",
+      "completed_at": "2026-07-06T00:16:10+0900"
     },
     {
       "step": 2,
