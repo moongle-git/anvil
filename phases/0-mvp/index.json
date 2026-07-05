@@ -39,7 +39,7 @@
       "name": "youtube-service",
       "status": "completed",
       "started_at": "2026-07-05T10:50:47+0900",
-      "completed_at": "2026-07-05T10:52:44+0900",
+      "completed_at": "2026-07-05T10:53:19+0900",
       "summary": "src/services/youtube.ts에 YoutubeService 작성(TDD) — 전역 fetch 기반 REST 래퍼(fetchFn 주입으로 mock 테스트), searchVideos(search part=snippet/type=video/relevanceLanguage=ko, maxVideos 기본 5 제한)/fetchComments(commentThreads part=snippet/order=relevance, maxCommentsPerVideo 기본 10 제한)/collectVoices(영상별 댓글 수집, commentsDisabled 403은 skip·quotaExceeded/키 오류는 YoutubeApiError로 명확한 예외), 페이지네이션 없음(quota 절약), mock 테스트 13개 (build/test/lint 통과)"
     },
     {
