@@ -69,12 +69,12 @@
     {
       "step": 8,
       "name": "pipeline-cli",
-      "status": "error",
+      "status": "completed",
       "started_at": "2026-07-05T11:01:13+0900",
-      "error_message": "[3회 시도 후 실패] Step did not update status",
-      "failed_at": "2026-07-05T11:01:19+0900"
+      "completed_at": "2026-07-05T19:15:33+0900",
+      "summary": "src/pipeline/orchestrator.ts에 runPipeline 작성(TDD) — 하네스 패턴(순차 step, 전이마다 saveRun 즉시 persist, resume 시 completed step은 loadStepOutput 스키마 검증 통과 시 skip·산출물 재사용, 손상 시 재실행), step 실패는 error 기록 후 runId를 담은 PipelineStepError로 전파; src/lib/report.ts renderReport가 PRD 리포트 규격 마크다운을 순수 함수로 렌더링(youtubeVoices 인용 블록, severity 대문자 표시, 스냅샷 테스트); src/cli/index.ts가 dotenv 로드·util.parseArgs 인자 파싱(--resume)·서비스 조립 후 성공 시 리포트 경로 stdout 출력·실패 시 --resume 안내, YOUTUBE_API_KEY 없으면 즉시 실패 fetchFn 주입으로 네트워크 호출 없이 웹검색만 진행, 테스트 12개 추가 (build/test/lint 통과)"
     }
   ],
   "created_at": "2026-07-04T11:49:15+0900",
-  "completed_at": "2026-07-05T11:01:35+0900"
+  "completed_at": "2026-07-05T19:15:33+0900"
 }
