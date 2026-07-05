@@ -4,10 +4,14 @@
   "private": true,
   "type": "module",
   "description": "AI 서비스 기획 컨설팅 에이전트",
+  "workspaces": [
+    "web"
+  ],
   "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "lint": "eslint src",
+    "build": "tsc && npm run build -w web",
+    "test": "vitest run && npm run test -w web",
+    "lint": "eslint src && npm run lint -w web",
+    "web": "npm run dev -w web",
     "consult": "tsx src/cli/index.ts"
   },
   "repository": {

@@ -10,6 +10,11 @@ node_modules/
 dist/
 tsconfig.tsbuildinfo
 
+# Next.js (web workspace)
+web/.next/
+web/out/
+web/next-env.d.ts
+
 # pipeline run outputs
 runs/
 
