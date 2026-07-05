@@ -1,0 +1,26 @@
+{
+  "runId": "2026-07-01T09-00-00-000Z-ai-meeting-notes-fx01",
+  "idea": "AI 회의록 요약 및 액션아이템 자동 추출 서비스",
+  "createdAt": "2026-07-01T09:00:00.000Z",
+  "steps": [
+    {
+      "name": "context-hunter",
+      "status": "completed",
+      "startedAt": "2026-07-01T09:00:01.000Z",
+      "completedAt": "2026-07-01T09:02:10.000Z"
+    },
+    {
+      "name": "cold-critic",
+      "status": "completed",
+      "startedAt": "2026-07-01T09:02:10.000Z",
+      "completedAt": "2026-07-01T09:03:40.000Z"
+    },
+    {
+      "name": "solution-designer",
+      "status": "completed",
+      "startedAt": "2026-07-01T09:03:40.000Z",
+      "completedAt": "2026-07-01T09:05:00.000Z"
+    }
+  ],
+  "completedAt": "2026-07-01T09:05:00.000Z"
+}

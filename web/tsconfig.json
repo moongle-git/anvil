@@ -20,7 +20,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@anvil/types": ["../src/types/index.ts"]
+      "@anvil/types": ["../src/types/index.ts"],
+      "@anvil/runStore": ["../src/lib/runStore.ts"]
     }
   },
   "include": [

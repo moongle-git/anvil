@@ -1,0 +1,21 @@
+{
+  "runId": "2026-07-03T14-00-00-000Z-plant-care-fx02",
+  "idea": "반려식물 케어 구독 서비스",
+  "createdAt": "2026-07-03T14:00:00.000Z",
+  "steps": [
+    {
+      "name": "context-hunter",
+      "status": "completed",
+      "startedAt": "2026-07-03T14:00:01.000Z",
+      "completedAt": "2026-07-03T14:01:45.000Z"
+    },
+    {
+      "name": "cold-critic",
+      "status": "pending"
+    },
+    {
+      "name": "solution-designer",
+      "status": "pending"
+    }
+  ]
+}
