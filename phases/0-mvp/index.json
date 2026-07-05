@@ -55,7 +55,7 @@
       "name": "agent-cold-critic",
       "status": "completed",
       "started_at": "2026-07-05T10:56:00+0900",
-      "completed_at": "2026-07-05T10:58:00+0900",
+      "completed_at": "2026-07-05T10:58:25+0900",
       "summary": "src/agents/coldCritic.ts에 runColdCritic 작성(TDD) — gemini.generateStructured(useGrounding: false, CriticismSchema)로 순수 추론 비판 생성, 시스템 프롬프트 상수에 20년 경력 냉혹한 분석가 페르소나·3축 비판 기준(페인포인트 허구성/BM 취약성/카피캣 리스크)·evidence의 MarketContext 실제 데이터 인용 강제·fatal/major/minor severity 판정 기준 정의, 유저 프롬프트에 아이디어 원문+MarketContext 전체 JSON 직렬화(유실 없음), mock 테스트 3개 (build/test/lint 통과)"
     },
     {
