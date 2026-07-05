@@ -29,3 +29,14 @@ MVP 속도 최우선. 외부 의존성 최소화. 작동하는 최소 구현을 
 **결정**: TypeScript strict mode + Node로 구현한다. 테스트는 vitest, 스키마 검증은 zod를 사용한다.
 **이유**: 다음 phase의 웹 UI(Next.js)와 스택을 통일해 타입·스키마를 공유할 수 있다.
 **트레이드오프**: execute.py(Python)와 언어가 갈리지만, 하네스 스크립트와 제품 코드는 역할이 분리되어 있어 문제가 없다.
+
+### ADR-006: 웹 UI는 Next.js App Router + npm workspaces (web/)
+**결정**: 웹 UI를 `web/` 디렉토리의 Next.js(App Router, TypeScript, Tailwind) 앱으로 만들고, 루트와 npm workspaces로 묶는다. zod 스키마·타입은 `src/types`를 단일 소스로 import하며 web에서 중복 정의하지 않는다.
+**이유**: ADR-005에서 예고한 대로 스택을 통일해 스키마를 공유한다. 별도 레포는 타입 공유를 위해 패키지 배포가 필요해지고, 루트 전체를 Next.js 앱으로 재편하면 기존 CLI 빌드/테스트 설정을 전부 재작업해야 한다. 로컬 도구 전제이므로 배포 인프라는 고려하지 않는다.
+**트레이드오프**: 루트 src의 TS 소스를 web에서 import하기 위한 컴파일 설정(tsconfig paths + Next 설정)이 필요하다.
+
+### ADR-007: 웹의 파이프라인 실행은 createRun 선생성 + CLI detached spawn, 진행 상태는 state.json 폴링
+**결정**: `POST /api/runs`는 `RunStore.createRun(idea)`(순수 파일 작업)로 runId를 먼저 만들고, CLI를 detached child process(`npm run consult -- --resume {runId}`)로 spawn한 뒤 즉시 runId를 응답한다. 진행 상태는 브라우저가 `GET /api/runs/{id}`를 2초 간격 폴링해 state.json 기반으로 표시한다. resume도 동일한 spawn 패턴이다.
+**이유**: (1) runId가 CLI 내부에서 생성되므로, 웹이 먼저 createRun하고 `--resume`으로 넘기면 stdout 파싱 없이 즉시 runId를 확보한다 — orchestrator의 resume은 pending run을 처음부터 실행하므로 CLI 수정이 불필요하다. (2) detached spawn은 Next dev 서버의 hot reload와 파이프라인 실행을 격리한다. (3) state.json이 이미 실행 상태의 단일 진실 공급원(ADR-002/004)이라 폴링이 파일 기반 아키텍처와 자연스럽게 정합한다. Gemini/YouTube 호출은 여전히 CLI 프로세스의 services/ 레이어 안에서만 일어난다.
+**기각한 대안**: SSE/WebSocket 스트리밍과 실시간 로그는 로그 캡처·저장 구조가 추가로 필요해 로컬 도구에는 과잉이다. in-process 실행(orchestrator 직접 import)은 dev 서버 재컴파일 시 실행이 중단될 수 있어 기각했다.
+**트레이드오프**: 진행 표시가 최대 2초 지연된다. 프로세스 비정상 종료는 mtime 휴리스틱(10분)으로 "중단됨"을 추정한다.

@@ -1,0 +1,16 @@
+{
+  "project": "anvil",
+  "phase": "1-web-ui",
+  "steps": [
+    { "step": 0, "name": "workspace-setup", "status": "pending" },
+    { "step": 1, "name": "run-index", "status": "pending" },
+    { "step": 2, "name": "api-routes", "status": "pending" },
+    { "step": 3, "name": "design-system", "status": "pending" },
+    { "step": 4, "name": "home-run-list", "status": "pending" },
+    { "step": 5, "name": "progress-view", "status": "pending" },
+    { "step": 6, "name": "report-overview-context", "status": "pending" },
+    { "step": 7, "name": "report-criticism-solution", "status": "pending" },
+    { "step": 8, "name": "compare-view", "status": "pending" },
+    { "step": 9, "name": "final-verify", "status": "pending" }
+  ]
+}
