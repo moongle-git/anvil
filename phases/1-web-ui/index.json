@@ -21,7 +21,10 @@
     {
       "step": 2,
       "name": "api-routes",
-      "status": "pending"
+      "status": "error",
+      "started_at": "2026-07-06T00:16:57+0900",
+      "error_message": "[3회 시도 후 실패] Step did not update status",
+      "failed_at": "2026-07-06T00:25:30+0900"
     },
     {
       "step": 3,
