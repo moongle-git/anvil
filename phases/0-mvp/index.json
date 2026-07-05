@@ -45,7 +45,10 @@
     {
       "step": 5,
       "name": "agent-context-hunter",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-05T10:53:19+0900",
+      "completed_at": "2026-07-05T10:55:24+0900",
+      "summary": "src/agents/contextHunter.ts에 runContextHunter 작성(TDD) — youtube.collectVoices(아이디어 검색어)로 영상·댓글 수집 후 gemini.generateStructured(useGrounding: true, MarketContextSchema)로 시장 맥락 생성, 프롬프트 상수 분리(시스템/템플릿, 한국어)·댓글 원문 보존(요약 금지) 지시 포함, YouTube 실패 시 console.warn 로깅 후 빈 youtubeVoices로 웹검색만 진행, mock 테스트 4개 (build/test/lint 통과)"
     },
     {
       "step": 6,
