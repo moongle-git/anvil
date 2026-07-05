@@ -471,6 +471,90 @@ class TestInvokeClaude:
 
 
 # ---------------------------------------------------------------------------
+# 사용량 리미트 (UsageLimitExceeded)
+# ---------------------------------------------------------------------------
+
+class TestUsageLimit:
+    STEP = {"step": 2, "name": "ui"}
+
+    def test_raises_with_reset_epoch(self, executor):
+        mock_result = MagicMock(returncode=1, stdout="Claude AI usage limit reached|1751700000", stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(ex.UsageLimitExceeded) as exc_info:
+                executor._invoke_claude(self.STEP, "preamble")
+        assert exc_info.value.reset_epoch == 1751700000
+
+    def test_raises_without_epoch_on_rate_limit(self, executor):
+        mock_result = MagicMock(returncode=1, stdout="", stderr="API Error 429: rate limit exceeded")
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(ex.UsageLimitExceeded) as exc_info:
+                executor._invoke_claude(self.STEP, "preamble")
+        assert exc_info.value.reset_epoch is None
+
+    def test_detects_is_error_json_despite_zero_exit(self, executor):
+        stdout = '{"is_error": true, "result": "Claude AI usage limit reached|1751700000"}'
+        mock_result = MagicMock(returncode=0, stdout=stdout, stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(ex.UsageLimitExceeded) as exc_info:
+                executor._invoke_claude(self.STEP, "preamble")
+        assert exc_info.value.reset_epoch == 1751700000
+
+    def test_no_false_positive_on_successful_step(self, executor):
+        # 성공한 step의 요약이 'rate limit'을 언급해도 오탐하지 않는다
+        stdout = '{"is_error": false, "result": "YouTube API rate limit 대응 로직 구현 완료"}'
+        mock_result = MagicMock(returncode=0, stdout=stdout, stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            output = executor._invoke_claude(self.STEP, "preamble")
+        assert output["exitCode"] == 0
+
+    def test_plain_failure_does_not_raise(self, executor):
+        # 리미트와 무관한 실패는 기존 재시도 경로를 유지한다
+        mock_result = MagicMock(returncode=1, stdout="", stderr="TypeError: boom")
+        with patch("subprocess.run", return_value=mock_result):
+            output = executor._invoke_claude(self.STEP, "preamble")
+        assert output["exitCode"] == 1
+
+    def test_output_json_saved_before_raise(self, executor):
+        mock_result = MagicMock(returncode=1, stdout="Claude AI usage limit reached|1751700000", stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(ex.UsageLimitExceeded):
+                executor._invoke_claude(self.STEP, "preamble")
+        data = json.loads((executor._phase_dir / "step2-output.json").read_text())
+        assert data["exitCode"] == 1
+
+    def test_step_exits_3_and_stays_pending(self, executor):
+        with patch.object(executor, "_invoke_claude", side_effect=ex.UsageLimitExceeded(1751700000)):
+            with pytest.raises(SystemExit) as exc_info:
+                executor._execute_single_step(dict(self.STEP), "")
+        assert exc_info.value.code == 3
+        index = json.loads(executor._index_file.read_text())
+        ui = next(s for s in index["steps"] if s["step"] == 2)
+        assert ui["status"] == "pending"
+        assert "error_message" not in ui
+
+    def test_limit_does_not_touch_top_index(self, executor, top_index):
+        executor._top_index_file = top_index
+        with patch.object(executor, "_invoke_claude", side_effect=ex.UsageLimitExceeded(None)):
+            with pytest.raises(SystemExit):
+                executor._execute_single_step(dict(self.STEP), "")
+        data = json.loads(top_index.read_text())
+        assert all(p["status"] == "pending" for p in data["phases"])
+
+
+# ---------------------------------------------------------------------------
+# 타임아웃 (subprocess.TimeoutExpired)
+# ---------------------------------------------------------------------------
+
+class TestTimeout:
+    def test_timeout_becomes_step_failure(self, executor):
+        exc = subprocess.TimeoutExpired(cmd="claude", timeout=1800)
+        with patch("subprocess.run", side_effect=exc):
+            output = executor._invoke_claude({"step": 2, "name": "ui"}, "preamble")
+        assert output["exitCode"] != 0
+        assert "타임아웃" in output["stderr"]
+
+
+# ---------------------------------------------------------------------------
 # progress_indicator (= 이전 Spinner)
 # ---------------------------------------------------------------------------
 

@@ -149,3 +149,4 @@ execute.py가 자동으로 처리하는 것:
 
 - **error 발생 시**: `phases/{task-name}/index.json`에서 해당 step의 `status`를 `"pending"`으로 바꾸고 `error_message`를 삭제한 뒤 재실행한다.
 - **blocked 발생 시**: `blocked_reason`에 적힌 사유를 해결한 뒤, `status`를 `"pending"`으로 바꾸고 `blocked_reason`을 삭제한 뒤 재실행한다.
+- **사용량 리미트 도달 시**: exit code 3으로 즉시 중단한다. 재시도 횟수를 소진하지 않고 step status도 `"pending"` 그대로 유지되므로, 리미트 해제 후 같은 커맨드를 재실행하면 별도 조치 없이 이어서 진행된다.

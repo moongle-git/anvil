@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -20,6 +21,14 @@ from pathlib import Path
 from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+class UsageLimitExceeded(Exception):
+    """Claude 사용량/레이트 리미트 도달. reset_epoch는 리셋 예상 시각(unix epoch), 파싱 불가 시 None."""
+
+    def __init__(self, reset_epoch: Optional[int] = None):
+        super().__init__("usage limit exceeded")
+        self.reset_epoch = reset_epoch
 
 
 @contextlib.contextmanager
@@ -235,15 +244,16 @@ class StepExecutor:
             sys.exit(1)
 
         prompt = preamble + step_file.read_text()
-        result = subprocess.run(
-            ["claude", "-p", "--dangerously-skip-permissions", "--output-format", "json", prompt],
-            cwd=self._root, capture_output=True, text=True, timeout=1800,
-        )
-
-        if result.returncode != 0:
-            print(f"\n  WARN: Claude가 비정상 종료됨 (code {result.returncode})")
-            if result.stderr:
-                print(f"  stderr: {result.stderr[:500]}")
+        try:
+            result = subprocess.run(
+                ["claude", "-p", "--dangerously-skip-permissions", "--output-format", "json", prompt],
+                cwd=self._root, capture_output=True, text=True, timeout=1800,
+            )
+        except subprocess.TimeoutExpired:
+            result = subprocess.CompletedProcess(
+                args="claude", returncode=-1, stdout="",
+                stderr="Claude 세션이 1800초 타임아웃으로 중단됨",
+            )
 
         output = {
             "step": step_num, "name": step_name,
@@ -254,7 +264,28 @@ class StepExecutor:
         with open(out_path, "w") as f:
             json.dump(output, f, indent=2, ensure_ascii=False)
 
+        self._raise_if_usage_limit(result)
+
+        if result.returncode != 0:
+            print(f"\n  WARN: Claude가 비정상 종료됨 (code {result.returncode})")
+            if result.stderr:
+                print(f"  stderr: {result.stderr[:500]}")
+
         return output
+
+    @staticmethod
+    def _raise_if_usage_limit(result):
+        """세션이 실패했고 출력에 리미트 문구가 있으면 UsageLimitExceeded를 던진다.
+
+        성공한 step의 요약이 'rate limit' 같은 단어를 담을 수 있으므로,
+        실패(비정상 종료 또는 is_error)한 경우에만 검사한다.
+        문구는 CLI 버전에 따라 달라질 수 있어 느슨하게 매칭한다.
+        """
+        combined = f"{result.stdout or ''}\n{result.stderr or ''}"
+        failed = result.returncode != 0 or re.search(r'"is_error"\s*:\s*true', combined)
+        if failed and re.search(r"(usage|rate).{0,3}limit", combined, re.IGNORECASE):
+            m = re.search(r"limit reached\|(\d+)", combined)
+            raise UsageLimitExceeded(int(m.group(1)) if m else None)
 
     # --- 헤더 & 검증 ---
 
@@ -305,9 +336,19 @@ class StepExecutor:
             if attempt > 1:
                 tag += f" [retry {attempt}/{self.MAX_RETRIES}]"
 
-            with progress_indicator(tag) as pi:
-                self._invoke_claude(step, preamble)
+            try:
+                with progress_indicator(tag) as pi:
+                    self._invoke_claude(step, preamble)
                 elapsed = int(pi.elapsed)
+            except UsageLimitExceeded as e:
+                if e.reset_epoch:
+                    reset = datetime.fromtimestamp(e.reset_epoch, self.TZ).strftime("%Y-%m-%d %H:%M")
+                    hint = f"리셋 예상: {reset} (KST)"
+                else:
+                    hint = "리셋 시각 불명"
+                print(f"  ⏳ Step {step_num}: {step_name} — 사용량 리미트 도달 ({hint})")
+                print(f"    status는 'pending'으로 유지된다. 리미트 해제 후 재실행하면 이어서 진행한다.")
+                sys.exit(3)
 
             index = self._read_json(self._index_file)
             status = next((s.get("status", "pending") for s in index["steps"] if s["step"] == step_num), "pending")
