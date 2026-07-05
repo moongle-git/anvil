@@ -2,15 +2,59 @@
   "project": "anvil",
   "phase": "1-web-ui",
   "steps": [
-    { "step": 0, "name": "workspace-setup", "status": "pending" },
-    { "step": 1, "name": "run-index", "status": "pending" },
-    { "step": 2, "name": "api-routes", "status": "pending" },
-    { "step": 3, "name": "design-system", "status": "pending" },
-    { "step": 4, "name": "home-run-list", "status": "pending" },
-    { "step": 5, "name": "progress-view", "status": "pending" },
-    { "step": 6, "name": "report-overview-context", "status": "pending" },
-    { "step": 7, "name": "report-criticism-solution", "status": "pending" },
-    { "step": 8, "name": "compare-view", "status": "pending" },
-    { "step": 9, "name": "final-verify", "status": "pending" }
-  ]
+    {
+      "step": 0,
+      "name": "workspace-setup",
+      "status": "completed",
+      "started_at": "2026-07-06T00:03:12+0900",
+      "summary": "npm workspaces([\"web\"]) 전환 + web/에 Next.js 16.2.10(App Router, TS strict, Tailwind v4, ESLint flat) 스캐폴드(홈은 placeholder만). 타입 공유: web tsconfig paths와 web/vitest.config.ts resolve.alias의 '@anvil/types' → 루트 src/types/index.ts + next.config.ts의 experimental.externalDir·turbopack.root(모노레포 루트)로 복제 없이 import — 스모크 테스트(web/src/test/schema-share.test.tsx)에서 MarketContextSchema.parse 검증. web 테스트 환경은 vitest+@testing-library/react+jsdom, 루트 vitest.config.ts(신규)는 web/** exclude. 루트 build/test/lint는 web까지 체이닝, dev 서버는 npm run web.",
+      "completed_at": "2026-07-06T00:13:06+0900"
+    },
+    {
+      "step": 1,
+      "name": "run-index",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "api-routes",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "design-system",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "home-run-list",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "progress-view",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "report-overview-context",
+      "status": "pending"
+    },
+    {
+      "step": 7,
+      "name": "report-criticism-solution",
+      "status": "pending"
+    },
+    {
+      "step": 8,
+      "name": "compare-view",
+      "status": "pending"
+    },
+    {
+      "step": 9,
+      "name": "final-verify",
+      "status": "pending"
+    }
+  ],
+  "created_at": "2026-07-06T00:03:12+0900"
 }
