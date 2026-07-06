@@ -37,7 +37,8 @@
     {
       "step": 4,
       "name": "home-run-list",
-      "status": "pending"
+      "status": "pending",
+      "started_at": "2026-07-06T20:40:44+0900"
     },
     {
       "step": 5,
