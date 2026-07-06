@@ -24,7 +24,7 @@
       "status": "completed",
       "started_at": "2026-07-06T20:20:35+0900",
       "summary": "web/src/lib/server/runs.ts(getRunsDir·getRepoRoot·getRunStore·getRunDetail—산출물 zod 검증 실패/부재 시 필드 생략·searchRuns)와 spawnConsult.ts(detached spawn+unref, spawnFn 주입) + route handler 4종(GET·POST /api/runs, GET /api/runs/[id], GET …/report 다운로드, POST …/resume 404/409/202) — createRun 선생성 후 spawn(ADR-007). fixture run 3종(완료/진행중/실패)은 web/src/test/fixtures/, 헬퍼는 web/src/test/fixtures.ts(임시 디렉토리 복사+ANVIL_RUNS_DIR 주입+mtime 제어). Turbopack이 externalDir의 NodeNext식 .js import를 해석하지 못해 web dev/build를 --webpack으로 전환하고 experimental.extensionAlias 추가.",
-      "completed_at": "2026-07-06T20:31:35+0900"
+      "completed_at": "2026-07-06T20:34:56+0900"
     },
     {
       "step": 3,
