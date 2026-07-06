@@ -283,7 +283,7 @@ class StepExecutor:
         """
         combined = f"{result.stdout or ''}\n{result.stderr or ''}"
         failed = result.returncode != 0 or re.search(r'"is_error"\s*:\s*true', combined)
-        if failed and re.search(r"(usage|rate).{0,3}limit", combined, re.IGNORECASE):
+        if failed and re.search(r"(usage|rate|session).{0,3}limit", combined, re.IGNORECASE):
             m = re.search(r"limit reached\|(\d+)", combined)
             raise UsageLimitExceeded(int(m.group(1)) if m else None)
 
