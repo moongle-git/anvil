@@ -29,7 +29,9 @@
     {
       "step": 3,
       "name": "design-system",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-06T20:34:56+0900",
+      "summary": "web/src/components/ui/에 UI_GUIDE 기반 공통 컴포넌트 9종(PageShell·Card·Button 3variant·TextAreaField·SeverityBadge·RunStatusBadge·Collapsible·EmptyState·SectionHeading) + index.ts 배럴 TDD 작성. 한국어 라벨 매핑 단일 소스 확정: SEVERITY_LABELS(fatal→치명적/major→중대/minor→경미), RUN_STATUS_LABELS(completed→완료/error→실패/running→진행중/stalled→중단됨) — 각 뱃지 모듈에서 export. 테스트 21개(web/src/test/components/ui.test.tsx, 라벨·variant·접힘 토글 중심, cleanup 명시 등록)."
     },
     {
       "step": 4,
