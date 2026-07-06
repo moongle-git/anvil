@@ -12,6 +12,11 @@ const nextConfig: NextConfig = {
   experimental: {
     // web/ 밖(루트 src/)의 TS 소스를 컴파일 대상에 포함
     externalDir: true,
+    // 루트 src는 NodeNext라 상대 import에 .js 확장자를 쓴다 — 번들러가 .ts로 대체 해석하게 한다.
+    // extensionAlias·externalDir 모두 webpack 전용 옵션이라 dev/build를 --webpack으로 실행한다 (package.json scripts)
+    extensionAlias: {
+      ".js": [".ts", ".tsx", ".js"],
+    },
   },
 };
 
