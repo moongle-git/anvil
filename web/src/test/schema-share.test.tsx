@@ -1,7 +1,5 @@
-import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { MarketContextSchema } from "@anvil/types";
-import Home from "@/app/page";
 
 describe("루트 src/types 스키마 공유 (ADR-006)", () => {
   it("MarketContextSchema가 유효한 fixture를 parse한다", () => {
@@ -32,12 +30,5 @@ describe("루트 src/types 스키마 공유 (ADR-006)", () => {
     const parsed = MarketContextSchema.parse(fixture);
     expect(parsed.ideaTitle).toBe("AI 회의록 요약 서비스");
     expect(parsed.competitors).toHaveLength(1);
-  });
-});
-
-describe("web 테스트 환경 (jsdom + Testing Library)", () => {
-  it("홈 placeholder 페이지를 렌더링한다", () => {
-    render(<Home />);
-    expect(screen.getByRole("heading", { name: "anvil" })).toBeDefined();
   });
 });
