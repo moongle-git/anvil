@@ -31,8 +31,8 @@
       "name": "design-system",
       "status": "completed",
       "started_at": "2026-07-06T20:34:56+0900",
-      "summary": "web/src/components/ui/에 UI_GUIDE 기반 공통 컴포넌트 9종(PageShell·Card·Button 3variant·TextAreaField·SeverityBadge·RunStatusBadge·Collapsible·EmptyState·SectionHeading) + index.ts 배럴 TDD 작성. 한국어 라벨 매핑 단일 소스 확정: SEVERITY_LABELS(fatal→치명적/major→중대/minor→경미), RUN_STATUS_LABELS(completed→완료/error→실패/running→진행중/stalled→중단됨) — 각 뱃지 모듈에서 export. 테스트 21개(web/src/test/components/ui.test.tsx, 라벨·variant·접힘 토글 중심, cleanup 명시 등록).",
-      "completed_at": "2026-07-06T20:40:44+0900"
+      "summary": "web/src/components/ui/에 공통 컴포넌트 10종 + index.ts 배럴. Badge 프리미티브(신설) + PageShell·Card·Button·TextAreaField·SeverityBadge·RunStatusBadge·Collapsible·EmptyState·SectionHeading. 핵심: severity/run상태를 색상 클래스가 아닌 시맨틱 톤(danger/warning/success/info/neutral)으로 매핑하고 Badge가 톤→UI_GUIDE 색으로 변환 — data-tone·data-severity·data-status·data-variant 속성으로 노출(이후 리포트/목록 뷰가 뱃지를 조회·검증할 안정적 훅). 한국어 라벨 단일 소스: SEVERITY_LABELS(fatal→치명적/major→중대/minor→경미)·RUN_STATUS_LABELS(completed→완료/error→실패/running→진행중/stalled→중단됨)를 각 뱃지 모듈에서 export. 테스트 35개(web/src/test/components/ui.test.tsx)는 Tailwind 클래스 문자열이 아니라 라벨 매핑(exhaustive)·톤 계약·접근성(role/label 연결/landmark)·동작(button type·클릭·disabled·Collapsible 토글·제어 textarea) 중심으로 검증.",
+      "completed_at": "2026-07-07T21:33:36+0900"
     },
     {
       "step": 4,
