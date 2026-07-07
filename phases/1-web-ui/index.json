@@ -73,8 +73,11 @@
     {
       "step": 9,
       "name": "final-verify",
-      "status": "pending"
+      "status": "completed",
+      "summary": "phase 마감·검증. 상태 처리 일관성: 공용 ErrorState(에러 카드+'다시 시도') 신설·export하고 RunList(최초 목록 실패)·RunDetailClient(폴링 최초 실패)·CompareLoader(fetch 실패)에 연결(각각 reload/restart로 복구). 로딩 표시·not-found·부분 산출물 EmptyState 폴백은 step4~8에서 이미 일관. 문서: CLAUDE.md 명령어에 'npm run web' 추가(layout.tsx는 lang=ko·title anvil·설명 이미 충족). 반응형: 경쟁사 테이블 overflow-x-auto·비교 매트릭스 grid·sources break-all로 375~1280px 가로 스크롤 없음. 아키텍처 검증 grep 통과: web에 @google/genai 직접 호출 없음·zod 스키마 중복 없음(루트 src/types 단일 소스, ADR-006)·안티패턴(blur/gradient/purple/indigo 등) 없음. 스모크(fixture 완료 run+클론, ANVIL_RUNS_DIR로 next start 3100): 홈 200·목록 API runId·상세 API verdict·리포트 페이지 200·비교 200·없는 run 404 전부 통과, 임시 디렉토리·서버 정리 완료. AC: build(루트+web) · 루트131+web132 테스트 · lint 클린 · 스모크 6/6.",
+      "completed_at": "2026-07-07T22:15:12+0900"
     }
   ],
-  "created_at": "2026-07-06T00:03:12+0900"
+  "created_at": "2026-07-06T00:03:12+0900",
+  "completed_at": "2026-07-07T22:15:12+0900"
 }
