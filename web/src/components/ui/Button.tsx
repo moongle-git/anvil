@@ -22,6 +22,7 @@ export function Button({
   return (
     <button
       type={type}
+      data-variant={variant}
       className={`${VARIANT_CLASSES[variant]}${className ? ` ${className}` : ""}`}
       {...rest}
     >
