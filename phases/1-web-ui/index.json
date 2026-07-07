@@ -45,7 +45,9 @@
     {
       "step": 5,
       "name": "progress-view",
-      "status": "pending"
+      "status": "completed",
+      "summary": "run 상세 페이지 web/src/app/runs/[id]/page.tsx(서버: params await → PageShell + RunDetailClient). web/src/components/progress/: useRunDetail(runId,intervalMs=2000) 훅이 GET /api/runs/{id}를 폴링하되 status==='running'일 때만 다음 폴링 예약(completed/error/stalled·404면 중단), restart()로 resume 후 재개(ADR-007 폴링). RunDetailClient가 status로 분기: completed→ReportView, notFound→안내, 그 외→ProgressView. ProgressView는 3단계 스테퍼(context-hunter→시장 조사/cold-critic→냉정한 비판/solution-designer→AI 네이티브 재설계), StepStatusIcon(인라인 SVG: 완료 체크/진행중 animate-spin 스피너/실패 X/대기 빈 원, role=img+aria-label), data-step-name·data-step-status 훅, 경과시간(완료=completedAt-startedAt, 진행중=useNow 1초 틱), step error 카드+errorMessage+이어서 실행, run stalled 안내+이어서 실행. **리포트 뷰는 placeholder: web/src/components/report/ReportView.tsx**(제목+'리포트 준비 완료'+report.md 다운로드 링크) — step 6~7이 교체할 지점. RunDetail 타입은 import type으로 서버 모듈에서 참조(런타임 결합 없음). 테스트 12개(web/src/test/components/progress.test.tsx, fake timers로 폴링 중단조건·renderHook, 상태별 렌더/resume). AC: build(/runs/[id] 동적) · 루트131+web100 · lint 클린.",
+      "completed_at": "2026-07-07T21:52:51+0900"
     },
     {
       "step": 6,
