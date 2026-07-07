@@ -37,8 +37,10 @@
     {
       "step": 4,
       "name": "home-run-list",
-      "status": "pending",
-      "started_at": "2026-07-06T20:40:44+0900"
+      "status": "completed",
+      "started_at": "2026-07-06T20:40:44+0900",
+      "summary": "홈 화면(web/src/app/page.tsx = PageShell + HomeClient). 컴포넌트는 web/src/components/home/: IdeaForm(제출 시 POST /api/runs→runId로 useRouter.push, 공백 비활성·제출 중 이중제출 차단·실패 시 role=alert 에러+입력 유지), RunList(GET /api/runs?q=&status=, 검색 300ms 디바운스, 상태 select 필터, error/stalled 행 '이어서 실행'→POST resume, completed 행 체크박스로 최대 2개 비교선택→/compare?a=&b=, 빈 상태 온보딩 EmptyState+예시 아이디어 버튼), HomeClient(idea 상태를 폼·예시버튼이 공유). 데이터 접근은 API route로만(서버컴포넌트 RunStore 직접호출 없음). runs는 null(미로딩)/[]로 구분해 온보딩 플래시 방지. 날짜 포맷은 web/src/lib/format.ts. 테스트 12개(web/src/test/components/home.test.tsx, fetch·next/navigation mock)로 목록·status/q 파라미터·디바운스·빈상태·폼제출 이동·resume·비교선택 2개제한·page 조립 검증. step3의 data-status 훅으로 뱃지 정확 조회. AC 통과: build(/ 정적) · 루트131+web88 · lint 클린.",
+      "completed_at": "2026-07-07T21:45:21+0900"
     },
     {
       "step": 5,
