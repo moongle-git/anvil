@@ -1,76 +1,197 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ComparePage } from "@/components/compare/ComparePage";
 import {
-  completedDetail,
-  COMPLETED_A_ID,
-  COMPLETED_B_ID,
-  runningDetail,
-  RUNNING_ID,
-} from "@/test/clientFixtures";
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Criticism, Solution } from "@anvil/types";
+import type { RunDetail } from "@/lib/server/runs";
+import { CompareClient } from "@/components/compare/CompareClient";
+
+// useSearchParams를 mock: 테스트마다 current를 바꿔 ?a=&b= 시나리오를 준다.
+const { params } = vi.hoisted(() => ({
+  params: { current: new URLSearchParams() },
+}));
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return { ...actual, useSearchParams: () => params.current };
+});
+
+const fetchMock = vi.fn();
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+  return {
+    ok: status >= 200 && status < 300,
     status,
-    headers: { "content-type": "application/json" },
-  });
+    json: async () => body,
+  } as Response;
 }
 
-let fetchMock: ReturnType<typeof vi.fn>;
-
 beforeEach(() => {
-  fetchMock = vi.fn();
+  fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
+  params.current = new URLSearchParams();
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  vi.clearAllMocks();
 });
 
-describe("ComparePage", () => {
-  it("완료 run 두 개를 2컬럼 비교 행으로 렌더링한다", async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes(COMPLETED_B_ID)) {
-        return Promise.resolve(
-          jsonResponse(completedDetail(COMPLETED_B_ID, "두 번째 완료 run")),
-        );
-      }
-      return Promise.resolve(
-        jsonResponse(completedDetail(COMPLETED_A_ID, "첫 번째 완료 run")),
-      );
-    });
+const criticism: Criticism = {
+  painPointReality: [{ claim: "c", evidence: "e", severity: "fatal" }],
+  bmWeakness: [{ claim: "c", evidence: "e", severity: "major" }],
+  copycatRisk: [{ claim: "c", evidence: "e", severity: "minor" }],
+  verdict: "판정 문장",
+};
 
-    render(<ComparePage runA={COMPLETED_A_ID} runB={COMPLETED_B_ID} />);
+const solution: Solution = {
+  revisedConcept: "재설계 컨셉 본문",
+  minimalInput: "x",
+  agenticWorkflow: "y",
+  dataFlywheel: "z",
+  monetization: "구독 모델 본문",
+};
 
-    expect(await screen.findByText("실행 정보")).toBeDefined();
-    expect(screen.getByText("severity")).toBeDefined();
-    expect(screen.getByText("verdict")).toBeDefined();
-    expect(screen.getByText("revisedConcept")).toBeDefined();
-    expect(screen.getByText("monetization")).toBeDefined();
-    expect(screen.getAllByText("첫 번째 완료 run").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("두 번째 완료 run").length).toBeGreaterThan(0);
+function makeDetail(
+  runId: string,
+  idea: string,
+  status: RunDetail["status"] = "completed",
+): RunDetail {
+  return {
+    state: {
+      runId,
+      idea,
+      createdAt: "2026-07-01T09:00:00.000Z",
+      steps: [],
+      ...(status === "completed"
+        ? { completedAt: "2026-07-01T09:05:00.000Z" }
+        : {}),
+    },
+    status,
+    hasReport: true,
+    criticism,
+    solution,
+  };
+}
+
+function routeFetch(map: Record<string, Response>) {
+  fetchMock.mockImplementation(async (url: string) => {
+    for (const [id, res] of Object.entries(map)) {
+      if (url.endsWith(`/api/runs/${id}`)) return res;
+    }
+    return jsonResponse({ error: "없음" }, 404);
+  });
+}
+
+describe("CompareClient 가드", () => {
+  it("b 파라미터가 없으면 비교를 차단한다", () => {
+    params.current = new URLSearchParams("a=r1");
+    render(<CompareClient />);
+    expect(screen.getByText("비교할 수 없습니다")).toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("미완료 run이 포함되면 비교를 차단한다", async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes(RUNNING_ID)) {
-        return Promise.resolve(jsonResponse(runningDetail()));
-      }
-      return Promise.resolve(jsonResponse(completedDetail()));
-    });
-
-    render(<ComparePage runA={COMPLETED_A_ID} runB={RUNNING_ID} />);
-
-    expect(await screen.findByText("완료된 run만 비교할 수 있습니다")).toBeDefined();
+  it("a와 b가 같으면 비교를 차단한다", () => {
+    params.current = new URLSearchParams("a=r1&b=r1");
+    render(<CompareClient />);
+    expect(screen.getByText("비교할 수 없습니다")).toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("쿼리 파라미터가 부족하면 빈 상태를 렌더링한다", () => {
-    render(<ComparePage runA={COMPLETED_A_ID} />);
+  it("한쪽 run이 404면 '존재하지 않는' 안내를 보여준다", async () => {
+    params.current = new URLSearchParams("a=r1&b=missing");
+    routeFetch({ r1: jsonResponse(makeDetail("r1", "아이디어 A")) });
+    render(<CompareClient />);
+    await waitFor(() =>
+      expect(
+        screen.getByText("존재하지 않는 run이 포함되어 있습니다."),
+      ).toBeDefined(),
+    );
+  });
 
-    expect(screen.getByText("비교할 run 두 개가 필요합니다")).toBeDefined();
+  it("한쪽이 미완료면 '완료된 run만' 안내를 보여준다", async () => {
+    params.current = new URLSearchParams("a=r1&b=r2");
+    routeFetch({
+      r1: jsonResponse(makeDetail("r1", "아이디어 A")),
+      r2: jsonResponse(makeDetail("r2", "아이디어 B", "running")),
+    });
+    render(<CompareClient />);
+    await waitFor(() =>
+      expect(
+        screen.getByText("완료된 run만 비교할 수 있습니다."),
+      ).toBeDefined(),
+    );
+  });
+});
+
+describe("CompareClient 에러 복구", () => {
+  it("fetch 실패 시 에러 카드를 보여주고 '다시 시도'로 복구한다", async () => {
+    params.current = new URLSearchParams("a=r1&b=r2");
+    let calls = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({ error: "서버 오류" }, 500); // 최초 로드 실패
+      }
+      if (url.endsWith("/api/runs/r1")) {
+        return jsonResponse(makeDetail("r1", "아이디어 A"));
+      }
+      if (url.endsWith("/api/runs/r2")) {
+        return jsonResponse(makeDetail("r2", "아이디어 B"));
+      }
+      return jsonResponse({ error: "없음" }, 404);
+    });
+    render(<CompareClient />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "다시 시도" }),
+      ).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "아이디어 A" })).toBeDefined(),
+    );
+  });
+});
+
+describe("CompareClient 정상 비교", () => {
+  it("두 완료 run을 5개 행(실행정보→severity→판정→컨셉→BM) 순서로 렌더링한다", async () => {
+    params.current = new URLSearchParams("a=r1&b=r2");
+    routeFetch({
+      r1: jsonResponse(makeDetail("r1", "아이디어 A")),
+      r2: jsonResponse(makeDetail("r2", "아이디어 B")),
+    });
+    const { container } = render(<CompareClient />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "아이디어 A" })).toBeDefined(),
+    );
+
+    // 두 run 리포트 링크
+    expect(
+      screen.getByRole("link", { name: "아이디어 A" }).getAttribute("href"),
+    ).toBe("/runs/r1");
+    expect(
+      screen.getByRole("link", { name: "아이디어 B" }).getAttribute("href"),
+    ).toBe("/runs/r2");
+
+    // 행 라벨과 순서
+    const text = container.textContent ?? "";
+    expect(text.indexOf("severity 집계")).toBeLessThan(text.indexOf("최종 판정"));
+    expect(text.indexOf("최종 판정")).toBeLessThan(text.indexOf("재설계된 컨셉"));
+    expect(text.indexOf("재설계된 컨셉")).toBeLessThan(
+      text.indexOf("비즈니스 모델"),
+    );
+
+    // 병렬 fetch 2회
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 내용 대조 (양쪽 verdict/컨셉/BM)
+    expect(screen.getAllByText("판정 문장").length).toBe(2);
+    expect(screen.getAllByText("구독 모델 본문").length).toBe(2);
   });
 });

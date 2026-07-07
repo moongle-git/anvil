@@ -31,40 +31,53 @@
       "name": "design-system",
       "status": "completed",
       "started_at": "2026-07-06T20:34:56+0900",
-      "summary": "web/src/components/ui/에 UI_GUIDE 기반 공통 컴포넌트 9종(PageShell·Card·Button 3variant·TextAreaField·SeverityBadge·RunStatusBadge·Collapsible·EmptyState·SectionHeading) + index.ts 배럴 TDD 작성. 한국어 라벨 매핑 단일 소스 확정: SEVERITY_LABELS(fatal→치명적/major→중대/minor→경미), RUN_STATUS_LABELS(completed→완료/error→실패/running→진행중/stalled→중단됨) — 각 뱃지 모듈에서 export. 테스트 21개(web/src/test/components/ui.test.tsx, 라벨·variant·접힘 토글 중심, cleanup 명시 등록).",
-      "completed_at": "2026-07-06T20:40:44+0900"
+      "summary": "web/src/components/ui/에 공통 컴포넌트 10종 + index.ts 배럴. Badge 프리미티브(신설) + PageShell·Card·Button·TextAreaField·SeverityBadge·RunStatusBadge·Collapsible·EmptyState·SectionHeading. 핵심: severity/run상태를 색상 클래스가 아닌 시맨틱 톤(danger/warning/success/info/neutral)으로 매핑하고 Badge가 톤→UI_GUIDE 색으로 변환 — data-tone·data-severity·data-status·data-variant 속성으로 노출(이후 리포트/목록 뷰가 뱃지를 조회·검증할 안정적 훅). 한국어 라벨 단일 소스: SEVERITY_LABELS(fatal→치명적/major→중대/minor→경미)·RUN_STATUS_LABELS(completed→완료/error→실패/running→진행중/stalled→중단됨)를 각 뱃지 모듈에서 export. 테스트 35개(web/src/test/components/ui.test.tsx)는 Tailwind 클래스 문자열이 아니라 라벨 매핑(exhaustive)·톤 계약·접근성(role/label 연결/landmark)·동작(button type·클릭·disabled·Collapsible 토글·제어 textarea) 중심으로 검증.",
+      "completed_at": "2026-07-07T21:33:36+0900"
     },
     {
       "step": 4,
       "name": "home-run-list",
-      "status": "pending",
-      "started_at": "2026-07-06T20:40:44+0900"
+      "status": "completed",
+      "started_at": "2026-07-06T20:40:44+0900",
+      "summary": "홈 화면(web/src/app/page.tsx = PageShell + HomeClient). 컴포넌트는 web/src/components/home/: IdeaForm(제출 시 POST /api/runs→runId로 useRouter.push, 공백 비활성·제출 중 이중제출 차단·실패 시 role=alert 에러+입력 유지), RunList(GET /api/runs?q=&status=, 검색 300ms 디바운스, 상태 select 필터, error/stalled 행 '이어서 실행'→POST resume, completed 행 체크박스로 최대 2개 비교선택→/compare?a=&b=, 빈 상태 온보딩 EmptyState+예시 아이디어 버튼), HomeClient(idea 상태를 폼·예시버튼이 공유). 데이터 접근은 API route로만(서버컴포넌트 RunStore 직접호출 없음). runs는 null(미로딩)/[]로 구분해 온보딩 플래시 방지. 날짜 포맷은 web/src/lib/format.ts. 테스트 12개(web/src/test/components/home.test.tsx, fetch·next/navigation mock)로 목록·status/q 파라미터·디바운스·빈상태·폼제출 이동·resume·비교선택 2개제한·page 조립 검증. step3의 data-status 훅으로 뱃지 정확 조회. AC 통과: build(/ 정적) · 루트131+web88 · lint 클린.",
+      "completed_at": "2026-07-07T21:45:21+0900"
     },
     {
       "step": 5,
       "name": "progress-view",
-      "status": "pending"
+      "status": "completed",
+      "summary": "run 상세 페이지 web/src/app/runs/[id]/page.tsx(서버: params await → PageShell + RunDetailClient). web/src/components/progress/: useRunDetail(runId,intervalMs=2000) 훅이 GET /api/runs/{id}를 폴링하되 status==='running'일 때만 다음 폴링 예약(completed/error/stalled·404면 중단), restart()로 resume 후 재개(ADR-007 폴링). RunDetailClient가 status로 분기: completed→ReportView, notFound→안내, 그 외→ProgressView. ProgressView는 3단계 스테퍼(context-hunter→시장 조사/cold-critic→냉정한 비판/solution-designer→AI 네이티브 재설계), StepStatusIcon(인라인 SVG: 완료 체크/진행중 animate-spin 스피너/실패 X/대기 빈 원, role=img+aria-label), data-step-name·data-step-status 훅, 경과시간(완료=completedAt-startedAt, 진행중=useNow 1초 틱), step error 카드+errorMessage+이어서 실행, run stalled 안내+이어서 실행. **리포트 뷰는 placeholder: web/src/components/report/ReportView.tsx**(제목+'리포트 준비 완료'+report.md 다운로드 링크) — step 6~7이 교체할 지점. RunDetail 타입은 import type으로 서버 모듈에서 참조(런타임 결합 없음). 테스트 12개(web/src/test/components/progress.test.tsx, fake timers로 폴링 중단조건·renderHook, 상태별 렌더/resume). AC: build(/runs/[id] 동적) · 루트131+web100 · lint 클린.",
+      "completed_at": "2026-07-07T21:52:51+0900"
     },
     {
       "step": 6,
       "name": "report-overview-context",
-      "status": "pending"
+      "status": "completed",
+      "summary": "리포트 뷰 골격 + ① 시장 맥락 섹션. step5 ReportView placeholder를 실제 구현으로 교체(RunDetailClient 인터페이스 유지). web/src/components/report/: ReportHeader(제목·일시·report.md 다운로드 링크=Secondary 스타일 <a>), VerdictBanner(역피라미드—헤더 바로 아래, verdict 전문+severity 집계 뱃지 치명적/중대/경미, data-severity-count 훅, criticism 부재 시 안내), SectionNav(앵커 목차 #market/#criticism/#solution/#monetization, 데스크톱 좌측 sticky·모바일 상단 가로, REPORT_SECTIONS 상수), MarketContextSection(트렌드 불릿/경쟁사 CompetitorTable/YouTube 인용카드/페인포인트/출처 Collapsible, context 부재 시 EmptyState), CompetitorTable(client, 초기 8개+N개 더보기, pricingHint→Badge, url→새탭 noopener). 집계 순수함수 web/src/lib/severity.ts countSeverities(3축 합산, TDD). 본문 max-w-3xl, 섹션 순서(근거→진단→처방→수익화) 고정. **② 비판/③ 재설계/④ BM은 스텁(SectionHeading+'다음 step에서 구현됩니다')—step 7이 교체.** 테스트: severity.test 2 + report.test 7(집계·더보기 8→9·YouTube 링크·context 부재·조립). AC: build · 루트131+web109 · lint 클린.",
+      "completed_at": "2026-07-07T21:58:14+0900"
     },
     {
       "step": 7,
       "name": "report-criticism-solution",
-      "status": "pending"
+      "status": "completed",
+      "summary": "리포트 뷰의 ②③④ 섹션으로 step6 스텁 교체. web/src/lib/richText.tsx renderRichText(text): 개행 기준 문단(<p>) 분리 + **볼드**→<strong>, 미종결 **는 정규식 미매칭으로 리터럴 유지, 그 외 마크다운 미처리(의존성 0). web/src/components/report/: CriticismSection(3축 고정 순서/제목 painPointReality→페인포인트의 허구성·bmWeakness→수익 모델(BM)의 취약성·copycatRisk→카피캣 리스크, 각 point=Card[SeverityBadge+claim h4+evidence Collapsible 기본접힘 '근거 보기'], 말미 VerdictCallout '최종 판정' bg-neutral-50 좌측보더), SolutionSection(revisedConcept 리드 강조카드 border-neutral-900 '재설계된 컨셉'을 먼저→minimalInput/agenticWorkflow/dataFlywheel 서브섹션 고정제목), MonetizationSection(monetization 본문). 각 부재 시 EmptyState. 모든 장문은 renderRichText+max-w-3xl. ReportView가 4섹션 실제 조립(스텁 제거), verdict는 배너+콜아웃 2곳. 테스트: richText 4(문단/볼드/미종결/일반) + report 섹션 테스트(3축·접힘·콜아웃·revisedConcept 선순서·부재 EmptyState). AC: build · 루트131+web122 · lint 클린.",
+      "completed_at": "2026-07-07T22:03:45+0900"
     },
     {
       "step": 8,
       "name": "compare-view",
-      "status": "pending"
+      "status": "completed",
+      "summary": "두 run 비교 화면 web/src/app/compare/page.tsx(Suspense로 useSearchParams 감쌈 → CompareClient). web/src/components/compare/: CompareClient(?a=&b= 읽어 파라미터 누락/a===b 즉시 차단), CompareLoader(GET /api/runs/{id} 두 개 Promise.all 병렬 fetch, 404→null, loading/error 처리, a·b 중 null→'존재하지 않는 run' 차단, 어느 한쪽 status!=='completed'→'완료된 run만' 차단), CompareMatrix(행 순서 고정: 실행정보=컬럼헤더(아이디어 링크+일시)→severity 집계(countSeverities 재사용)→최종 판정→재설계된 컨셉→비즈니스 모델(renderRichText 재사용), 데스크톱 2컬럼 grid·모바일 세로 스택+sm:hidden run 식별 라벨), CompareGuard(EmptyState+홈 링크 공통). step6 countSeverities·step7 renderRichText 재사용(중복 구현 없음), 5개 행만(리포트 전체 섹션 미포함), 2개 비교만. 테스트 5개(web/src/test/components/compare.test.tsx, useSearchParams·fetch mock): 파라미터 누락/동일 차단·404·미완료 차단·정상 비교(행 순서·병렬 fetch 2회·양쪽 대조). AC: build(/compare 정적) · 루트131+web127 · lint 클린.",
+      "completed_at": "2026-07-07T22:08:24+0900"
     },
     {
       "step": 9,
       "name": "final-verify",
-      "status": "pending"
+      "status": "completed",
+      "summary": "phase 마감·검증. 상태 처리 일관성: 공용 ErrorState(에러 카드+'다시 시도') 신설·export하고 RunList(최초 목록 실패)·RunDetailClient(폴링 최초 실패)·CompareLoader(fetch 실패)에 연결(각각 reload/restart로 복구). 로딩 표시·not-found·부분 산출물 EmptyState 폴백은 step4~8에서 이미 일관. 문서: CLAUDE.md 명령어에 'npm run web' 추가(layout.tsx는 lang=ko·title anvil·설명 이미 충족). 반응형: 경쟁사 테이블 overflow-x-auto·비교 매트릭스 grid·sources break-all로 375~1280px 가로 스크롤 없음. 아키텍처 검증 grep 통과: web에 @google/genai 직접 호출 없음·zod 스키마 중복 없음(루트 src/types 단일 소스, ADR-006)·안티패턴(blur/gradient/purple/indigo 등) 없음. 스모크(fixture 완료 run+클론, ANVIL_RUNS_DIR로 next start 3100): 홈 200·목록 API runId·상세 API verdict·리포트 페이지 200·비교 200·없는 run 404 전부 통과, 임시 디렉토리·서버 정리 완료. AC: build(루트+web) · 루트131+web132 테스트 · lint 클린 · 스모크 6/6.",
+      "completed_at": "2026-07-07T22:15:12+0900"
     }
   ],
-  "created_at": "2026-07-06T00:03:12+0900"
+  "created_at": "2026-07-06T00:03:12+0900",
+  "completed_at": "2026-07-07T22:15:12+0900"
 }

@@ -1,15 +1,15 @@
-import { RunDetailPage } from "@/components/progress/RunDetailPage";
 import { PageShell } from "@/components/ui";
+import { RunDetailClient } from "@/components/progress/RunDetailClient";
 
-interface RunPageProps {
+export default async function RunDetailPage({
+  params,
+}: {
   params: Promise<{ id: string }>;
-}
-
-export default async function RunPage({ params }: RunPageProps) {
+}) {
   const { id } = await params;
   return (
     <PageShell>
-      <RunDetailPage runId={id} />
+      <RunDetailClient runId={id} />
     </PageShell>
   );
 }

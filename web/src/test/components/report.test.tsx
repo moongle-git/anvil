@@ -1,44 +1,238 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import type {
+  CompetitorService,
+  Criticism,
+  MarketContext,
+  Solution,
+} from "@anvil/types";
+import type { RunDetail } from "@/lib/server/runs";
+import { CompetitorTable } from "@/components/report/CompetitorTable";
+import { CriticismSection } from "@/components/report/CriticismSection";
+import { MarketContextSection } from "@/components/report/MarketContextSection";
+import { MonetizationSection } from "@/components/report/MonetizationSection";
+import { SolutionSection } from "@/components/report/SolutionSection";
+import { VerdictBanner } from "@/components/report/VerdictBanner";
 import { ReportView } from "@/components/report/ReportView";
-import { completedDetail } from "@/test/clientFixtures";
 
 afterEach(cleanup);
 
-describe("ReportView", () => {
-  it("헤더, verdict, severity 집계, 다운로드 링크를 렌더링한다", () => {
-    render(<ReportView detail={completedDetail()} />);
+const criticism: Criticism = {
+  painPointReality: [
+    { claim: "페인포인트가 약하다", evidence: "근거1", severity: "fatal" },
+    { claim: "대체재 존재", evidence: "근거2", severity: "minor" },
+  ],
+  bmWeakness: [
+    { claim: "BM 취약", evidence: "근거3", severity: "major" },
+  ],
+  copycatRisk: [
+    { claim: "카피 쉬움", evidence: "근거4", severity: "fatal" },
+  ],
+  verdict: "현재 구조로는 시장에서 살아남기 어렵다.",
+};
 
-    expect(screen.getByRole("heading", { name: "AI 회의록 요약 서비스" })).toBeDefined();
-    expect(screen.getByText("치명적 1")).toBeDefined();
-    expect(screen.getByText("중대 1")).toBeDefined();
-    expect(screen.getByText("경미 1")).toBeDefined();
+function makeCompetitors(n: number): CompetitorService[] {
+  return Array.from({ length: n }, (_, i) => ({
+    name: `경쟁사 ${i + 1}`,
+    description: `설명 ${i + 1}`,
+    url: `https://example.com/${i + 1}`,
+    pricingHint: i % 2 === 0 ? "무료" : "유료",
+  }));
+}
+
+const solution: Solution = {
+  revisedConcept:
+    "**에이전트 기반 재설계**\n\n회의를 자동 관측해 요약과 액션을 만든다.",
+  minimalInput: "사용자는 회의 링크만 제공한다.",
+  agenticWorkflow: "관측 → 요약 → 액션 추출을 자동 실행한다.",
+  dataFlywheel: "사용자 수정 피드백이 요약 품질을 높인다.",
+  monetization: "팀 단위 구독. 좌석당 과금 모델.",
+};
+
+const marketContext: MarketContext = {
+  ideaTitle: "AI 회의록 요약",
+  trends: ["AI 요약 수요 증가", "원격근무 확산"],
+  competitors: makeCompetitors(9),
+  youtubeVoices: [
+    {
+      videoTitle: "회의록 자동화 후기",
+      videoUrl: "https://youtube.com/watch?v=abc",
+      comment: "회의 끝나고 정리에 한 시간씩 써요",
+      authorName: "user1",
+      likeCount: 42,
+    },
+  ],
+  painPointEvidence: ["회의록 작성에 주당 3시간"],
+  sources: ["https://vertexaisearch.google.com/redirect/very-long-url-aaaaaa"],
+};
+
+function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
+  return {
+    state: {
+      runId: "r1",
+      idea: "AI 회의록 요약 서비스",
+      createdAt: "2026-07-01T09:00:00.000Z",
+      steps: [],
+      completedAt: "2026-07-01T09:05:00.000Z",
+    },
+    status: "completed",
+    hasReport: true,
+    context: marketContext,
+    criticism,
+    solution,
+    ...overrides,
+  };
+}
+
+describe("VerdictBanner", () => {
+  it("verdict 전문과 severity 집계(치명적 2·중대 1·경미 1)를 보여준다", () => {
+    render(<VerdictBanner criticism={criticism} />);
     expect(
-      screen.getAllByText(
-        "요약 단독 기능은 실패 확률이 높고 실행 추적 워크플로우로 전환해야 한다.",
-      ).length,
-    ).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "report.md 다운로드" })).toBeDefined();
+      screen.getByText("현재 구조로는 시장에서 살아남기 어렵다."),
+    ).toBeDefined();
+    expect(
+      document.querySelector('[data-severity-count="fatal"]')?.textContent,
+    ).toBe("2");
+    expect(
+      document.querySelector('[data-severity-count="major"]')?.textContent,
+    ).toBe("1");
+    expect(
+      document.querySelector('[data-severity-count="minor"]')?.textContent,
+    ).toBe("1");
   });
 
-  it("시장 맥락에서 경쟁 서비스 8개를 먼저 보이고 더보기로 확장한다", () => {
-    render(<ReportView detail={completedDetail()} />);
+  it("criticism이 없으면 안내 문구를 보여준다", () => {
+    render(<VerdictBanner criticism={undefined} />);
+    expect(screen.getByText("비판 데이터를 불러올 수 없습니다.")).toBeDefined();
+  });
+});
+
+describe("CompetitorTable", () => {
+  it("초기 8개만 보이고 '1개 더보기'로 전체를 확장한다", () => {
+    render(<CompetitorTable competitors={makeCompetitors(9)} />);
 
     expect(screen.getByText("경쟁사 8")).toBeDefined();
     expect(screen.queryByText("경쟁사 9")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "더보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "1개 더보기" }));
+
     expect(screen.getByText("경쟁사 9")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /더보기/ })).toBeNull();
   });
 
-  it("비판과 솔루션 섹션을 구조화해 렌더링한다", () => {
-    render(<ReportView detail={completedDetail()} />);
+  it("8개 이하면 더보기 버튼이 없다", () => {
+    render(<CompetitorTable competitors={makeCompetitors(8)} />);
+    expect(screen.queryByRole("button", { name: /더보기/ })).toBeNull();
+  });
+});
 
-    expect(screen.getByRole("heading", { name: "② 냉정한 비판" })).toBeDefined();
-    expect(screen.getByText("단독 구독 BM이 취약하다")).toBeDefined();
-    expect(screen.getByRole("heading", { name: "③ AI 네이티브 재설계" })).toBeDefined();
-    expect(screen.getByText("결정-실행 추적 에이전트로 재정의한다.")).toBeDefined();
-    expect(screen.getByRole("heading", { name: "④ 비즈니스 모델" })).toBeDefined();
-    expect(screen.getByText("팀 플랜과 온프레미스 라이선스로 과금한다.")).toBeDefined();
+describe("MarketContextSection", () => {
+  it("YouTube 인용 카드에 댓글·좋아요·새 탭 영상 링크를 렌더링한다", () => {
+    render(<MarketContextSection context={marketContext} />);
+
+    expect(
+      screen.getByText("회의 끝나고 정리에 한 시간씩 써요"),
+    ).toBeDefined();
+    expect(screen.getByText(/좋아요 42/)).toBeDefined();
+    const link = screen.getByRole("link", { name: "회의록 자동화 후기" });
+    expect(link.getAttribute("href")).toBe("https://youtube.com/watch?v=abc");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("context가 없으면 데이터 없음 EmptyState를 보여준다", () => {
+    render(<MarketContextSection context={undefined} />);
+    expect(screen.getByText("시장 맥락 데이터가 없습니다")).toBeDefined();
+  });
+});
+
+describe("ReportView (조립)", () => {
+  it("헤더·verdict 배너·목차·시장 맥락 섹션과 나머지 섹션 스텁을 렌더링한다", () => {
+    render(<ReportView detail={makeDetail()} />);
+
+    // 헤더
+    expect(
+      screen.getByRole("heading", { level: 1, name: "AI 회의록 요약 서비스" }),
+    ).toBeDefined();
+    // verdict는 상단 배너와 비판 섹션 콜아웃 두 곳에 나타난다 (역피라미드 + 최종 판정)
+    expect(
+      screen.getAllByText("현재 구조로는 시장에서 살아남기 어렵다.").length,
+    ).toBe(2);
+    // 목차 앵커
+    const nav = screen.getByRole("navigation", { name: "리포트 목차" });
+    expect(nav.querySelector('a[href="#market"]')).not.toBeNull();
+    expect(nav.querySelector('a[href="#solution"]')).not.toBeNull();
+    // 4개 섹션이 모두 실제로 렌더링된다 (스텁 없음)
+    expect(screen.getByText("① 실시간 시장 맥락")).toBeDefined();
+    expect(screen.getByText("페인포인트의 허구성")).toBeDefined();
+    expect(screen.getByText("재설계된 컨셉")).toBeDefined();
+    expect(screen.getByText("④ 지속 가능한 비즈니스 모델")).toBeDefined();
+    expect(screen.queryByText("다음 step에서 구현됩니다.")).toBeNull();
+  });
+});
+
+describe("CriticismSection", () => {
+  it("3축 서브섹션과 각 항목 카드(뱃지·claim)를 렌더링한다", () => {
+    render(<CriticismSection criticism={criticism} />);
+    expect(screen.getByText("페인포인트의 허구성")).toBeDefined();
+    expect(screen.getByText("수익 모델(BM)의 취약성")).toBeDefined();
+    expect(screen.getByText("카피캣 리스크")).toBeDefined();
+    expect(screen.getByText("페인포인트가 약하다")).toBeDefined();
+  });
+
+  it("evidence는 기본 접힘(Collapsible)이다", () => {
+    render(<CriticismSection criticism={criticism} />);
+    const summaries = screen.getAllByText("근거 보기");
+    // 항목 총 4개(2+1+1)
+    expect(summaries.length).toBe(4);
+    expect(summaries[0].closest("details")?.open).toBe(false);
+  });
+
+  it("마지막에 verdict 콜아웃(최종 판정)을 보여준다", () => {
+    render(<CriticismSection criticism={criticism} />);
+    expect(screen.getByText("최종 판정")).toBeDefined();
+    expect(
+      screen.getByText("현재 구조로는 시장에서 살아남기 어렵다."),
+    ).toBeDefined();
+  });
+
+  it("criticism이 없으면 EmptyState를 보여준다", () => {
+    render(<CriticismSection criticism={undefined} />);
+    expect(screen.getByText("비판 데이터가 없습니다")).toBeDefined();
+  });
+});
+
+describe("SolutionSection", () => {
+  it("revisedConcept 리드 블록을 서브섹션보다 먼저 렌더링한다 (역피라미드)", () => {
+    const { container } = render(<SolutionSection solution={solution} />);
+    const text = container.textContent ?? "";
+    expect(text.indexOf("재설계된 컨셉")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("재설계된 컨셉")).toBeLessThan(
+      text.indexOf("① 데이터 수집 및 최소 입력 구조"),
+    );
+  });
+
+  it("3개 서브섹션 제목을 순서대로 보여준다", () => {
+    render(<SolutionSection solution={solution} />);
+    expect(screen.getByText("① 데이터 수집 및 최소 입력 구조")).toBeDefined();
+    expect(screen.getByText("② 에이전틱 워크플로우")).toBeDefined();
+    expect(screen.getByText("③ 독점적 데이터 플라이휠")).toBeDefined();
+  });
+
+  it("solution이 없으면 EmptyState를 보여준다", () => {
+    render(<SolutionSection solution={undefined} />);
+    expect(screen.getByText("재설계 데이터가 없습니다")).toBeDefined();
+  });
+});
+
+describe("MonetizationSection", () => {
+  it("monetization 본문을 렌더링한다", () => {
+    render(<MonetizationSection solution={solution} />);
+    expect(screen.getByText("팀 단위 구독. 좌석당 과금 모델.")).toBeDefined();
+  });
+
+  it("solution이 없으면 EmptyState를 보여준다", () => {
+    render(<MonetizationSection solution={undefined} />);
+    expect(screen.getByText("비즈니스 모델 데이터가 없습니다")).toBeDefined();
   });
 });

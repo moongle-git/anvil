@@ -1,103 +1,77 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { RunDetail } from "@/lib/client/types";
+import type { RunDetail } from "@/lib/server/runs";
 
 export interface UseRunDetailResult {
   detail: RunDetail | null;
-  isLoading: boolean;
-  error: string;
   notFound: boolean;
-  refresh: () => void;
+  error: string | null;
+  restart: () => void;
 }
 
-interface DetailState {
-  key: string;
-  detail: RunDetail | null;
-  error: string;
-  notFound: boolean;
-}
-
-async function readError(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: unknown };
-    if (typeof body.error === "string") {
-      return body.error;
-    }
-  } catch {
-    // 응답 본문이 JSON이 아니면 기본 문구를 쓴다.
-  }
-  return "run 정보를 불러오지 못했습니다.";
-}
-
+// GET /api/runs/{id}를 주기 폴링한다 (ADR-007: SSE/WebSocket 대신 폴링).
+// running일 때만 다음 폴링을 예약하고, completed/error/stalled·404면 멈춘다.
+// restart()는 resume 후 폴링을 다시 시작하는 데 쓴다.
 export function useRunDetail(
   runId: string,
   intervalMs = 2000,
 ): UseRunDetailResult {
-  const [state, setState] = useState<DetailState>({
-    key: "",
-    detail: null,
-    error: "",
-    notFound: false,
-  });
-  const [refreshToken, setRefreshToken] = useState(0);
-  const requestKey = `${runId}\n${refreshToken}`;
+  const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
 
-  const refresh = useCallback(() => {
-    setRefreshToken((value) => value + 1);
+  const restart = useCallback(() => {
+    setNotFound(false);
+    setError(null);
+    setNonce((n) => n + 1);
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    async function load() {
+    async function poll() {
+      let res: Response;
       try {
-        const response = await fetch(`/api/runs/${encodeURIComponent(runId)}`, {
-          signal: controller.signal,
-        });
-        if (response.status === 404) {
-          setState({ key: requestKey, detail: null, notFound: true, error: "" });
-          window.clearInterval(timer);
-          return;
-        }
-        if (!response.ok) {
-          throw new Error(await readError(response));
-        }
-        const body = (await response.json()) as RunDetail;
-        setState({ key: requestKey, detail: body, notFound: false, error: "" });
-        if (body.status === "completed") {
-          window.clearInterval(timer);
-        }
-      } catch (loadError) {
-        if (!controller.signal.aborted) {
-          setState({
-            key: requestKey,
-            detail: null,
-            notFound: false,
-            error:
-              loadError instanceof Error
-                ? loadError.message
-                : "run 정보를 불러오지 못했습니다.",
-          });
-        }
+        res = await fetch(`/api/runs/${runId}`);
+      } catch {
+        if (cancelled) return;
+        setError("진행 상태를 불러오지 못했습니다.");
+        timer = setTimeout(poll, intervalMs);
+        return;
+      }
+      if (cancelled) return;
+
+      if (res.status === 404) {
+        setNotFound(true);
+        return;
+      }
+      if (!res.ok) {
+        setError("진행 상태를 불러오지 못했습니다.");
+        timer = setTimeout(poll, intervalMs);
+        return;
+      }
+
+      const data = (await res.json()) as RunDetail;
+      if (cancelled) return;
+      setDetail(data);
+      setError(null);
+      // 실행 중일 때만 계속 폴링한다 (completed/error/stalled는 사용자 액션 대기).
+      if (data.status === "running") {
+        timer = setTimeout(poll, intervalMs);
       }
     }
 
-    const timer = window.setInterval(load, intervalMs);
-    void load();
-
+    poll();
     return () => {
-      controller.abort();
-      window.clearInterval(timer);
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
-  }, [intervalMs, requestKey, runId]);
+  }, [runId, intervalMs, nonce]);
 
-  const isCurrentResponse = state.key === requestKey;
-  return {
-    detail: isCurrentResponse ? state.detail : null,
-    isLoading: !isCurrentResponse,
-    error: isCurrentResponse ? state.error : "",
-    notFound: isCurrentResponse ? state.notFound : false,
-    refresh,
-  };
+  return { detail, notFound, error, restart };
 }

@@ -1,4 +1,5 @@
 import type { RunDisplayStatus } from "@anvil/runStore";
+import { Badge, type BadgeTone } from "./Badge";
 
 // 한국어 라벨 매핑의 단일 소스 — 이후 step은 이 상수를 재사용한다
 export const RUN_STATUS_LABELS: Record<RunDisplayStatus, string> = {
@@ -8,12 +9,12 @@ export const RUN_STATUS_LABELS: Record<RunDisplayStatus, string> = {
   stalled: "중단됨",
 };
 
-// UI_GUIDE 시맨틱 색상: 완료 green-600 / 실패 red-600 / 진행중 blue-700 / 중단 중립 gray
-const STATUS_CLASSES: Record<RunDisplayStatus, string> = {
-  completed: "border-green-200 bg-green-50 text-green-700",
-  error: "border-red-200 bg-red-50 text-red-700",
-  running: "border-blue-200 bg-blue-50 text-blue-700",
-  stalled: "border-gray-200 bg-gray-50 text-gray-600",
+// run 상태 → 시맨틱 톤 (완료=success / 실패=danger / 진행중=info / 중단=neutral)
+const STATUS_TONES: Record<RunDisplayStatus, BadgeTone> = {
+  completed: "success",
+  error: "danger",
+  running: "info",
+  stalled: "neutral",
 };
 
 interface RunStatusBadgeProps {
@@ -22,10 +23,8 @@ interface RunStatusBadgeProps {
 
 export function RunStatusBadge({ status }: RunStatusBadgeProps) {
   return (
-    <span
-      className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[status]}`}
-    >
+    <Badge tone={STATUS_TONES[status]} data-status={status}>
       {RUN_STATUS_LABELS[status]}
-    </span>
+    </Badge>
   );
 }

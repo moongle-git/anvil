@@ -22,6 +22,7 @@
 npm run build      # tsc 컴파일 (에러 0이어야 함)
 npm run test       # vitest 실행
 npm run lint       # ESLint
+npm run web        # 웹 UI 개발 서버 실행 (Next.js)
 npm run consult -- "아이디어 텍스트"   # 컨설팅 파이프라인 실행 (CLI)
 
 ## 환경변수 (.env — git 미추적)
