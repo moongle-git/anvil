@@ -229,11 +229,16 @@ describe("ProgressView", () => {
 });
 
 describe("RunDetailClient (분기)", () => {
-  it("completed면 리포트 뷰 placeholder를 렌더링한다", async () => {
+  it("completed면 리포트 뷰(제목·다운로드 링크)를 렌더링한다", async () => {
     fetchMock.mockResolvedValue(jsonResponse(completedDetail));
     render(<RunDetailClient runId="r1" />);
     await waitFor(() =>
-      expect(screen.getByText("리포트 준비 완료")).toBeDefined(),
+      expect(
+        screen.getByRole("heading", {
+          level: 1,
+          name: completedDetail.state.idea,
+        }),
+      ).toBeDefined(),
     );
     expect(
       screen.getByRole("link", { name: "report.md 다운로드" }),
