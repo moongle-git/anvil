@@ -52,7 +52,9 @@
     {
       "step": 6,
       "name": "report-overview-context",
-      "status": "pending"
+      "status": "completed",
+      "summary": "리포트 뷰 골격 + ① 시장 맥락 섹션. step5 ReportView placeholder를 실제 구현으로 교체(RunDetailClient 인터페이스 유지). web/src/components/report/: ReportHeader(제목·일시·report.md 다운로드 링크=Secondary 스타일 <a>), VerdictBanner(역피라미드—헤더 바로 아래, verdict 전문+severity 집계 뱃지 치명적/중대/경미, data-severity-count 훅, criticism 부재 시 안내), SectionNav(앵커 목차 #market/#criticism/#solution/#monetization, 데스크톱 좌측 sticky·모바일 상단 가로, REPORT_SECTIONS 상수), MarketContextSection(트렌드 불릿/경쟁사 CompetitorTable/YouTube 인용카드/페인포인트/출처 Collapsible, context 부재 시 EmptyState), CompetitorTable(client, 초기 8개+N개 더보기, pricingHint→Badge, url→새탭 noopener). 집계 순수함수 web/src/lib/severity.ts countSeverities(3축 합산, TDD). 본문 max-w-3xl, 섹션 순서(근거→진단→처방→수익화) 고정. **② 비판/③ 재설계/④ BM은 스텁(SectionHeading+'다음 step에서 구현됩니다')—step 7이 교체.** 테스트: severity.test 2 + report.test 7(집계·더보기 8→9·YouTube 링크·context 부재·조립). AC: build · 루트131+web109 · lint 클린.",
+      "completed_at": "2026-07-07T21:58:14+0900"
     },
     {
       "step": 7,
