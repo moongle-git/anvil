@@ -4,10 +4,14 @@ import type {
   CompetitorService,
   Criticism,
   MarketContext,
+  Solution,
 } from "@anvil/types";
 import type { RunDetail } from "@/lib/server/runs";
 import { CompetitorTable } from "@/components/report/CompetitorTable";
+import { CriticismSection } from "@/components/report/CriticismSection";
 import { MarketContextSection } from "@/components/report/MarketContextSection";
+import { MonetizationSection } from "@/components/report/MonetizationSection";
+import { SolutionSection } from "@/components/report/SolutionSection";
 import { VerdictBanner } from "@/components/report/VerdictBanner";
 import { ReportView } from "@/components/report/ReportView";
 
@@ -35,6 +39,15 @@ function makeCompetitors(n: number): CompetitorService[] {
     pricingHint: i % 2 === 0 ? "무료" : "유료",
   }));
 }
+
+const solution: Solution = {
+  revisedConcept:
+    "**에이전트 기반 재설계**\n\n회의를 자동 관측해 요약과 액션을 만든다.",
+  minimalInput: "사용자는 회의 링크만 제공한다.",
+  agenticWorkflow: "관측 → 요약 → 액션 추출을 자동 실행한다.",
+  dataFlywheel: "사용자 수정 피드백이 요약 품질을 높인다.",
+  monetization: "팀 단위 구독. 좌석당 과금 모델.",
+};
 
 const marketContext: MarketContext = {
   ideaTitle: "AI 회의록 요약",
@@ -66,6 +79,7 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
     hasReport: true,
     context: marketContext,
     criticism,
+    solution,
     ...overrides,
   };
 }
@@ -140,16 +154,85 @@ describe("ReportView (조립)", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "AI 회의록 요약 서비스" }),
     ).toBeDefined();
-    // verdict 배너 (역피라미드)
+    // verdict는 상단 배너와 비판 섹션 콜아웃 두 곳에 나타난다 (역피라미드 + 최종 판정)
     expect(
-      screen.getByText("현재 구조로는 시장에서 살아남기 어렵다."),
-    ).toBeDefined();
+      screen.getAllByText("현재 구조로는 시장에서 살아남기 어렵다.").length,
+    ).toBe(2);
     // 목차 앵커
     const nav = screen.getByRole("navigation", { name: "리포트 목차" });
     expect(nav.querySelector('a[href="#market"]')).not.toBeNull();
     expect(nav.querySelector('a[href="#solution"]')).not.toBeNull();
-    // ① 시장 맥락 실제 렌더 + 나머지 스텁
+    // 4개 섹션이 모두 실제로 렌더링된다 (스텁 없음)
     expect(screen.getByText("① 실시간 시장 맥락")).toBeDefined();
-    expect(screen.getAllByText("다음 step에서 구현됩니다.").length).toBe(3);
+    expect(screen.getByText("페인포인트의 허구성")).toBeDefined();
+    expect(screen.getByText("재설계된 컨셉")).toBeDefined();
+    expect(screen.getByText("④ 지속 가능한 비즈니스 모델")).toBeDefined();
+    expect(screen.queryByText("다음 step에서 구현됩니다.")).toBeNull();
+  });
+});
+
+describe("CriticismSection", () => {
+  it("3축 서브섹션과 각 항목 카드(뱃지·claim)를 렌더링한다", () => {
+    render(<CriticismSection criticism={criticism} />);
+    expect(screen.getByText("페인포인트의 허구성")).toBeDefined();
+    expect(screen.getByText("수익 모델(BM)의 취약성")).toBeDefined();
+    expect(screen.getByText("카피캣 리스크")).toBeDefined();
+    expect(screen.getByText("페인포인트가 약하다")).toBeDefined();
+  });
+
+  it("evidence는 기본 접힘(Collapsible)이다", () => {
+    render(<CriticismSection criticism={criticism} />);
+    const summaries = screen.getAllByText("근거 보기");
+    // 항목 총 4개(2+1+1)
+    expect(summaries.length).toBe(4);
+    expect(summaries[0].closest("details")?.open).toBe(false);
+  });
+
+  it("마지막에 verdict 콜아웃(최종 판정)을 보여준다", () => {
+    render(<CriticismSection criticism={criticism} />);
+    expect(screen.getByText("최종 판정")).toBeDefined();
+    expect(
+      screen.getByText("현재 구조로는 시장에서 살아남기 어렵다."),
+    ).toBeDefined();
+  });
+
+  it("criticism이 없으면 EmptyState를 보여준다", () => {
+    render(<CriticismSection criticism={undefined} />);
+    expect(screen.getByText("비판 데이터가 없습니다")).toBeDefined();
+  });
+});
+
+describe("SolutionSection", () => {
+  it("revisedConcept 리드 블록을 서브섹션보다 먼저 렌더링한다 (역피라미드)", () => {
+    const { container } = render(<SolutionSection solution={solution} />);
+    const text = container.textContent ?? "";
+    expect(text.indexOf("재설계된 컨셉")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("재설계된 컨셉")).toBeLessThan(
+      text.indexOf("① 데이터 수집 및 최소 입력 구조"),
+    );
+  });
+
+  it("3개 서브섹션 제목을 순서대로 보여준다", () => {
+    render(<SolutionSection solution={solution} />);
+    expect(screen.getByText("① 데이터 수집 및 최소 입력 구조")).toBeDefined();
+    expect(screen.getByText("② 에이전틱 워크플로우")).toBeDefined();
+    expect(screen.getByText("③ 독점적 데이터 플라이휠")).toBeDefined();
+  });
+
+  it("solution이 없으면 EmptyState를 보여준다", () => {
+    render(<SolutionSection solution={undefined} />);
+    expect(screen.getByText("재설계 데이터가 없습니다")).toBeDefined();
+  });
+});
+
+describe("MonetizationSection", () => {
+  it("monetization 본문을 렌더링한다", () => {
+    render(<MonetizationSection solution={solution} />);
+    expect(screen.getByText("팀 단위 구독. 좌석당 과금 모델.")).toBeDefined();
+  });
+
+  it("solution이 없으면 EmptyState를 보여준다", () => {
+    render(<MonetizationSection solution={undefined} />);
+    expect(screen.getByText("비즈니스 모델 데이터가 없습니다")).toBeDefined();
   });
 });
