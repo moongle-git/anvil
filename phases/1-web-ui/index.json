@@ -59,7 +59,9 @@
     {
       "step": 7,
       "name": "report-criticism-solution",
-      "status": "pending"
+      "status": "completed",
+      "summary": "리포트 뷰의 ②③④ 섹션으로 step6 스텁 교체. web/src/lib/richText.tsx renderRichText(text): 개행 기준 문단(<p>) 분리 + **볼드**→<strong>, 미종결 **는 정규식 미매칭으로 리터럴 유지, 그 외 마크다운 미처리(의존성 0). web/src/components/report/: CriticismSection(3축 고정 순서/제목 painPointReality→페인포인트의 허구성·bmWeakness→수익 모델(BM)의 취약성·copycatRisk→카피캣 리스크, 각 point=Card[SeverityBadge+claim h4+evidence Collapsible 기본접힘 '근거 보기'], 말미 VerdictCallout '최종 판정' bg-neutral-50 좌측보더), SolutionSection(revisedConcept 리드 강조카드 border-neutral-900 '재설계된 컨셉'을 먼저→minimalInput/agenticWorkflow/dataFlywheel 서브섹션 고정제목), MonetizationSection(monetization 본문). 각 부재 시 EmptyState. 모든 장문은 renderRichText+max-w-3xl. ReportView가 4섹션 실제 조립(스텁 제거), verdict는 배너+콜아웃 2곳. 테스트: richText 4(문단/볼드/미종결/일반) + report 섹션 테스트(3축·접힘·콜아웃·revisedConcept 선순서·부재 EmptyState). AC: build · 루트131+web122 · lint 클린.",
+      "completed_at": "2026-07-07T22:03:45+0900"
     },
     {
       "step": 8,
