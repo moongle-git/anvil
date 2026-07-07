@@ -66,7 +66,9 @@
     {
       "step": 8,
       "name": "compare-view",
-      "status": "pending"
+      "status": "completed",
+      "summary": "두 run 비교 화면 web/src/app/compare/page.tsx(Suspense로 useSearchParams 감쌈 → CompareClient). web/src/components/compare/: CompareClient(?a=&b= 읽어 파라미터 누락/a===b 즉시 차단), CompareLoader(GET /api/runs/{id} 두 개 Promise.all 병렬 fetch, 404→null, loading/error 처리, a·b 중 null→'존재하지 않는 run' 차단, 어느 한쪽 status!=='completed'→'완료된 run만' 차단), CompareMatrix(행 순서 고정: 실행정보=컬럼헤더(아이디어 링크+일시)→severity 집계(countSeverities 재사용)→최종 판정→재설계된 컨셉→비즈니스 모델(renderRichText 재사용), 데스크톱 2컬럼 grid·모바일 세로 스택+sm:hidden run 식별 라벨), CompareGuard(EmptyState+홈 링크 공통). step6 countSeverities·step7 renderRichText 재사용(중복 구현 없음), 5개 행만(리포트 전체 섹션 미포함), 2개 비교만. 테스트 5개(web/src/test/components/compare.test.tsx, useSearchParams·fetch mock): 파라미터 누락/동일 차단·404·미완료 차단·정상 비교(행 순서·병렬 fetch 2회·양쪽 대조). AC: build(/compare 정적) · 루트131+web127 · lint 클린.",
+      "completed_at": "2026-07-07T22:08:24+0900"
     },
     {
       "step": 9,
