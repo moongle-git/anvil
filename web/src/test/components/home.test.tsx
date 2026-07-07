@@ -215,6 +215,24 @@ describe("RunList", () => {
     );
   });
 
+  it("최초 목록 조회 실패 시 에러 카드를 보여주고 '다시 시도'로 복구한다", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce(jsonResponse({ runs: RUNS }));
+    render(<RunList onPickExample={() => {}} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "다시 시도" }),
+      ).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() =>
+      expect(screen.getByText("회의록 요약 서비스")).toBeDefined(),
+    );
+  });
+
   it("완료 run 2개 선택 시 비교 버튼이 활성화되고 /compare로 이동한다", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ runs: RUNS }));
     render(<RunList onPickExample={() => {}} />);

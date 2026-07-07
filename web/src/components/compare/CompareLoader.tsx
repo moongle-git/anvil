@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { RunDetail } from "@/lib/server/runs";
+import { ErrorState } from "@/components/ui";
 import { CompareGuard } from "./CompareGuard";
 import { CompareMatrix } from "./CompareMatrix";
 
@@ -23,6 +24,7 @@ type LoadState =
 
 export function CompareLoader({ a, b }: { a: string; b: string }) {
   const [load, setLoad] = useState<LoadState>({ phase: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -44,7 +46,7 @@ export function CompareLoader({ a, b }: { a: string; b: string }) {
     return () => {
       ignore = true;
     };
-  }, [a, b]);
+  }, [a, b, reloadKey]);
 
   if (load.phase === "loading") {
     return (
@@ -52,7 +54,15 @@ export function CompareLoader({ a, b }: { a: string; b: string }) {
     );
   }
   if (load.phase === "error") {
-    return <CompareGuard message={load.message} />;
+    return (
+      <ErrorState
+        message={load.message}
+        onRetry={() => {
+          setLoad({ phase: "loading" });
+          setReloadKey((key) => key + 1);
+        }}
+      />
+    );
   }
 
   if (load.a === null || load.b === null) {

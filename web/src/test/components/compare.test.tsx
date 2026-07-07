@@ -1,5 +1,6 @@
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -122,6 +123,38 @@ describe("CompareClient 가드", () => {
       expect(
         screen.getByText("완료된 run만 비교할 수 있습니다."),
       ).toBeDefined(),
+    );
+  });
+});
+
+describe("CompareClient 에러 복구", () => {
+  it("fetch 실패 시 에러 카드를 보여주고 '다시 시도'로 복구한다", async () => {
+    params.current = new URLSearchParams("a=r1&b=r2");
+    let calls = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({ error: "서버 오류" }, 500); // 최초 로드 실패
+      }
+      if (url.endsWith("/api/runs/r1")) {
+        return jsonResponse(makeDetail("r1", "아이디어 A"));
+      }
+      if (url.endsWith("/api/runs/r2")) {
+        return jsonResponse(makeDetail("r2", "아이디어 B"));
+      }
+      return jsonResponse({ error: "없음" }, 404);
+    });
+    render(<CompareClient />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "다시 시도" }),
+      ).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "아이디어 A" })).toBeDefined(),
     );
   });
 });

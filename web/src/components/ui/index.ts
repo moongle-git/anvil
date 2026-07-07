@@ -3,6 +3,7 @@ export { Button, type ButtonVariant } from "./Button";
 export { Card } from "./Card";
 export { Collapsible } from "./Collapsible";
 export { EmptyState } from "./EmptyState";
+export { ErrorState } from "./ErrorState";
 export { PageShell } from "./PageShell";
 export { RUN_STATUS_LABELS, RunStatusBadge } from "./RunStatusBadge";
 export { SectionHeading } from "./SectionHeading";

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { ErrorState } from "@/components/ui";
 import { ReportView } from "@/components/report/ReportView";
 import { ProgressView } from "./ProgressView";
 import { useRunDetail } from "./useRunDetail";
 
 // run 상세: 폴링 결과 status로 진행 뷰/리포트 뷰를 분기한다 (같은 URL, 폴링으로 자동 전환).
 export function RunDetailClient({ runId }: { runId: string }) {
-  const { detail, notFound, restart } = useRunDetail(runId);
+  const { detail, notFound, error, restart } = useRunDetail(runId);
 
   async function handleResume() {
     try {
@@ -37,6 +38,11 @@ export function RunDetailClient({ runId }: { runId: string }) {
         </Link>
       </div>
     );
+  }
+
+  // 최초 로딩이 실패해 아직 표시할 데이터가 없으면 에러 카드 + 다시 시도
+  if (detail === null && error !== null) {
+    return <ErrorState message={error} onRetry={restart} />;
   }
 
   if (detail === null) {

@@ -259,6 +259,22 @@ describe("RunDetailClient (분기)", () => {
     );
   });
 
+  it("최초 로딩이 실패하면 에러 카드를 보여주고 '다시 시도'로 복구한다", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue(jsonResponse(runningDetail));
+    render(<RunDetailClient runId="r1" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "다시 시도" }),
+      ).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(screen.getByText("시장 조사")).toBeDefined());
+  });
+
   it("resume 버튼 클릭 시 POST resume를 호출한다", async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (url.includes("/resume")) {

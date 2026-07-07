@@ -9,6 +9,7 @@ import {
   Card,
   Collapsible,
   EmptyState,
+  ErrorState,
   PageShell,
   RUN_STATUS_LABELS,
   RunStatusBadge,
@@ -265,6 +266,21 @@ describe("PageShell", () => {
     );
     expect(screen.getByRole("banner")).toBeDefined();
     expect(screen.getByRole("main")).toBeDefined();
+  });
+});
+
+describe("ErrorState", () => {
+  it("메시지와 '다시 시도' 버튼을 렌더링하고 클릭 시 onRetry를 호출한다", () => {
+    const onRetry = vi.fn();
+    render(<ErrorState message="네트워크 오류" onRetry={onRetry} />);
+    expect(screen.getByRole("alert").textContent).toContain("네트워크 오류");
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("onRetry가 없으면 버튼을 렌더링하지 않는다", () => {
+    render(<ErrorState message="오류" />);
+    expect(screen.queryByRole("button", { name: "다시 시도" })).toBeNull();
   });
 });
 

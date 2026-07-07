@@ -7,6 +7,7 @@ import type { RunDisplayStatus, RunSummary } from "@anvil/runStore";
 import {
   Button,
   EmptyState,
+  ErrorState,
   RUN_STATUS_LABELS,
   RunStatusBadge,
 } from "@/components/ui";
@@ -43,6 +44,7 @@ export function RunList({ onPickExample }: RunListProps) {
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // 과도한 요청을 피하도록 검색어를 300ms 디바운스한다
   useEffect(() => {
@@ -82,7 +84,7 @@ export function RunList({ onPickExample }: RunListProps) {
     return () => {
       ignore = true;
     };
-  }, [url]);
+  }, [url, reloadKey]);
 
   function toggleSelect(runId: string) {
     setSelected((prev) => {
@@ -109,8 +111,21 @@ export function RunList({ onPickExample }: RunListProps) {
   const hasFilter = debouncedQuery.trim() !== "" || status !== "";
   const compareReady = selected.length === 2;
 
+  // 최초 로딩이 실패하면 에러 카드 + 다시 시도
+  if (runs === null && error !== null) {
+    return (
+      <ErrorState
+        message={error}
+        onRetry={() => {
+          setError(null);
+          setReloadKey((key) => key + 1);
+        }}
+      />
+    );
+  }
+
   // 최초 로딩 미완료: 온보딩/목록을 성급히 그리지 않는다
-  if (runs === null && error === null) {
+  if (runs === null) {
     return (
       <p className="py-8 text-center text-sm text-neutral-500">불러오는 중…</p>
     );
