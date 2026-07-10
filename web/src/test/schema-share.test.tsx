@@ -5,6 +5,10 @@ describe("루트 src/types 스키마 공유 (ADR-006)", () => {
   it("MarketContextSchema가 유효한 fixture를 parse한다", () => {
     const fixture = {
       ideaTitle: "AI 회의록 요약 서비스",
+      briefing: "요약 기능이 플랫폼 번들로 흡수되며 유료화 명분이 좁아진다.",
+      marketSizeIndicators: [],
+      competitorInsight: "무료 티어가 지배해 요약 단독 포지션은 소진됐다.",
+      voicesInsight: "지불 의사는 요약이 아니라 그 다음 단계에 남는다.",
       trends: ["AI 요약 도구 수요 증가"],
       competitors: [
         {

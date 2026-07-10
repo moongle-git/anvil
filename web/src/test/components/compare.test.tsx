@@ -41,9 +41,35 @@ afterEach(() => {
 });
 
 const criticism: Criticism = {
-  painPointReality: [{ claim: "c", evidence: "e", severity: "fatal" }],
-  bmWeakness: [{ claim: "c", evidence: "e", severity: "major" }],
-  copycatRisk: [{ claim: "c", evidence: "e", severity: "minor" }],
+  points: [
+    {
+      id: "c1",
+      axis: "painPoint",
+      claim: "c",
+      evidence: "e",
+      severity: "fatal",
+      riskScore: 80,
+      riskKeyword: "치명",
+    },
+    {
+      id: "c2",
+      axis: "bm",
+      claim: "c",
+      evidence: "e",
+      severity: "major",
+      riskScore: 50,
+      riskKeyword: "중대",
+    },
+    {
+      id: "c3",
+      axis: "copycat",
+      claim: "c",
+      evidence: "e",
+      severity: "minor",
+      riskScore: 20,
+      riskKeyword: "경미",
+    },
+  ],
   verdict: "판정 문장",
 };
 

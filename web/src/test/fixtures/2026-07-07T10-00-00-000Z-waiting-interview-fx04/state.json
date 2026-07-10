@@ -24,6 +24,10 @@
     {
       "name": "solution-designer",
       "status": "pending"
+    },
+    {
+      "name": "verdict",
+      "status": "pending"
     }
   ]
 }

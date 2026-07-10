@@ -10,11 +10,19 @@
       "completedAt": "2026-07-03T14:01:45.000Z"
     },
     {
+      "name": "thesis",
+      "status": "pending"
+    },
+    {
       "name": "cold-critic",
       "status": "pending"
     },
     {
       "name": "solution-designer",
+      "status": "pending"
+    },
+    {
+      "name": "verdict",
       "status": "pending"
     }
   ]

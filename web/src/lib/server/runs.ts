@@ -11,12 +11,14 @@ import {
   MarketContextSchema,
   SolutionSchema,
   ThesisSchema,
+  VerdictSchema,
   type Criticism,
   type InterviewQuestions,
   type MarketContext,
   type RunState,
   type Solution,
   type Thesis,
+  type Verdict,
 } from "@anvil/types";
 
 export function getRunsDir(): string {
@@ -39,6 +41,7 @@ export interface RunDetail {
   thesis?: Thesis;
   criticism?: Criticism;
   solution?: Solution;
+  verdict?: Verdict;
   hasReport: boolean;
 }
 
@@ -56,11 +59,14 @@ export function getRunDetail(runId: string): RunDetail | null {
     return null;
   }
 
+  // loadStepOutput은 스키마 검증 실패 시 null을 반환한다. 구버전 run(평탄화 이전 criticism.json 등)은
+  // 해당 필드만 생략되고 UI가 빈 상태를 보여준다 — run 하나가 목록·상세 전체를 죽이지 않는다 (ADR-011).
   const questions = store.loadInterviewQuestions(runId);
   const context = store.loadStepOutput(runId, "context-hunter", MarketContextSchema);
   const thesis = store.loadStepOutput(runId, "thesis", ThesisSchema);
   const criticism = store.loadStepOutput(runId, "cold-critic", CriticismSchema);
   const solution = store.loadStepOutput(runId, "solution-designer", SolutionSchema);
+  const verdict = store.loadStepOutput(runId, "verdict", VerdictSchema);
 
   return {
     state,
@@ -70,6 +76,7 @@ export function getRunDetail(runId: string): RunDetail | null {
     ...(thesis !== null ? { thesis } : {}),
     ...(criticism !== null ? { criticism } : {}),
     ...(solution !== null ? { solution } : {}),
+    ...(verdict !== null ? { verdict } : {}),
     hasReport: fs.existsSync(path.join(runDir, "report.md")),
   };
 }

@@ -25,15 +25,43 @@ import {
 afterEach(cleanup);
 
 const criticism: Criticism = {
-  painPointReality: [
-    { claim: "페인포인트가 약하다", evidence: "근거1", severity: "fatal" },
-    { claim: "대체재 존재", evidence: "근거2", severity: "minor" },
-  ],
-  bmWeakness: [
-    { claim: "BM 취약", evidence: "근거3", severity: "major" },
-  ],
-  copycatRisk: [
-    { claim: "카피 쉬움", evidence: "근거4", severity: "fatal" },
+  points: [
+    {
+      id: "c1",
+      axis: "painPoint",
+      claim: "페인포인트가 약하다",
+      evidence: "근거1",
+      severity: "fatal",
+      riskScore: 80,
+      riskKeyword: "약한 통증",
+    },
+    {
+      id: "c2",
+      axis: "painPoint",
+      claim: "대체재 존재",
+      evidence: "근거2",
+      severity: "minor",
+      riskScore: 20,
+      riskKeyword: "대체재",
+    },
+    {
+      id: "c3",
+      axis: "bm",
+      claim: "BM 취약",
+      evidence: "근거3",
+      severity: "major",
+      riskScore: 50,
+      riskKeyword: "가격 침식",
+    },
+    {
+      id: "c4",
+      axis: "copycat",
+      claim: "카피 쉬움",
+      evidence: "근거4",
+      severity: "fatal",
+      riskScore: 78,
+      riskKeyword: "복제 용이",
+    },
   ],
   verdict: "현재 구조로는 시장에서 살아남기 어렵다.",
 };
@@ -58,6 +86,26 @@ const solution: Solution = {
 };
 
 const thesis: Thesis = {
+  points: [
+    {
+      id: "t1",
+      axis: "painPoint",
+      claim: "회의 정리 통증은 실재한다",
+      rationale: "회의 후 정리에 한 시간씩 쓴다는 목소리가 있다.",
+    },
+    {
+      id: "t2",
+      axis: "bm",
+      claim: "팀 좌석당 구독에 지불 의사가 있다",
+      rationale: "조직 단위 도입 수요가 관찰된다.",
+    },
+    {
+      id: "t3",
+      axis: "copycat",
+      claim: "회의 데이터 진입점이 해자가 된다",
+      rationale: "진입점을 선점하면 후발 주자가 따라오기 어렵다.",
+    },
+  ],
   revenueModel: "팀 좌석당 구독으로 확장한다.",
   growthLevers: ["조직 내 바이럴 확산", "캘린더 생태계 번들"],
   marketTailwinds: ["원격근무 확산", "AI 요약 수요 증가"],
@@ -67,6 +115,10 @@ const thesis: Thesis = {
 
 const marketContext: MarketContext = {
   ideaTitle: "AI 회의록 요약",
+  briefing: "요약 기능이 번들로 흡수되며 독립 서비스의 유료화 명분이 좁아진다.",
+  marketSizeIndicators: [],
+  competitorInsight: "무료 티어가 지배해 요약 단독 포지션은 소진됐다.",
+  voicesInsight: "지불 의사는 요약이 아니라 그 다음 단계에 남는다.",
   trends: ["AI 요약 수요 증가", "원격근무 확산"],
   competitors: makeCompetitors(9),
   youtubeVoices: [
@@ -198,7 +250,7 @@ describe("ReportView (조립)", () => {
     // 정반합 5개 섹션이 모두 실제로 렌더링된다 (스텁 없음)
     expect(screen.getByText("① 실시간 시장 맥락")).toBeDefined();
     expect(screen.getByText("② 낙관적 논제 (正)")).toBeDefined();
-    expect(screen.getByText("페인포인트의 허구성")).toBeDefined();
+    expect(screen.getByText("해자와 카피캣")).toBeDefined();
     expect(screen.getByText("재설계된 컨셉")).toBeDefined();
     expect(screen.getByText("⑤ 지속 가능한 비즈니스 모델")).toBeDefined();
     expect(screen.queryByText("다음 step에서 구현됩니다.")).toBeNull();
@@ -242,16 +294,16 @@ describe("ThesisSection", () => {
 describe("CriticismSection", () => {
   it("3축 서브섹션과 각 항목 카드(뱃지·claim)를 렌더링한다", () => {
     render(<CriticismSection criticism={criticism} />);
-    expect(screen.getByText("페인포인트의 허구성")).toBeDefined();
-    expect(screen.getByText("수익 모델(BM)의 취약성")).toBeDefined();
-    expect(screen.getByText("카피캣 리스크")).toBeDefined();
+    expect(screen.getByText("페인포인트")).toBeDefined();
+    expect(screen.getByText("수익 모델")).toBeDefined();
+    expect(screen.getByText("해자와 카피캣")).toBeDefined();
     expect(screen.getByText("페인포인트가 약하다")).toBeDefined();
   });
 
   it("evidence는 기본 접힘(Collapsible)이다", () => {
     render(<CriticismSection criticism={criticism} />);
     const summaries = screen.getAllByText("근거 보기");
-    // 항목 총 4개(2+1+1)
+    // 항목 총 4개(painPoint 2 + bm 1 + copycat 1)
     expect(summaries.length).toBe(4);
     expect(summaries[0].closest("details")?.open).toBe(false);
   });

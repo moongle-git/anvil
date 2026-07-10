@@ -10,9 +10,15 @@
       "completedAt": "2026-07-01T09:02:10.000Z"
     },
     {
-      "name": "cold-critic",
+      "name": "thesis",
       "status": "completed",
       "startedAt": "2026-07-01T09:02:10.000Z",
+      "completedAt": "2026-07-01T09:02:55.000Z"
+    },
+    {
+      "name": "cold-critic",
+      "status": "completed",
+      "startedAt": "2026-07-01T09:02:55.000Z",
       "completedAt": "2026-07-01T09:03:40.000Z"
     },
     {
@@ -20,7 +26,13 @@
       "status": "completed",
       "startedAt": "2026-07-01T09:03:40.000Z",
       "completedAt": "2026-07-01T09:05:00.000Z"
+    },
+    {
+      "name": "verdict",
+      "status": "completed",
+      "startedAt": "2026-07-01T09:05:00.000Z",
+      "completedAt": "2026-07-01T09:05:40.000Z"
     }
   ],
-  "completedAt": "2026-07-01T09:05:00.000Z"
+  "completedAt": "2026-07-01T09:05:40.000Z"
 }

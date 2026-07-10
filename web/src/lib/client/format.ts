@@ -29,11 +29,7 @@ export function summarizeSeverity(criticism?: Criticism): Record<CriticismSeveri
     return counts;
   }
 
-  for (const point of [
-    ...criticism.painPointReality,
-    ...criticism.bmWeakness,
-    ...criticism.copycatRisk,
-  ]) {
+  for (const point of criticism.points) {
     counts[point.severity] += 1;
   }
   return counts;

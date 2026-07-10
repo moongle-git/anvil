@@ -10,14 +10,24 @@
       "completedAt": "2026-07-05T20:01:30.000Z"
     },
     {
+      "name": "thesis",
+      "status": "completed",
+      "startedAt": "2026-07-05T20:01:30.000Z",
+      "completedAt": "2026-07-05T20:02:15.000Z"
+    },
+    {
       "name": "cold-critic",
       "status": "error",
-      "startedAt": "2026-07-05T20:01:30.000Z",
+      "startedAt": "2026-07-05T20:02:15.000Z",
       "failedAt": "2026-07-05T20:04:12.000Z",
       "errorMessage": "Gemini 응답이 3회 연속 CriticismSchema 검증에 실패했다: verdict 필드 누락"
     },
     {
       "name": "solution-designer",
+      "status": "pending"
+    },
+    {
+      "name": "verdict",
       "status": "pending"
     }
   ]

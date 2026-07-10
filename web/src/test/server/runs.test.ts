@@ -67,7 +67,7 @@ describe("getRunDetail", () => {
     cleanupTempRunsDir(runsDir);
   });
 
-  it("완료 run: 산출물 3종 + hasReport + completed 상태를 조립한다", () => {
+  it("완료 run: 산출물 5종 + hasReport + completed 상태를 조립한다", () => {
     copyFixtureRun(runsDir, COMPLETED_RUN_ID);
 
     const detail = getRunDetail(COMPLETED_RUN_ID);
@@ -77,9 +77,49 @@ describe("getRunDetail", () => {
     expect(detail?.status).toBe("completed");
     expect(detail?.context?.competitors.length).toBeGreaterThanOrEqual(10);
     expect(detail?.context?.youtubeVoices.length).toBeGreaterThanOrEqual(3);
+    expect(detail?.context?.briefing).toBeTruthy();
+    expect(detail?.thesis?.points.length).toBeGreaterThanOrEqual(3);
+    expect(detail?.criticism?.points.length).toBeGreaterThanOrEqual(3);
     expect(detail?.criticism?.verdict).toBeTruthy();
     expect(detail?.solution?.revisedConcept).toBeTruthy();
     expect(detail?.hasReport).toBe(true);
+  });
+
+  it("완료 run: thesis와 verdict 산출물을 포함해 반환한다", () => {
+    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+
+    const detail = getRunDetail(COMPLETED_RUN_ID);
+
+    expect(detail?.thesis?.winningThesis).toBeTruthy();
+    expect(detail?.verdict?.recommendation).toBeTruthy();
+    expect(detail?.verdict?.survivalScore).toBeGreaterThanOrEqual(0);
+    expect(detail?.verdict?.residualRisks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("옛 스키마 criticism.json(3개 배열)은 criticism 필드가 생략되고 throw하지 않는다", () => {
+    // 구버전 run 하위호환 회귀 방지: 평탄화 이전 형식(painPointReality 등)은 새 스키마 검증에
+    // 실패하지만, loadStepOutput이 null을 반환해 해당 필드만 빠지고 나머지는 그대로 조립된다 (ADR-011).
+    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+    fs.writeFileSync(
+      path.join(runsDir, COMPLETED_RUN_ID, "criticism.json"),
+      JSON.stringify({
+        painPointReality: [
+          { claim: "옛 형식", evidence: "근거", severity: "major" },
+        ],
+        bmWeakness: [{ claim: "옛 형식", evidence: "근거", severity: "fatal" }],
+        copycatRisk: [{ claim: "옛 형식", evidence: "근거", severity: "minor" }],
+        verdict: "옛 판정",
+      }),
+    );
+
+    const detail = getRunDetail(COMPLETED_RUN_ID);
+
+    expect(detail).not.toBeNull();
+    expect(detail && "criticism" in detail).toBe(false);
+    // 다른 산출물은 정상적으로 조립된다 — 하나의 구버전 파일이 상세 전체를 죽이지 않는다
+    expect(detail?.context).toBeTruthy();
+    expect(detail?.solution).toBeTruthy();
+    expect(detail?.verdict).toBeTruthy();
   });
 
   it("진행중 run: context만 있고 criticism/solution 필드는 생략된다", () => {
@@ -127,6 +167,11 @@ describe("getRunDetail", () => {
     fs.writeFileSync(
       path.join(runsDir, COMPLETED_RUN_ID, "thesis.json"),
       JSON.stringify({
+        points: [
+          { id: "t1", axis: "painPoint", claim: "통증 실재", rationale: "근거" },
+          { id: "t2", axis: "bm", claim: "지불 의사", rationale: "근거" },
+          { id: "t3", axis: "copycat", claim: "해자", rationale: "근거" },
+        ],
         revenueModel: "구독 전환",
         growthLevers: ["바이럴 루프"],
         marketTailwinds: ["시장 성장"],
