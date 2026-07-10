@@ -4,15 +4,21 @@ import { MarketContextSection } from "./MarketContextSection";
 import { ReportHeader } from "./ReportHeader";
 import { SectionNav } from "./SectionNav";
 import { SolutionSection } from "./SolutionSection";
-import { VerdictBanner } from "./VerdictBanner";
+import { VerdictSection } from "./VerdictSection";
 
 interface ReportViewProps {
   detail: RunDetail;
 }
 
-// 리포트 뷰(완료 run). 역피라미드: 헤더 → verdict 배너 → 목차 → 섹션.
+// 리포트 뷰(완료 run). 5단계 순차 논증 서사 (ADR-008 결론 후치):
+// 시장 맥락 → 正 → 反 → 合 → 최종 판정. 결론(verdict·생존 점수·severity 집계)을 상단에 두지
+// 않는다 — 사용자는 끝까지 읽어야 판정을 본다. 결론 선노출은 正/反 대립을 장식으로 만든다.
 export function ReportView({ detail }: ReportViewProps) {
-  const { state, context, thesis, criticism, solution } = detail;
+  const { state, context, thesis, criticism, solution, verdict } = detail;
+
+  // 완료됐지만 새 스키마 산출물이 없는 구버전 run. 결론 스포일러가 아니라 데이터 상태 안내이므로
+  // 상단에 두어도 ADR-008에 어긋나지 않는다.
+  const isLegacyReport = verdict === undefined && detail.hasReport;
 
   return (
     <div className="flex flex-col gap-8">
@@ -22,16 +28,25 @@ export function ReportView({ detail }: ReportViewProps) {
         createdAt={state.createdAt}
         hasReport={detail.hasReport}
       />
-      <VerdictBanner criticism={criticism} />
+
+      {isLegacyReport ? (
+        <div className="border-l-2 border-neutral-300 bg-neutral-50 p-4 text-[15px] leading-[1.8] text-neutral-700">
+          이 리포트는 이전 버전 형식으로 생성되었습니다. 전체 내용은 report.md
+          다운로드로 확인하세요.
+        </div>
+      ) : null}
 
       <div className="lg:grid lg:grid-cols-[11rem_1fr] lg:gap-10">
         <div className="mb-6 lg:mb-0 lg:sticky lg:top-6 lg:self-start">
           <SectionNav />
         </div>
-        <div className="flex min-w-0 max-w-3xl flex-col gap-12">
+        {/* 섹션 폭은 각 섹션이 스스로 정한다: DialecticSplit만 max-w-5xl, 나머지는 max-w-3xl.
+            바깥을 max-w-3xl로 감싸면 Split View가 좁아지므로 여기서 폭을 제한하지 않는다. */}
+        <div className="flex min-w-0 flex-col gap-12">
           <MarketContextSection context={context} />
           <DialecticSplit thesis={thesis} criticism={criticism} />
           <SolutionSection solution={solution} />
+          <VerdictSection verdict={verdict} />
         </div>
       </div>
     </div>

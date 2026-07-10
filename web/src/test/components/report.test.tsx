@@ -1,17 +1,18 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   CompetitorService,
   Criticism,
   MarketContext,
   Solution,
   Thesis,
+  Verdict,
 } from "@anvil/types";
 import type { RunDetail } from "@/lib/server/runs";
 import { CompetitorTable } from "@/components/report/CompetitorTable";
 import { MarketContextSection } from "@/components/report/MarketContextSection";
+import { SectionNav } from "@/components/report/SectionNav";
 import { SolutionSection } from "@/components/report/SolutionSection";
-import { VerdictBanner } from "@/components/report/VerdictBanner";
 import { ReportView } from "@/components/report/ReportView";
 import {
   MONETIZATION_NUMBERED,
@@ -130,6 +131,22 @@ const marketContext: MarketContext = {
   sources: ["https://vertexaisearch.google.com/redirect/very-long-url-aaaaaa"],
 };
 
+const verdict: Verdict = {
+  survivalScore: 55,
+  recommendation: "pivot",
+  headline: "요약을 버리고 실행 추적으로 재편하면 생존 가능성이 열린다.",
+  rationale:
+    "핵심 가치를 요약이 아니라 실행 추적으로 옮기면 번들 흡수를 우회할 수 있다.",
+  residualRisks: [
+    {
+      keyword: "번들 흡수",
+      severity: "major",
+      note: "대형 협업 도구가 요약을 번들로 흡수할 수 있다.",
+    },
+  ],
+  conditions: ["6개월 내 팀 3곳 유료 전환"],
+};
+
 function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
   return {
     state: {
@@ -146,46 +163,10 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
     thesis,
     criticism,
     solution,
+    verdict,
     ...overrides,
   };
 }
-
-describe("VerdictBanner", () => {
-  it("verdict 전문과 severity 집계(치명적 2·중대 1·경미 1)를 보여준다", () => {
-    render(<VerdictBanner criticism={criticism} />);
-    expect(
-      screen.getByText("현재 구조로는 시장에서 살아남기 어렵다."),
-    ).toBeDefined();
-    expect(
-      document.querySelector('[data-severity-count="fatal"]')?.textContent,
-    ).toBe("2");
-    expect(
-      document.querySelector('[data-severity-count="major"]')?.textContent,
-    ).toBe("1");
-    expect(
-      document.querySelector('[data-severity-count="minor"]')?.textContent,
-    ).toBe("1");
-  });
-
-  it("criticism이 없으면 안내 문구를 보여준다", () => {
-    render(<VerdictBanner criticism={undefined} />);
-    expect(screen.getByText("비판 데이터를 불러올 수 없습니다.")).toBeDefined();
-  });
-
-  it("verdict의 볼드를 <strong>으로 렌더링하되 <p>를 중첩하지 않는다", () => {
-    const { container } = render(
-      <VerdictBanner
-        criticism={{ ...criticism, verdict: "**치명적**이라고 판단한다." }}
-      />,
-    );
-
-    expect(container.querySelector("p > strong")?.textContent).toBe("치명적");
-    expect(container.textContent).not.toContain("**");
-    // renderRichText를 쓰면 <p> 안에 <div><p>가 들어가 HTML이 무효가 된다
-    expect(container.querySelector("p p")).toBeNull();
-    expect(container.querySelector("p div")).toBeNull();
-  });
-});
 
 describe("CompetitorTable", () => {
   it("초기 8개만 보이고 '1개 더보기'로 전체를 확장한다", () => {
@@ -345,36 +326,190 @@ describe("MarketContextSection", () => {
 });
 
 describe("ReportView (조립)", () => {
-  it("헤더·verdict 배너·목차·시장 맥락 섹션과 나머지 섹션 스텁을 렌더링한다", () => {
+  it("헤더·목차·다섯 서사 섹션을 렌더링한다", () => {
     render(<ReportView detail={makeDetail()} />);
 
-    // 헤더
     expect(
       screen.getByRole("heading", { level: 1, name: "AI 회의록 요약 서비스" }),
     ).toBeDefined();
-    // verdict는 상단 배너와 비판 섹션 콜아웃 두 곳에 나타난다 (역피라미드 + 최종 판정)
-    expect(
-      screen.getAllByText("현재 구조로는 시장에서 살아남기 어렵다.").length,
-    ).toBe(2);
-    // 목차 앵커
-    const nav = screen.getByRole("navigation", { name: "리포트 목차" });
-    expect(nav.querySelector('a[href="#market"]')).not.toBeNull();
-    expect(nav.querySelector('a[href="#thesis"]')).not.toBeNull();
-    expect(nav.querySelector('a[href="#solution"]')).not.toBeNull();
-    // ①~④ 서사 섹션이 모두 실제로 렌더링된다 (스텁 없음).
-    // ②正/③反은 DialecticSplit의 좌우 컬럼 헤더로 나타난다.
-    // (⑤ 최종 판정 섹션 배치와 목차 갱신은 step 10 범위)
+
+    // 시장 맥락 헤딩은 '실시간'을 유지해 목차 라벨('① 시장 맥락')과 충돌하지 않는다
     expect(screen.getByText("① 실시간 시장 맥락")).toBeDefined();
+    // ②正/③反은 DialecticSplit의 좌우 컬럼 헤더(H2)로 나타난다
     expect(
       screen.getByRole("heading", { level: 2, name: "② 낙관적 가설 (正)" }),
     ).toBeDefined();
     expect(
       screen.getByRole("heading", { level: 2, name: "③ 냉정한 비판 (反)" }),
     ).toBeDefined();
-    expect(screen.getByText("재설계된 컨셉")).toBeDefined();
-    // monetization은 별도 최상위 섹션이 아니라 合(SolutionSection)의 하위 절 ④로 흡수됐다
-    expect(screen.getByText("④ 지속 가능한 비즈니스 모델")).toBeDefined();
-    expect(screen.queryByText("다음 step에서 구현됩니다.")).toBeNull();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "④ 인사이트 및 재설계 (合)" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "⑤ 최종 판정" }),
+    ).toBeDefined();
+    // criticism.verdict(反 소결론)는 이제 배너가 사라져 DialecticSplit 한 곳에만 나타난다
+    expect(
+      screen.getAllByText("현재 구조로는 시장에서 살아남기 어렵다.").length,
+    ).toBe(1);
+  });
+
+  it("다섯 섹션을 시장 맥락 → 正/反 → 合 → 최종 판정 DOM 순서로 렌더링한다", () => {
+    render(<ReportView detail={makeDetail()} />);
+    const ids = ["market", "thesis", "antithesis", "solution", "verdict"];
+    const els = ids.map((id) => document.getElementById(id));
+    els.forEach((el) => expect(el).not.toBeNull());
+    for (let i = 0; i < els.length - 1; i++) {
+      expect(
+        els[i]!.compareDocumentPosition(els[i + 1]!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  it("verdict.headline이 criticism.verdict(反 소결론)보다 뒤에 나온다 (결론 후치)", () => {
+    const { container } = render(<ReportView detail={makeDetail()} />);
+    const text = container.textContent ?? "";
+    expect(text.indexOf(criticism.verdict)).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf(verdict.headline)).toBeGreaterThan(
+      text.indexOf(criticism.verdict),
+    );
+  });
+
+  // ADR-008 회귀 방지선: 상단(헤더~첫 섹션)에 결론·생존 점수·severity 집계가 없어야 한다.
+  it("상단에 결론(severity 집계·생존 점수·headline)을 노출하지 않는다 (역피라미드 제거)", () => {
+    render(<ReportView detail={makeDetail()} />);
+
+    // 상단 배너의 severity 집계 뱃지가 코드베이스에서 사라졌다
+    expect(document.querySelector("[data-severity-count]")).toBeNull();
+
+    const market = document.getElementById("market");
+    expect(market).not.toBeNull();
+
+    // 생존 점수 게이지는 최종 판정 섹션(#market 뒤)에만 있다
+    const gauge = document.querySelector("[data-survival-score]");
+    expect(gauge).not.toBeNull();
+    expect(
+      market!.compareDocumentPosition(gauge!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // 최종 판정 headline도 #market보다 뒤에 온다
+    const headline = screen.getByText(verdict.headline);
+    expect(
+      market!.compareDocumentPosition(headline) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("목차 앵커 5개가 실제 섹션 id와 모두 일치한다 (끊어진 앵커 없음)", () => {
+    render(<ReportView detail={makeDetail()} />);
+    const nav = screen.getByRole("navigation", { name: "리포트 목차" });
+    const links = Array.from(nav.querySelectorAll('a[href^="#"]'));
+    expect(links.length).toBe(5);
+    for (const link of links) {
+      const id = link.getAttribute("href")!.slice(1);
+      expect(document.getElementById(id)).not.toBeNull();
+    }
+  });
+
+  it("verdict가 없고 hasReport면 구버전 안내 배너를 보여준다", () => {
+    render(
+      <ReportView detail={makeDetail({ verdict: undefined, hasReport: true })} />,
+    );
+    expect(screen.getByText(/이전 버전 형식으로 생성/)).toBeDefined();
+  });
+
+  it("verdict가 있으면 구버전 안내 배너를 보여주지 않는다", () => {
+    render(<ReportView detail={makeDetail()} />);
+    expect(screen.queryByText(/이전 버전 형식으로 생성/)).toBeNull();
+  });
+
+  it("모든 산출물이 undefined인 구버전 run도 throw 없이 렌더링한다", () => {
+    expect(() =>
+      render(
+        <ReportView
+          detail={makeDetail({
+            context: undefined,
+            thesis: undefined,
+            criticism: undefined,
+            solution: undefined,
+            verdict: undefined,
+            hasReport: false,
+          })}
+        />,
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe("SectionNav", () => {
+  it("nav에 aria-label이 있고 5단계 서사 순서의 앵커를 노출한다", () => {
+    render(<SectionNav />);
+    const nav = screen.getByRole("navigation", { name: "리포트 목차" });
+    const hrefs = Array.from(nav.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toEqual([
+      "#market",
+      "#thesis",
+      "#antithesis",
+      "#solution",
+      "#verdict",
+    ]);
+  });
+
+  it("IntersectionObserver가 없는 환경에서 throw하지 않는다", () => {
+    const original = globalThis.IntersectionObserver;
+    // @ts-expect-error jsdom 기본 상태(미정의)를 재현한다
+    delete globalThis.IntersectionObserver;
+    expect(() => render(<SectionNav />)).not.toThrow();
+    globalThis.IntersectionObserver = original;
+  });
+
+  it("현재 뷰포트 섹션 항목에 aria-current='location'을 붙인다 (observer mock)", () => {
+    let captured: IntersectionObserverCallback | undefined;
+    const original = globalThis.IntersectionObserver;
+    class MockObserver {
+      constructor(cb: IntersectionObserverCallback) {
+        captured = cb;
+      }
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      takeRecords = vi.fn();
+      root = null;
+      rootMargin = "";
+      thresholds = [];
+    }
+    globalThis.IntersectionObserver =
+      MockObserver as unknown as typeof IntersectionObserver;
+
+    render(<SectionNav />);
+    act(() => {
+      captured?.(
+        [
+          {
+            target: { id: "solution" } as Element,
+            isIntersecting: true,
+          } as IntersectionObserverEntry,
+        ],
+        {} as IntersectionObserver,
+      );
+    });
+
+    const active = screen.getByRole("link", {
+      name: "④ 인사이트 및 재설계 (合)",
+    });
+    expect(active.getAttribute("aria-current")).toBe("location");
+    // 나머지 항목엔 aria-current가 없다
+    expect(
+      screen
+        .getByRole("link", { name: "① 시장 맥락" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+
+    globalThis.IntersectionObserver = original;
   });
 });
 
