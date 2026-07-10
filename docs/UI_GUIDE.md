@@ -4,7 +4,7 @@
 
 ## 디자인 원칙
 1. 컨설팅 리포트 문서처럼 읽혀야 한다. 마케팅 페이지가 아니라 인쇄해도 어색하지 않은 보고서. 장식은 가독성을 돕는 선에서만.
-2. 결론 우선(역피라미드). 사용자가 스크롤 없이 verdict와 severity 집계를 파악할 수 있어야 한다.
+2. 순차 논증. 리포트는 시장 맥락 → 正 → 反 → 合 → 최종 판정 순으로 읽힌다. 결론을 상단에 미리 노출하지 않는다. 사용자의 현재 위치는 목차 네비의 현재 섹션 강조로 알린다.
 3. 색은 데이터의 의미에만 쓴다. severity(fatal/major/minor)·run 상태·링크 외에는 무채색만 사용한다.
 
 ## AI 슬롭 안티패턴 — 하지 마라
@@ -17,6 +17,7 @@
 | 보라/인디고 브랜드 색상 | "AI = 보라색" 클리셰 |
 | 모든 카드에 동일한 rounded-2xl | 균일한 둥근 모서리는 템플릿 느낌 |
 | 배경 gradient orb (blur-3xl 원형) | 모든 AI 랜딩 페이지에 있는 장식 |
+| 차트 라이브러리 기본 테마(무지개 팔레트) | 색은 데이터 의미에만 쓴다는 원칙 위반 |
 
 ## 색상
 ### 배경
@@ -72,9 +73,36 @@ inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium
 ### 접기 (Collapsible)
 네이티브 `<details>/<summary>` 기반. summary는 text-sm text-neutral-500, 펼친 내용은 본문 스타일.
 
+### RiskRadar
+축별 위험도 점수(0~100)를 그리는 인라인 SVG. 차트 라이브러리를 쓰지 않는다(ADR-009).
+- 격자·축선: `neutral-200`
+- 데이터 폴리곤: stroke는 해당 리포트의 최고 severity 색, fill은 같은 색 opacity 0.08
+- 축 라벨: `text-xs text-neutral-500`
+- 좌표 애니메이션·트랜지션 금지(정적 SVG). 아이콘 컨테이너로 감싸지 않는다
+
+### SurvivalGauge
+최종 판정의 생존 점수(0~100)를 표시한다.
+- 트랙: `neutral-200`
+- 값 부분: 점수 밴드 색 — 0~39 red-600 / 40~69 amber-600 / 70~100 green-600
+- 숫자는 `tabular-nums`
+
+### RiskScoreBadge
+기존 뱃지 규격을 따른다.
+```
+inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium
+```
+- 점수는 `tabular-nums`
+- 리스크 키워드는 뱃지 안에 넣지 않고, 뱃지 옆 `text-xs text-neutral-500`으로 분리 노출한다
+
+## 정보 밀도
+원시 데이터는 본문에 나열하지 않는다. 경쟁사 표, YouTube 댓글 원문, 출처 URL 목록은 반드시
+`Collapsible`(네이티브 `<details>`) 안에 넣는다. 본문에는 에이전트가 정제한 인사이트 문단만 놓는다.
+접힌 영역의 summary에는 건수를 표기한다(예: "경쟁 서비스 12개", "실제 유저 목소리 8건").
+
 ## 레이아웃
 - 전체 너비: max-w-5xl mx-auto px-6
 - 리포트 본문(장문 텍스트): max-w-3xl — 문서 가독 폭 유지
+  - 예외: 正/反 Split View 섹션은 `max-w-5xl`을 쓴다. `max-w-3xl`(768px)을 좌우로 나누면 컬럼당 약 360px가 되어 한국어 본문 가독 폭에 못 미친다. 이 섹션만 넓히고, 나머지 장문 섹션은 3xl을 유지한다.
 - 정렬: 좌측 정렬 기본. 중앙 정렬 금지(빈 상태 안내 제외)
 - 간격: 요소 간 gap-3~4, 섹션 간 space-y-10. 리포트 섹션 내부는 gap-6로 통일
 - 리포트 목차 네비: 데스크톱 좌측 sticky, 모바일 상단 가로 스크롤
