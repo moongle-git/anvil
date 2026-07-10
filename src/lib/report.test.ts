@@ -4,6 +4,7 @@ import type {
   MarketContext,
   Solution,
   Thesis,
+  Verdict,
 } from "../types/index.js";
 import { renderReport } from "./report.js";
 
@@ -120,8 +121,24 @@ const solution: Solution = {
     "낙관의 성장 동력과 반론의 지불 의사 한계를 종합하면 '생존 보장'이 유일한 해자다",
 };
 
+const verdict: Verdict = {
+  survivalScore: 58,
+  recommendation: "pivot",
+  headline: "리마인더 앱으로는 죽고, 생존 보장 구독으로는 산다",
+  rationale:
+    "反의 fatal 비판(무료 대체재)은 合이 생존 보장형 과금으로 우회했으나, 해자 부재는 방어되지 않았다",
+  residualRisks: [
+    {
+      keyword: "해자 부재",
+      severity: "major",
+      note: "PictureThis가 동일 기능을 추가하면 차별점이 사라진다",
+    },
+  ],
+  conditions: ["출시 6개월 내 유료 전환율 5% 확보"],
+};
+
 describe("renderReport", () => {
-  const report = renderReport(IDEA, context, thesis, criticism, solution);
+  const report = renderReport(IDEA, context, thesis, criticism, solution, verdict);
 
   it("정반합 리포트 규격의 섹션 제목이 순서대로 모두 존재한다", () => {
     const headings = [
@@ -194,6 +211,7 @@ describe("renderReport", () => {
       thesis,
       criticism,
       withoutSynthesis,
+      verdict,
     );
     expect(rendered).not.toContain("**종합 통찰:**");
     expect(rendered).toContain("## 4. 종합과 재설계 (Synthesis / 合)");
@@ -201,9 +219,9 @@ describe("renderReport", () => {
   });
 
   it("순수 함수다 — 같은 입력이면 같은 출력", () => {
-    expect(renderReport(IDEA, context, thesis, criticism, solution)).toBe(
-      report,
-    );
+    expect(
+      renderReport(IDEA, context, thesis, criticism, solution, verdict),
+    ).toBe(report);
   });
 
   it("youtubeVoices가 비어 있으면 수집 실패 안내를 렌더링한다", () => {
@@ -213,8 +231,24 @@ describe("renderReport", () => {
       thesis,
       criticism,
       solution,
+      verdict,
     );
     expect(empty).toContain("수집된 YouTube 목소리 없음");
+  });
+
+  it("최종 판정(合 이후)을 反의 소결론과 구분해 렌더링한다", () => {
+    expect(report).toContain("## 6. 최종 판정 (Verdict)");
+    expect(report).toContain(verdict.headline);
+    expect(report).toContain(`${verdict.survivalScore} / 100`);
+    expect(report).toContain("피벗"); // RECOMMENDATION_LABELS.pivot
+    expect(report).toContain(verdict.rationale);
+    expect(report).toContain(verdict.residualRisks[0].keyword);
+    expect(report).toContain(verdict.conditions[0]);
+
+    // 反의 소결론(criticism.verdict)은 3절에 남고, 최종 판정에 흡수되지 않는다 (ADR-010)
+    expect(report.indexOf(criticism.verdict)).toBeLessThan(
+      report.indexOf(verdict.headline),
+    );
   });
 
   it("고정 입력 → 고정 출력 (스냅샷)", () => {

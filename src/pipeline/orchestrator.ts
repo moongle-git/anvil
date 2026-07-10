@@ -4,6 +4,7 @@ import { runContextHunter } from "../agents/contextHunter.js";
 import { runInterviewer } from "../agents/interviewer.js";
 import { runSolutionDesigner } from "../agents/solutionDesigner.js";
 import { runThesis } from "../agents/thesis.js";
+import { runVerdict } from "../agents/verdict.js";
 import { renderReport } from "../lib/report.js";
 import type { RunStore } from "../lib/runStore.js";
 import type { GeminiService } from "../services/gemini.js";
@@ -13,6 +14,7 @@ import {
   MarketContextSchema,
   SolutionSchema,
   ThesisSchema,
+  VerdictSchema,
   type InterviewAnswers,
   type InterviewQuestions,
   type PipelineStepName,
@@ -209,10 +211,14 @@ export async function runPipeline(
   const solution = await executeStep("solution-designer", SolutionSchema, () =>
     runSolutionDesigner({ gemini: deps.gemini }, idea, context, criticism, thesis),
   );
+  // 合을 설계한 당사자가 스스로 채점하면 낙관 편향이 들어간다 — 판정자는 분리한다 (ADR-010)
+  const verdict = await executeStep("verdict", VerdictSchema, () =>
+    runVerdict({ gemini: deps.gemini }, idea, context, thesis, criticism, solution),
+  );
 
   const reportPath = deps.store.saveReport(
     runId,
-    renderReport(idea, context, thesis, criticism, solution),
+    renderReport(idea, context, thesis, criticism, solution, verdict),
   );
   if (state.completedAt === undefined) {
     state.completedAt = new Date().toISOString();

@@ -1,3 +1,4 @@
+import { RECOMMENDATION_LABELS } from "../types/index.js";
 import type {
   CompetitorService,
   Criticism,
@@ -6,6 +7,7 @@ import type {
   MarketContext,
   Solution,
   Thesis,
+  Verdict,
   YoutubeVoice,
 } from "../types/index.js";
 
@@ -44,7 +46,7 @@ function criticismLines(
 
 /**
  * 정반합(正反合) 구조의 마크다운 컨설팅 리포트를 렌더링하는 순수 함수.
- * 1. 시장 맥락 → 2. 낙관적 논제(正) → 3. 냉정한 반론(反) → 4. 종합과 재설계(合) → 5. 비즈니스 모델.
+ * 1. 시장 맥락 → 2. 낙관적 논제(正) → 3. 냉정한 반론(反) → 4. 종합과 재설계(合) → 5. 비즈니스 모델 → 6. 최종 판정.
  */
 export function renderReport(
   idea: string,
@@ -52,6 +54,7 @@ export function renderReport(
   thesis: Thesis,
   criticism: Criticism,
   solution: Solution,
+  verdict: Verdict,
 ): string {
   const lines: string[] = [];
 
@@ -116,6 +119,25 @@ export function renderReport(
 
   lines.push("## 5. 지속 가능한 비즈니스 모델 (Monetization Model)", "");
   lines.push(solution.monetization, "");
+
+  // 合을 채점한 제3 에이전트의 최종 판정 (ADR-010). 서사 재배치는 step 4의 몫이다.
+  lines.push("## 6. 최종 판정 (Verdict)", "");
+  lines.push(`**${verdict.headline}**`, "");
+  lines.push(
+    `*   **생존 점수:** ${verdict.survivalScore} / 100`,
+    `*   **권고:** ${RECOMMENDATION_LABELS[verdict.recommendation]}`,
+  );
+  lines.push("", verdict.rationale, "");
+  lines.push("*   **잔존 리스크:**");
+  lines.push(
+    ...verdict.residualRisks.map(
+      (risk) =>
+        `    *   **[${risk.severity.toUpperCase()}]** ${risk.keyword} — ${risk.note}`,
+    ),
+  );
+  lines.push("*   **생존 조건:**");
+  lines.push(...verdict.conditions.map((condition) => `    *   ${condition}`));
+  lines.push("");
 
   return lines.join("\n");
 }

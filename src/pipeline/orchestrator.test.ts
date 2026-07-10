@@ -11,11 +11,13 @@ import {
   MarketContextSchema,
   SolutionSchema,
   ThesisSchema,
+  VerdictSchema,
   type Criticism,
   type InterviewQuestions,
   type MarketContext,
   type Solution,
   type Thesis,
+  type Verdict,
 } from "../types/index.js";
 import {
   PipelineStepError,
@@ -117,6 +119,21 @@ const solution: Solution = {
   synthesis: "낙관과 비판을 종합하면 데이터 축적이 핵심 해자다",
 };
 
+const verdict: Verdict = {
+  survivalScore: 55,
+  recommendation: "pivot",
+  headline: "원안으로는 죽고, 생존 보장 구독으로 피벗하면 산다",
+  rationale: "무료 대체재 비판은 보장형 과금으로 우회했으나 해자는 여전히 얕다",
+  residualRisks: [
+    {
+      keyword: "해자 부재",
+      severity: "major",
+      note: "기존 앱이 동일 기능을 추가하면 차별점이 사라진다",
+    },
+  ],
+  conditions: ["출시 6개월 내 리텐션 D30 20% 확보"],
+};
+
 interface FakeGemini {
   gemini: GeminiService;
   generateStructured: ReturnType<typeof vi.fn>;
@@ -139,6 +156,7 @@ function fakeGemini(options?: {
       if (schema === ThesisSchema) return Promise.resolve(thesis);
       if (schema === CriticismSchema) return Promise.resolve(criticism);
       if (schema === SolutionSchema) return Promise.resolve(solution);
+      if (schema === VerdictSchema) return Promise.resolve(verdict);
       return Promise.reject(new Error("예상하지 못한 스키마"));
     },
   );
@@ -178,32 +196,33 @@ describe("runPipeline", () => {
     return { store, gemini, youtube: fakeYoutube(), log: () => undefined };
   }
 
-  it("신규 run(CLI): 인터뷰 없이 정반합 4개 step을 순서대로 실행하고 리포트를 생성한다", async () => {
+  it("신규 run(CLI): 인터뷰 없이 정반합·판정 5개 step을 순서대로 실행하고 리포트를 생성한다", async () => {
     const { gemini, generateStructured } = fakeGemini();
 
     const result = await runPipeline(makeDeps(gemini), { idea: IDEA });
 
     expect(result.status).toBe("completed");
 
-    // step 순서: context-hunter → thesis → cold-critic → solution-designer (interviewer는 CLI에서 미실행)
+    // step 순서: context-hunter → thesis → cold-critic → solution-designer → verdict
+    // (interviewer는 CLI에서 미실행). verdict는 合을 채점하므로 반드시 solution-designer 다음이다 (ADR-010).
     expect(calledSchemas(generateStructured)).toEqual([
       MarketContextSchema,
       ThesisSchema,
       CriticismSchema,
       SolutionSchema,
+      VerdictSchema,
     ]);
 
-    // state 전이: 실행된 step은 completed + 타임스탬프, run 완료 시각 기록.
-    // verdict는 seed만 되고 아직 실행되지 않는다 (에이전트는 step 3에서 붙는다).
+    // state 전이: 실행된 step은 completed + 타임스탬프, run 완료 시각 기록
     const saved = store.loadRun(result.runId);
     expect(saved.steps.map((s) => s.status)).toEqual([
       "completed",
       "completed",
       "completed",
       "completed",
-      "pending",
+      "completed",
     ]);
-    for (const step of saved.steps.filter((s) => s.status === "completed")) {
+    for (const step of saved.steps) {
       expect(step.startedAt).toBeDefined();
       expect(step.completedAt).toBeDefined();
     }
@@ -219,6 +238,12 @@ describe("runPipeline", () => {
         ),
       ),
     ).toEqual(marketContext);
+    expect(STEP_OUTPUT_FILES.verdict).toBe("verdict.json");
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(runDir, STEP_OUTPUT_FILES.verdict), "utf-8"),
+      ),
+    ).toEqual(verdict);
 
     // 리포트 생성
     expect(result.reportPath).toBe(path.join(runDir, "report.md"));
@@ -228,6 +253,71 @@ describe("runPipeline", () => {
     );
     expect(report).toContain("# [컨설팅 리포트]");
     expect(report).toContain(solution.revisedConcept);
+    expect(report).toContain(verdict.headline);
+  });
+
+  it("verdict step 실패: state에 error를 기록하고 리포트도 completedAt도 남기지 않는다", async () => {
+    const { gemini } = fakeGemini({ failOn: VerdictSchema });
+
+    const promise = runPipeline(makeDeps(gemini), { idea: IDEA });
+    await expect(promise).rejects.toBeInstanceOf(PipelineStepError);
+    const error = (await promise.catch((e: unknown) => e)) as PipelineStepError;
+    expect(error.step).toBe("verdict");
+
+    const saved = store.loadRun(error.runId);
+    expect(saved.steps.map((s) => s.status)).toEqual([
+      "completed",
+      "completed",
+      "completed",
+      "completed",
+      "error",
+    ]);
+    expect(saved.steps[4].errorMessage).toContain("Gemini 호출 실패");
+    expect(saved.steps[4].failedAt).toBeDefined();
+    // 판정 없이 완료로 표시되면 안 된다 — 리포트의 결론이 비어 버린다
+    expect(saved.completedAt).toBeUndefined();
+    expect(fs.existsSync(path.join(baseDir, error.runId, "report.md"))).toBe(
+      false,
+    );
+  });
+
+  it("resume: completed인 verdict step은 저장된 verdict.json을 재사용하고 재실행하지 않는다", async () => {
+    const first = fakeGemini();
+    const { runId } = await runPipeline(makeDeps(first.gemini), { idea: IDEA });
+
+    const second = fakeGemini();
+    await runPipeline(makeDeps(second.gemini), {
+      idea: IDEA,
+      resumeRunId: runId,
+    });
+
+    expect(calledSchemas(second.generateStructured)).toEqual([]);
+    expect(store.loadStepOutput(runId, "verdict", VerdictSchema)).toEqual(
+      verdict,
+    );
+  });
+
+  it("verdict.json이 손상되면 completed 상태여도 verdict step만 재실행한다", async () => {
+    const first = fakeGemini();
+    const { runId } = await runPipeline(makeDeps(first.gemini), { idea: IDEA });
+
+    // 스키마 검증에 실패하는 산출물 (survivalScore가 recommendation 밴드와 모순)
+    fs.writeFileSync(
+      path.join(baseDir, runId, STEP_OUTPUT_FILES.verdict),
+      JSON.stringify({ ...verdict, survivalScore: 5 }),
+      "utf-8",
+    );
+
+    const second = fakeGemini();
+    await runPipeline(makeDeps(second.gemini), {
+      idea: IDEA,
+      resumeRunId: runId,
+    });
+
+    expect(calledSchemas(second.generateStructured)).toEqual([VerdictSchema]);
+    expect(store.loadStepOutput(runId, "verdict", VerdictSchema)).toEqual(
+      verdict,
+    );
   });
 
   it("cold-critic step 실패: state에 error를 기록하고 PipelineStepError를 던진다", async () => {
@@ -238,7 +328,7 @@ describe("runPipeline", () => {
     const error = (await promise.catch((e: unknown) => e)) as PipelineStepError;
     expect(error.step).toBe("cold-critic");
 
-    // context-hunter·thesis는 완료, cold-critic 에러, solution-designer·verdict 대기
+    // context-hunter·thesis는 완료, cold-critic 에러, solution-designer·verdict 미실행
     const saved = store.loadRun(error.runId);
     expect(saved.steps.map((s) => s.status)).toEqual([
       "completed",
@@ -268,10 +358,11 @@ describe("runPipeline", () => {
     );
 
     expect(result.runId).toBe(error.runId);
-    // context-hunter·thesis는 1차에서 completed → skip, cold-critic·solution만 재실행
+    // context-hunter·thesis는 1차에서 completed → skip, cold-critic 이후만 재실행
     expect(calledSchemas(second.generateStructured)).toEqual([
       CriticismSchema,
       SolutionSchema,
+      VerdictSchema,
     ]);
     expect(youtube.collectVoices).not.toHaveBeenCalled();
 
@@ -281,7 +372,7 @@ describe("runPipeline", () => {
       "completed",
       "completed",
       "completed",
-      "pending",
+      "completed",
     ]);
     expect(saved.steps[2].errorMessage).toBeUndefined();
 
@@ -386,6 +477,7 @@ describe("runPipeline", () => {
         ThesisSchema,
         CriticismSchema,
         SolutionSchema,
+        VerdictSchema,
       ]);
 
       // context-hunter 프롬프트에 답변이 반영된다
@@ -419,6 +511,7 @@ describe("runPipeline", () => {
         ThesisSchema,
         CriticismSchema,
         SolutionSchema,
+        VerdictSchema,
       ]);
       expect(store.loadRun(runId).completedAt).toBeDefined();
     });

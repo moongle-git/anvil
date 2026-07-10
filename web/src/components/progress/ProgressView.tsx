@@ -14,6 +14,7 @@ const STEP_LABELS: Record<PipelineStepName, string> = {
   thesis: "낙관적 논제",
   "cold-critic": "냉정한 비판",
   "solution-designer": "AI 네이티브 재설계",
+  verdict: "최종 판정",
 };
 
 // 진행중 판정: startedAt 있고 completedAt·error 없음 (PRD 규칙)
