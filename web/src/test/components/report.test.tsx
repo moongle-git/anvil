@@ -9,15 +9,12 @@ import type {
 } from "@anvil/types";
 import type { RunDetail } from "@/lib/server/runs";
 import { CompetitorTable } from "@/components/report/CompetitorTable";
-import { CriticismSection } from "@/components/report/CriticismSection";
 import { MarketContextSection } from "@/components/report/MarketContextSection";
 import { MonetizationSection } from "@/components/report/MonetizationSection";
 import { SolutionSection } from "@/components/report/SolutionSection";
-import { ThesisSection } from "@/components/report/ThesisSection";
 import { VerdictBanner } from "@/components/report/VerdictBanner";
 import { ReportView } from "@/components/report/ReportView";
 import {
-  LEVER_BOLD_LEADIN,
   MONETIZATION_NUMBERED,
   REVISED_CONCEPT_NESTED,
 } from "../richTextFixtures";
@@ -247,78 +244,18 @@ describe("ReportView (조립)", () => {
     expect(nav.querySelector('a[href="#market"]')).not.toBeNull();
     expect(nav.querySelector('a[href="#thesis"]')).not.toBeNull();
     expect(nav.querySelector('a[href="#solution"]')).not.toBeNull();
-    // 정반합 5개 섹션이 모두 실제로 렌더링된다 (스텁 없음)
+    // 정반합 5개 섹션이 모두 실제로 렌더링된다 (스텁 없음).
+    // ②正/③反은 DialecticSplit의 좌우 컬럼 헤더로 나타난다.
     expect(screen.getByText("① 실시간 시장 맥락")).toBeDefined();
-    expect(screen.getByText("② 낙관적 논제 (正)")).toBeDefined();
-    expect(screen.getByText("해자와 카피캣")).toBeDefined();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "② 낙관적 가설 (正)" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "③ 냉정한 비판 (反)" }),
+    ).toBeDefined();
     expect(screen.getByText("재설계된 컨셉")).toBeDefined();
     expect(screen.getByText("⑤ 지속 가능한 비즈니스 모델")).toBeDefined();
     expect(screen.queryByText("다음 step에서 구현됩니다.")).toBeNull();
-  });
-});
-
-describe("ThesisSection", () => {
-  it("낙관 논제의 핵심 논지·수익 모델·성장 지렛대·시장 순풍을 렌더링한다", () => {
-    render(<ThesisSection thesis={thesis} />);
-    expect(
-      screen.getByText(
-        "회의 데이터 진입점을 선점하면 실행 추적 시장을 장악한다.",
-      ),
-    ).toBeDefined();
-    expect(screen.getByText("팀 좌석당 구독으로 확장한다.")).toBeDefined();
-    expect(screen.getByText("조직 내 바이럴 확산")).toBeDefined();
-    expect(screen.getByText("원격근무 확산")).toBeDefined();
-  });
-
-  it("thesis가 없으면 EmptyState를 보여준다 (구 run 하위호환)", () => {
-    render(<ThesisSection thesis={undefined} />);
-    expect(screen.getByText("낙관 논제 데이터가 없습니다")).toBeDefined();
-  });
-
-  it("성장 지렛대·시장 순풍의 볼드 리드인을 <strong>으로 렌더링한다 (** 노출 금지)", () => {
-    const { container } = render(
-      <ThesisSection
-        thesis={{
-          ...thesis,
-          growthLevers: [LEVER_BOLD_LEADIN],
-          marketTailwinds: [LEVER_BOLD_LEADIN],
-        }}
-      />,
-    );
-
-    expect(container.querySelectorAll("li > strong").length).toBe(2);
-    expect(container.textContent).not.toContain("**");
-  });
-});
-
-describe("CriticismSection", () => {
-  it("3축 서브섹션과 각 항목 카드(뱃지·claim)를 렌더링한다", () => {
-    render(<CriticismSection criticism={criticism} />);
-    expect(screen.getByText("페인포인트")).toBeDefined();
-    expect(screen.getByText("수익 모델")).toBeDefined();
-    expect(screen.getByText("해자와 카피캣")).toBeDefined();
-    expect(screen.getByText("페인포인트가 약하다")).toBeDefined();
-  });
-
-  it("evidence는 기본 접힘(Collapsible)이다", () => {
-    render(<CriticismSection criticism={criticism} />);
-    const summaries = screen.getAllByText("근거 보기");
-    // 항목 총 4개(painPoint 2 + bm 1 + copycat 1)
-    expect(summaries.length).toBe(4);
-    expect(summaries[0].closest("details")?.open).toBe(false);
-  });
-
-  it("마지막에 verdict 콜아웃(최종 판정)을 보여준다", () => {
-    render(<CriticismSection criticism={criticism} />);
-    expect(screen.getByText("최종 판정")).toBeDefined();
-    expect(
-      screen.getByText("현재 구조로는 시장에서 살아남기 어렵다."),
-    ).toBeDefined();
-  });
-
-  it("criticism이 없으면 EmptyState를 보여준다", () => {
-    render(<CriticismSection criticism={undefined} />);
-    expect(screen.getByText("비판 데이터가 없습니다")).toBeDefined();
   });
 });
 

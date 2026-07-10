@@ -61,7 +61,10 @@
     {
       "step": 7,
       "name": "dialectic-split",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T01:01:11+0900",
+      "completed_at": "2026-07-11T01:13:06+0900",
+      "summary": "正(2단계)과 反(3단계)을 공유 축(painPoint/bm/copycat) 위에 좌우로 대립시키는 Split View 신설, ThesisSection·CriticismSection 폐기. (1) web/src/components/report/DialecticSplit.tsx 신설(props: thesis?/criticism?) — <section id=\"dialectic\" aria-labelledby=\"thesis antithesis\" className=\"max-w-5xl\"> 안에 컬럼 헤더(<h2 id=\"thesis\">② 낙관적 가설 (正) / <h2 id=\"antithesis\">③ 냉정한 비판 (反), step 10 목차 앵커) → 리드 행(正 winningThesis 핵심 논지 카드 / 反 criticism.verdict '反의 소결론' 콜아웃(최종 판정 아님, ADR-010) + RiskRadar(buildRiskProfile+maxSeverity)) → DIALECTIC_AXES 순 축 행 3개(data-axis-row, 두 컬럼 걸친 DIALECTIC_AXIS_LABELS 소제목, grid-cols-1 lg:grid-cols-2로 같은 축 正/反 좌우 정렬, 모바일 세로 스택+正/反 라벨 칩 lg:hidden) → 正의 서사 보강 아코디언(수익모델·성장지렛대·시장순풍·최상시나리오). ThesisPoint 카드=claim 제목(renderInline)+rationale Collapsible '근거 보기'(data-thesis-id·data-axis); CriticismPoint 카드=RiskScoreBadge(severity+score+keyword)+claim 제목+evidence Collapsible+유효 rebuts 시 '이 낙관을 반박: {thesis claim}' 칩(indexById(thesis.points) 조회, 끊어진 참조·thesis 부재는 칩 없이 no-throw)(data-criticism-id·data-axis·data-rebuts). thesis undefined→좌 EmptyState, criticism undefined→우 EmptyState, 둘 다 없으면 섹션 전체 EmptyState 하나(구버전 run 하위호환 ADR-011). renderInline/renderRichText로 ** 노출 차단, severity 팔레트 외 새 색 0. (2) web/src/lib/risk.ts에 순수 함수 maxSeverity(criticism):CriticismSeverity 추가(fatal>major>minor, 빈/손상 데이터는 minor no-throw). (3) 삭제: ThesisSection.tsx·CriticismSection.tsx(참조 0). (4) ReportView.tsx: 두 컴포넌트 import를 DialecticSplit 하나로 교체(섹션 순서·VerdictBanner 불변 — 전체 재배치는 step 10). TDD: dialectic.test.tsx 신설(14 — 축 순서·축별 격리·라벨 소스·유효 rebuts claim 근접·t999 no-throw·thesis/criticism/양쪽 undefined 빈 상태·data-risk-* 노출·기본 접힘+클릭 열림·** 미노출·thesis/antithesis 앵커·h2+aria-labelledby·아코디언 볼드), risk.test.ts에 maxSeverity 3, report.test.tsx에서 ThesisSection/CriticismSection 블록 이관 삭제 및 ReportView 조립 단언을 DialecticSplit 컬럼 헤더(getByRole h2)로 갱신. 검증: npm run build 통과, npm test 통과(root 322 + web 197→207=529), npm run lint 통과. 앵커 id=thesis·id=antithesis, 삭제 파일 ThesisSection.tsx·CriticismSection.tsx."
     },
     {
       "step": 8,

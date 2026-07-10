@@ -3,6 +3,7 @@ import {
   DIALECTIC_AXIS_LABELS,
   type Criticism,
   type CriticismPoint,
+  type CriticismSeverity,
   type DialecticAxis,
 } from "@anvil/types";
 
@@ -66,4 +67,25 @@ export function indexById<T extends { id: string }>(
   items: readonly T[],
 ): Map<string, T> {
   return new Map(items.map((item) => [item.id, item]));
+}
+
+// 색·정렬용 severity 서열. fatal이 가장 위험하다.
+const SEVERITY_RANK: Record<CriticismSeverity, number> = {
+  minor: 0,
+  major: 1,
+  fatal: 2,
+};
+
+/**
+ * criticism.points 중 가장 높은 severity. RiskRadar 폴리곤 색을 결정한다.
+ * 빈 배열·구버전/손상 데이터는 'minor'로 수렴한다 (no-throw).
+ */
+export function maxSeverity(criticism: Criticism): CriticismSeverity {
+  return criticism.points.reduce<CriticismSeverity>(
+    (worst, point) =>
+      SEVERITY_RANK[point.severity] > SEVERITY_RANK[worst]
+        ? point.severity
+        : worst,
+    "minor",
+  );
 }

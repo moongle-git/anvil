@@ -7,7 +7,12 @@ import {
   type DialecticAxis,
   type ThesisPoint,
 } from "@anvil/types";
-import { buildRiskProfile, groupPointsByAxis, indexById } from "@/lib/risk";
+import {
+  buildRiskProfile,
+  groupPointsByAxis,
+  indexById,
+  maxSeverity,
+} from "@/lib/risk";
 
 function point(
   id: string,
@@ -134,6 +139,36 @@ describe("groupPointsByAxis", () => {
 
     expect(grouped.painPoint[0]?.rationale).toBe("근거");
     expect(grouped.bm).toEqual([]);
+  });
+});
+
+describe("maxSeverity", () => {
+  it("가장 높은 severity를 반환한다 (fatal > major > minor)", () => {
+    expect(
+      maxSeverity(
+        criticismOf([
+          point("c1", "painPoint", 20, "약한 통증"), // minor
+          point("c2", "bm", 90, "치명적 침식"), // fatal
+          point("c3", "copycat", 50, "중간"), // major
+        ]),
+      ),
+    ).toBe("fatal");
+  });
+
+  it("최고가 major면 major를 반환한다", () => {
+    expect(
+      maxSeverity(
+        criticismOf([
+          point("c1", "painPoint", 20, "약한 통증"), // minor
+          point("c2", "bm", 50, "가격 침식"), // major
+        ]),
+      ),
+    ).toBe("major");
+  });
+
+  it("points가 비어도 throw하지 않고 minor를 반환한다 (구버전·손상 데이터)", () => {
+    expect(() => maxSeverity(criticismOf([]))).not.toThrow();
+    expect(maxSeverity(criticismOf([]))).toBe("minor");
   });
 });
 

@@ -1,11 +1,10 @@
 import type { RunDetail } from "@/lib/server/runs";
-import { CriticismSection } from "./CriticismSection";
+import { DialecticSplit } from "./DialecticSplit";
 import { MarketContextSection } from "./MarketContextSection";
 import { MonetizationSection } from "./MonetizationSection";
 import { ReportHeader } from "./ReportHeader";
 import { SectionNav } from "./SectionNav";
 import { SolutionSection } from "./SolutionSection";
-import { ThesisSection } from "./ThesisSection";
 import { VerdictBanner } from "./VerdictBanner";
 
 interface ReportViewProps {
@@ -32,8 +31,7 @@ export function ReportView({ detail }: ReportViewProps) {
         </div>
         <div className="flex min-w-0 max-w-3xl flex-col gap-12">
           <MarketContextSection context={context} />
-          <ThesisSection thesis={thesis} />
-          <CriticismSection criticism={criticism} />
+          <DialecticSplit thesis={thesis} criticism={criticism} />
           <SolutionSection solution={solution} />
           <MonetizationSection solution={solution} />
         </div>
