@@ -7,7 +7,8 @@
       "name": "design-docs",
       "status": "completed",
       "started_at": "2026-07-10T23:46:03+0900",
-      "summary": "가드레일 문서 4종을 정반합 5단계 순차 논증으로 전환 — PRD(핵심 기능 5개·리포트 5단계 서사·컴포넌트 매핑·요약 배너 제거·Phase 2 섹션), UI_GUIDE(원칙 2 순차 논증·Split View max-w-5xl 예외·RiskRadar/SurvivalGauge/RiskScoreBadge 규격·정보 밀도 규칙·안티패턴 1행), ARCHITECTURE(thesis/verdict/questions/answers.json·6 step 흐름·report 컴포넌트·렌더링 패턴), ADR-008~011 append. 코드 변경 0."
+      "summary": "가드레일 문서 4종을 정반합 5단계 순차 논증으로 전환 — PRD(핵심 기능 5개·리포트 5단계 서사·컴포넌트 매핑·요약 배너 제거·Phase 2 섹션), UI_GUIDE(원칙 2 순차 논증·Split View max-w-5xl 예외·RiskRadar/SurvivalGauge/RiskScoreBadge 규격·정보 밀도 규칙·안티패턴 1행), ARCHITECTURE(thesis/verdict/questions/answers.json·6 step 흐름·report 컴포넌트·렌더링 패턴), ADR-008~011 append. 코드 변경 0.",
+      "completed_at": "2026-07-10T23:52:03+0900"
     },
     {
       "step": 1,
