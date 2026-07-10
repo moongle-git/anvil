@@ -2,11 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import type { GeminiService } from "../services/gemini.js";
 import {
   CriticismSchema,
+  DIALECTIC_AXES,
+  SEVERITY_SCORE_BANDS,
   type Criticism,
   type MarketContext,
   type Thesis,
 } from "../types/index.js";
-import { runColdCritic, type ColdCriticDeps } from "./coldCritic.js";
+import {
+  COLD_CRITIC_SYSTEM_PROMPT,
+  runColdCritic,
+  type ColdCriticDeps,
+} from "./coldCritic.js";
 
 const IDEA = "반려견 산책 대행 매칭 서비스";
 
@@ -184,5 +190,53 @@ describe("runColdCritic", () => {
     expect(prompt).toContain("산책 시킬 시간이 없어서 너무 미안해요...");
     expect(prompt).toContain("펫 시장 성장");
     expect(prompt).toContain("죄책감이라는 강한 감정 트리거가 반복 결제를 이끈다");
+  });
+
+  it("유저 프롬프트에 Thesis points의 id가 노출되어 rebuts 대상이 된다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await runColdCritic(deps, IDEA, MARKET_CONTEXT, THESIS);
+
+    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+
+    // rebuts에 적을 id는 프롬프트에 직렬화된 Thesis JSON에서 읽어야 한다
+    for (const point of THESIS.points) {
+      expect(prompt).toContain(`"id": "${point.id}"`);
+    }
+    expect(prompt).toContain("rebuts");
+  });
+});
+
+describe("COLD_CRITIC_SYSTEM_PROMPT (points 출력 계약)", () => {
+  it.each(DIALECTIC_AXES)("axis 값 %s를 명시한다", (axis) => {
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain(axis);
+  });
+
+  // 프롬프트에 박힌 숫자가 스키마 상수와 어긋나면 Gemini가 3회 재시도 후 실패한다.
+  // 하드코딩 두 벌이 갈라지지 않도록 상수에서 읽어 검증한다.
+  it.each(Object.entries(SEVERITY_SCORE_BANDS))(
+    "severity %s의 riskScore 밴드 경계를 상수 그대로 담는다",
+    (severity, band) => {
+      expect(COLD_CRITIC_SYSTEM_PROMPT).toContain(
+        `${severity}: ${band.min}~${band.max}`,
+      );
+    },
+  );
+
+  it("rebuts·riskScore·riskKeyword 작성 규칙을 담는다", () => {
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("rebuts");
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("riskScore");
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("riskKeyword");
+    // riskKeyword는 문장이 아니라 짧은 명사구다
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("명사구");
+  });
+
+  it("verdict가 反의 소결론이며 리포트의 최종 판정이 아님을 명시한다 (ADR-010)", () => {
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("소결론");
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("최종 판정이 아니다");
+  });
+
+  it("세 축을 각각 최소 1개씩 덮으라고 지시한다", () => {
+    expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("최소 1개");
   });
 });

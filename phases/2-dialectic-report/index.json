@@ -21,7 +21,10 @@
     {
       "step": 2,
       "name": "agent-prompts",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T00:06:51+0900",
+      "summary": "step 1 스키마에 맞춰 에이전트 4종의 프롬프트 문자열만 재작성(로직·시그니처 무변경). (1) contextHunter — 시스템 프롬프트에 '건조한 팩트' 톤(낙관/비관은 다음 단계 正/反의 일)과 인사이트 4필드 작성 지시 추가: briefing(3~5문장 애널리스트 브리핑), marketSizeIndicators(정량 지표만, 미확인 시 추측 말고 빈 배열), competitorInsight(빈 가격대·소진된 차별화 축을 읽어낸 판단), voicesInsight(말하지 않은 것까지 읽는 해석 + youtubeVoices 빈 배열이면 목소리를 지어내지 말고 '수집된 목소리 없음'과 웹검색 의존 한계를 진술). PROMPT_TEMPLATE의 출력 형식 JSON 예시를 새 4필드 포함해 갱신 — useGrounding:true라 responseJsonSchema를 못 써 이 예시가 유일한 형식 지시다. YOUTUBE_EMPTY_SECTION·formatYoutubeSection·YouTube 실패 fallback 불변. (2) thesis — points 세 축 커버리지 지시(painPoint 실재/bm 지불의사/copycat 해자), id 't1'부터 순번·중복 금지, claim은 한 문장 단정, rationale은 MarketContext 인용. growthLevers에 바이럴 루프, revenueModel에 유료 전환 수익화 경로 요구. 기존 서사 5필드 유지. (3) coldCritic — 3그룹 배열 폐기에 맞춰 points[]+axis로 전환, 세 축 각 최소 1개 커버리지, Thesis points[].id를 rebuts에 적어 정면 반박(같은 축 최소 1개 필수, 없으면 생략), riskScore 밴드를 명시 숫자로 박음(minor 0~33 / major 34~66 / fatal 67~100, severity 먼저 정하고 밴드 안에서 채점), riskKeyword는 2~10자 명사구(문장 금지), verdict는 反 소결론이며 '최종 판정이 아니다'(ADR-010)를 명시해 사망선고 참칭 차단. 페르소나·완충표현 금지·evidence 인용 강제·severity 정의 유지. (4) solutionDesigner — 合을 '단순 절충이 아닌 피벗 전략(비판을 방어하거나 우회해 새 비즈니스 가치 창출)'으로 재정의, synthesis를 프롬프트로 사실상 필수화(스키마는 하위호환상 optional 유지), 비판 수용 강제를 criticism.points의 severity fatal·major 각 항목 대응으로 갱신하고 폐기된 painPointReality/bmWeakness/copycatRisk 필드명 제거. TDD로 테스트 선작성(29→57 tests, 루트 249→286): 프롬프트 전문 비교 대신 계약 검증 — 축 이름·필드명 포함, 밴드 숫자는 SEVERITY_SCORE_BANDS 상수에서 읽어 대조(하드코딩 두 벌 분기 차단), JSON 예시 키는 MarketContextSchema.shape에서 도출, prompt에 MarketContext/Thesis JSON 직렬화 및 points[].id 노출, schema 동일 참조, runContextHunter만 useGrounding:true, 폐기 필드명 부재. 검증: npx tsc --noEmit 통과, npx vitest run 286 tests 통과(API 키 없이도), eslint 통과. src/types·web/·verdict.ts 미수정.",
+      "completed_at": "2026-07-11T00:14:30+0900"
     },
     {
       "step": 3,

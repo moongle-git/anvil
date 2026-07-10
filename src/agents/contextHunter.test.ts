@@ -6,7 +6,12 @@ import type {
   YoutubeVideo,
 } from "../services/youtube.js";
 import { MarketContextSchema, type MarketContext } from "../types/index.js";
-import { runContextHunter, type ContextHunterDeps } from "./contextHunter.js";
+import {
+  CONTEXT_HUNTER_PROMPT_TEMPLATE,
+  CONTEXT_HUNTER_SYSTEM_PROMPT,
+  runContextHunter,
+  type ContextHunterDeps,
+} from "./contextHunter.js";
 
 const IDEA = "반려견 산책 대행 매칭 서비스";
 
@@ -183,5 +188,52 @@ describe("runContextHunter (YouTube 실패 내성)", () => {
 
     expect(result).toEqual(MARKET_CONTEXT);
     expect(generateStructured).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CONTEXT_HUNTER_PROMPT_TEMPLATE (출력 형식 계약)", () => {
+  // 이 에이전트만 useGrounding: true라 responseJsonSchema를 못 쓴다.
+  // 프롬프트의 JSON 예시가 유일한 형식 지시이므로 키 하나만 빠져도 검증이 실패한다.
+  it("JSON 예시가 MarketContextSchema의 모든 최상위 키를 담는다", () => {
+    for (const key of Object.keys(MarketContextSchema.shape)) {
+      expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain(`"${key}"`);
+    }
+  });
+
+  it.each(["briefing", "marketSizeIndicators", "competitorInsight", "voicesInsight"])(
+    "JSON 예시에 인사이트 필드 %s가 있다",
+    (field) => {
+      expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain(`"${field}"`);
+    },
+  );
+});
+
+describe("CONTEXT_HUNTER_SYSTEM_PROMPT (인사이트 변환 지시)", () => {
+  it.each(["briefing", "marketSizeIndicators", "competitorInsight", "voicesInsight"])(
+    "인사이트 필드 %s의 작성 지시를 담는다",
+    (field) => {
+      expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain(field);
+    },
+  );
+
+  it("건조한 팩트 톤을 지시하고 낙관·비관을 다음 단계로 미룬다", () => {
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("건조");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("낙관");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("비관");
+  });
+
+  it("marketSizeIndicators는 확인되지 않으면 빈 배열로 두라고 지시한다", () => {
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("빈 배열");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("추측");
+  });
+
+  it("youtubeVoices가 비었을 때 voicesInsight에 그 한계를 진술하라고 지시한다", () => {
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("youtubeVoices");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("지어내지");
+  });
+
+  it("댓글 원문 보존 규칙을 유지한다", () => {
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("요약하지 말");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("원문");
   });
 });

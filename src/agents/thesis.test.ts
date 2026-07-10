@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GeminiService } from "../services/gemini.js";
 import {
+  DIALECTIC_AXES,
   ThesisSchema,
   type MarketContext,
   type Thesis,
 } from "../types/index.js";
-import { runThesis, type ThesisDeps } from "./thesis.js";
+import {
+  THESIS_PROMPT_TEMPLATE,
+  THESIS_SYSTEM_PROMPT,
+  runThesis,
+  type ThesisDeps,
+} from "./thesis.js";
 
 const IDEA = "반려견 산책 대행 매칭 서비스";
 
@@ -130,5 +136,31 @@ describe("runThesis", () => {
     expect(prompt).toContain(JSON.stringify(MARKET_CONTEXT, null, 2));
     expect(prompt).toContain("도그메이트");
     expect(prompt).toContain("산책 시킬 시간이 없어서 너무 미안해요...");
+  });
+});
+
+describe("THESIS_SYSTEM_PROMPT (points 출력 계약)", () => {
+  // 反이 같은 축 위에서 정면 반박하려면 正이 세 축을 모두 세워야 한다 (ADR-011)
+  it.each(DIALECTIC_AXES)("axis 값 %s를 명시한다", (axis) => {
+    expect(THESIS_SYSTEM_PROMPT).toContain(axis);
+  });
+
+  it("points 항목의 id·claim·rationale 작성 규칙을 담는다", () => {
+    expect(THESIS_SYSTEM_PROMPT).toContain("points");
+    expect(THESIS_SYSTEM_PROMPT).toContain("claim");
+    expect(THESIS_SYSTEM_PROMPT).toContain("rationale");
+    expect(THESIS_SYSTEM_PROMPT).toContain('"t1"');
+    expect(THESIS_SYSTEM_PROMPT).toContain("한 문장");
+  });
+
+  it("正의 본질인 바이럴 루프·수익화 경로 지시를 담는다", () => {
+    expect(THESIS_SYSTEM_PROMPT).toContain("바이럴 루프");
+    expect(THESIS_SYSTEM_PROMPT).toContain("수익화 경로");
+  });
+});
+
+describe("THESIS_PROMPT_TEMPLATE (세 축 커버리지 요구)", () => {
+  it.each(DIALECTIC_AXES)("축 %s의 낙관 주장을 요구한다", (axis) => {
+    expect(THESIS_PROMPT_TEMPLATE).toContain(axis);
   });
 });

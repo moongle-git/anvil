@@ -8,6 +8,8 @@ import {
   type Thesis,
 } from "../types/index.js";
 import {
+  SOLUTION_DESIGNER_PROMPT_TEMPLATE,
+  SOLUTION_DESIGNER_SYSTEM_PROMPT,
   runSolutionDesigner,
   type SolutionDesignerDeps,
 } from "./solutionDesigner.js";
@@ -203,4 +205,31 @@ describe("runSolutionDesigner", () => {
     expect(prompt).toContain("현 구조로는 사업 성립이 어렵다");
     expect(prompt).toContain("죄책감이라는 강한 감정 트리거가 반복 결제를 이끈다");
   });
+});
+
+describe("SOLUTION_DESIGNER 프롬프트 (合 = 피벗 전략)", () => {
+  it("合을 단순 절충이 아닌 피벗 전략으로 정의한다", () => {
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("피벗");
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("우회");
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("단순 절충");
+  });
+
+  it("synthesis를 스키마상 optional이지만 사실상 필수로 요구한다", () => {
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("synthesis");
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("반드시");
+  });
+
+  it("평탄화된 criticism.points를 참조하고 severity로 대응 대상을 지정한다", () => {
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("criticism.points");
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("severity");
+  });
+
+  // ADR-011로 사라진 3그룹 배열을 프롬프트가 계속 가리키면 에이전트가 없는 필드를 읽으려 한다
+  it.each(["painPointReality", "bmWeakness", "copycatRisk"])(
+    "폐기된 Criticism 필드명 %s를 언급하지 않는다",
+    (legacyField) => {
+      expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).not.toContain(legacyField);
+      expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).not.toContain(legacyField);
+    },
+  );
 });
