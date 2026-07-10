@@ -499,6 +499,18 @@ class TestUsageLimit:
                 executor._invoke_claude(self.STEP, "preamble")
         assert exc_info.value.reset_epoch == 1751700000
 
+    def test_detects_session_limit_phrase(self, executor):
+        # 실제 CLI가 반환한 문구 (2026-07-06 캡처): usage/rate 대신 'session limit'을 쓴다
+        stdout = (
+            '{"type":"result","subtype":"success","is_error":true,"api_error_status":429,'
+            '"result":"You\'ve hit your session limit · resets 5am (Asia/Seoul)"}'
+        )
+        mock_result = MagicMock(returncode=1, stdout=stdout, stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            with pytest.raises(ex.UsageLimitExceeded) as exc_info:
+                executor._invoke_claude(self.STEP, "preamble")
+        assert exc_info.value.reset_epoch is None
+
     def test_no_false_positive_on_successful_step(self, executor):
         # 성공한 step의 요약이 'rate limit'을 언급해도 오탐하지 않는다
         stdout = '{"is_error": false, "result": "YouTube API rate limit 대응 로직 구현 완료"}'

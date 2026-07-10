@@ -14,6 +14,24 @@ describe("SolutionSchema", () => {
     expect(SolutionSchema.safeParse(validSolution).success).toBe(true);
   });
 
+  it("synthesis 없이도 허용한다 (옵셔널, 구 solution.json 하위호환)", () => {
+    expect(SolutionSchema.safeParse(validSolution).success).toBe(true);
+  });
+
+  it("synthesis가 있으면 허용한다", () => {
+    const result = SolutionSchema.safeParse({
+      ...validSolution,
+      synthesis:
+        "낙관론의 성장 동력과 반론의 이탈 리스크를 종합하면 '실패 없는 케어' 가치가 핵심이다.",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("synthesis가 빈 문자열이면 거부한다", () => {
+    const result = SolutionSchema.safeParse({ ...validSolution, synthesis: "" });
+    expect(result.success).toBe(false);
+  });
+
   it.each([
     "minimalInput",
     "agenticWorkflow",

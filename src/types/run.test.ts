@@ -7,9 +7,11 @@ import {
 } from "./run.js";
 
 describe("PIPELINE_STEPS", () => {
-  it("파이프라인 step 이름을 순서대로 담는다", () => {
+  it("파이프라인 step 이름을 정반합 순서대로 담는다", () => {
     expect(PIPELINE_STEPS).toEqual([
+      "interviewer",
       "context-hunter",
+      "thesis",
       "cold-critic",
       "solution-designer",
     ]);
@@ -17,9 +19,12 @@ describe("PIPELINE_STEPS", () => {
 });
 
 describe("StepStatusSchema", () => {
-  it.each(["pending", "completed", "error"])("'%s'를 허용한다", (status) => {
-    expect(StepStatusSchema.parse(status)).toBe(status);
-  });
+  it.each(["pending", "completed", "error", "waiting"])(
+    "'%s'를 허용한다",
+    (status) => {
+      expect(StepStatusSchema.parse(status)).toBe(status);
+    },
+  );
 
   it("정의되지 않은 status를 거부한다", () => {
     expect(StepStatusSchema.safeParse("running").success).toBe(false);
@@ -72,6 +77,33 @@ describe("RunStateSchema", () => {
     const result = RunStateSchema.safeParse({
       ...validRunState,
       completedAt: "2026-07-04T12:10:00.000Z",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("interview 필드가 없는 구 state.json은 interview=false로 파싱한다", () => {
+    const result = RunStateSchema.safeParse(validRunState);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.interview).toBe(false);
+    }
+  });
+
+  it("interview=true를 허용한다", () => {
+    const result = RunStateSchema.safeParse({
+      ...validRunState,
+      interview: true,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.interview).toBe(true);
+    }
+  });
+
+  it("waiting 상태의 step을 포함한 RunState를 허용한다", () => {
+    const result = RunStateSchema.safeParse({
+      ...validRunState,
+      steps: [{ name: "interviewer", status: "waiting" }],
     });
     expect(result.success).toBe(true);
   });

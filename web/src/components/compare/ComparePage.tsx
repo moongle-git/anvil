@@ -186,7 +186,7 @@ export function ComparePage({ runA, runB }: ComparePageProps) {
           a={currentA}
           b={currentB}
           render={(detail) => (
-            <dl className="space-y-2 text-[15px] leading-relaxed text-neutral-700">
+            <dl className="space-y-2 text-[15px] leading-[1.8] text-neutral-700">
               <div>
                 <dt className="text-xs font-medium text-neutral-500">실행 일시</dt>
                 <dd className="tabular-nums">{formatDateTime(detail.state.createdAt)}</dd>
@@ -209,7 +209,7 @@ export function ComparePage({ runA, runB }: ComparePageProps) {
           a={currentA}
           b={currentB}
           render={(detail) => (
-            <p className="text-[15px] leading-relaxed text-neutral-700">
+            <p className="text-[15px] leading-[1.8] text-neutral-700">
               {detail.criticism?.verdict ?? "verdict 없음"}
             </p>
           )}
@@ -219,7 +219,7 @@ export function ComparePage({ runA, runB }: ComparePageProps) {
           a={currentA}
           b={currentB}
           render={(detail) => (
-            <p className="text-[15px] leading-relaxed text-neutral-700">
+            <p className="text-[15px] leading-[1.8] text-neutral-700">
               {detail.solution?.revisedConcept ?? "revisedConcept 없음"}
             </p>
           )}
@@ -229,7 +229,7 @@ export function ComparePage({ runA, runB }: ComparePageProps) {
           a={currentA}
           b={currentB}
           render={(detail) => (
-            <p className="text-[15px] leading-relaxed text-neutral-700">
+            <p className="text-[15px] leading-[1.8] text-neutral-700">
               {detail.solution?.monetization ?? "monetization 없음"}
             </p>
           )}

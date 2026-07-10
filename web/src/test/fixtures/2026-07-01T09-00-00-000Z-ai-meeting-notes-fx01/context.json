@@ -1,0 +1,120 @@
+{
+  "ideaTitle": "AI 회의록 요약 및 액션아이템 자동 추출 서비스",
+  "trends": [
+    "2025년 이후 AI 회의 비서 시장이 연 30% 이상 성장하며 화상회의 플랫폼의 기본 기능으로 흡수되는 추세",
+    "Zoom·Google Meet·Teams가 자체 AI 요약 기능을 무료 번들로 제공하기 시작",
+    "국내 기업의 보안 규정 때문에 온프레미스·프라이빗 처리 수요가 별도 세그먼트로 형성",
+    "회의록 요약을 넘어 액션아이템의 실행 추적(태스크 툴 연동)으로 경쟁 축이 이동",
+    "STT 정확도가 상향 평준화되면서 요약 품질 자체는 차별화 요소로서 약화"
+  ],
+  "competitors": [
+    {
+      "name": "클로바노트",
+      "description": "네이버의 음성 기록·요약 서비스. 한국어 STT 정확도가 높고 무료 사용량이 넉넉하다",
+      "url": "https://clovanote.naver.com",
+      "pricingHint": "무료(월 300분) + 프리미엄"
+    },
+    {
+      "name": "Otter.ai",
+      "description": "영어권 대표 회의 전사·요약 서비스. Zoom/Meet 자동 참여 봇 제공",
+      "url": "https://otter.ai",
+      "pricingHint": "무료 + $16.99/월"
+    },
+    {
+      "name": "Fireflies.ai",
+      "description": "회의 녹음·전사·요약과 CRM 연동에 강한 미팅 어시스턴트",
+      "url": "https://fireflies.ai",
+      "pricingHint": "무료 + $18/월"
+    },
+    {
+      "name": "tl;dv",
+      "description": "회의 녹화 클립·타임스탬프 하이라이트 중심의 미팅 레코더",
+      "url": "https://tldv.io",
+      "pricingHint": "무료 + $29/월"
+    },
+    {
+      "name": "Notta",
+      "description": "일본계 다국어 전사 서비스. 한국어 포함 58개 언어 지원",
+      "url": "https://www.notta.ai",
+      "pricingHint": "무료 + $14.99/월"
+    },
+    {
+      "name": "Fathom",
+      "description": "개인 사용자 무료 정책으로 급성장한 미팅 요약 도구",
+      "url": "https://fathom.video",
+      "pricingHint": "개인 무료 + 팀 유료"
+    },
+    {
+      "name": "Tactiq",
+      "description": "브라우저 확장 기반 실시간 자막·요약. 봇 없이 동작하는 점이 특징",
+      "url": "https://tactiq.io",
+      "pricingHint": "무료 + $12/월"
+    },
+    {
+      "name": "Sembly AI",
+      "description": "회의 인사이트·리스크 항목 추출 등 분석형 기능에 집중",
+      "url": "https://www.sembly.ai",
+      "pricingHint": "무료 + $10/월"
+    },
+    {
+      "name": "MeetGeek",
+      "description": "회의 KPI·대화 분석 리포트를 제공하는 미팅 인텔리전스 툴",
+      "url": "https://meetgeek.ai",
+      "pricingHint": "무료 + $15/월"
+    },
+    {
+      "name": "티로(Tiro)",
+      "description": "국내 스타트업의 회의록 자동화 서비스. 한국어 회의 문화(존칭·직급)에 최적화",
+      "url": "https://tiro.ooo",
+      "pricingHint": "팀 단위 구독"
+    },
+    {
+      "name": "Zoom AI Companion",
+      "description": "Zoom 유료 플랜에 번들로 포함된 회의 요약·질의응답 기능",
+      "url": "https://www.zoom.com",
+      "pricingHint": "Zoom 유료 플랜 번들"
+    }
+  ],
+  "youtubeVoices": [
+    {
+      "videoTitle": "AI 회의록 툴 5개 한 달 써본 솔직 후기",
+      "videoUrl": "https://www.youtube.com/watch?v=fx01aaa0001",
+      "comment": "요약은 다 비슷비슷한데 결국 회의 끝나고 액션아이템 누가 뭘 하기로 했는지 정리하는 게 제일 귀찮아요. 그건 아직도 제가 손으로 해요.",
+      "authorName": "직장인K",
+      "likeCount": 214
+    },
+    {
+      "videoTitle": "클로바노트 vs Otter 비교",
+      "videoUrl": "https://www.youtube.com/watch?v=fx01bbb0002",
+      "comment": "회사 보안팀에서 외부 서버에 녹음 올리는 거 금지해서 결국 둘 다 못 쓰게 됐습니다. 사내망에서 돌아가는 게 있으면 바로 살 텐데요.",
+      "authorName": "보안팀과싸우는PM",
+      "likeCount": 158
+    },
+    {
+      "videoTitle": "회의 많은 회사에서 살아남기",
+      "videoUrl": "https://www.youtube.com/watch?v=fx01ccc0003",
+      "comment": "무료 요약 기능이 줌에 이미 들어있는데 왜 돈 내고 별도 툴을 써야 하는지 모르겠어요. 팀장님 설득이 안 됩니다.",
+      "authorName": "만년대리",
+      "likeCount": 96
+    },
+    {
+      "videoTitle": "스타트업 미팅 문화 개선기",
+      "videoUrl": "https://www.youtube.com/watch?v=fx01ddd0004",
+      "comment": "한국어 회의는 존칭이랑 말 끊기가 많아서 외국 툴 요약이 자주 틀려요. 결정사항이 반대로 정리된 적도 있어서 지금은 검수를 이중으로 합니다.",
+      "authorName": "seed단계CEO",
+      "likeCount": 67
+    }
+  ],
+  "painPointEvidence": [
+    "요약 자체보다 액션아이템 후속 추적이 수작업으로 남아 있다는 불만이 반복적으로 관찰됨",
+    "기업 보안 정책상 외부 클라우드 업로드가 차단되어 SaaS형 도구를 도입하지 못하는 사례 다수",
+    "화상회의 플랫폼 번들 기능 대비 유료 결제를 정당화할 근거를 실무자가 제시하기 어려움",
+    "한국어 특유의 화법(존칭·간접 화법)에서 결정사항 오추출이 발생해 재검수 비용이 발생"
+  ],
+  "sources": [
+    "https://www.grandviewresearch.com/industry-analysis/ai-meeting-assistants-market-report",
+    "https://blog.zoom.us/ai-companion-updates",
+    "https://www.notta.ai/en/blog/meeting-transcription-tools",
+    "https://tiro.ooo/blog/korean-meeting-culture"
+  ]
+}

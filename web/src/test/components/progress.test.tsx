@@ -1,26 +1,31 @@
-import { act } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RunDetailPage } from "@/components/progress/RunDetailPage";
 import {
-  completedDetail,
-  errorDetail,
-  ERROR_ID,
-  runningDetail,
-  RUNNING_ID,
-} from "@/test/clientFixtures";
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RunState, StepState } from "@anvil/types";
+import type { RunDetail } from "@/lib/server/runs";
+import { ProgressView } from "@/components/progress/ProgressView";
+import { RunDetailClient } from "@/components/progress/RunDetailClient";
+import { useRunDetail } from "@/components/progress/useRunDetail";
+
+const fetchMock = vi.fn();
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+  return {
+    ok: status >= 200 && status < 300,
     status,
-    headers: { "content-type": "application/json" },
-  });
+    json: async () => body,
+  } as Response;
 }
 
-let fetchMock: ReturnType<typeof vi.fn>;
-
 beforeEach(() => {
-  fetchMock = vi.fn();
+  fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -28,79 +33,361 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
-  vi.clearAllMocks();
 });
 
-async function flushAsyncState() {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+// --- RunDetail 빌더 ---
+
+function makeState(steps: StepState[], completedAt?: string): RunState {
+  return {
+    runId: "r1",
+    idea: "반려식물 케어 구독 서비스",
+    createdAt: "2026-07-03T14:00:00.000Z",
+    steps,
+    interview: false,
+    ...(completedAt ? { completedAt } : {}),
+  };
 }
 
-describe("RunDetailPage", () => {
-  it("진행중 run의 3단계 스테퍼와 번역 라벨을 렌더링한다", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(runningDetail()));
+const RUNNING_STEPS: StepState[] = [
+  {
+    name: "context-hunter",
+    status: "completed",
+    startedAt: "2026-07-03T14:00:01.000Z",
+    completedAt: "2026-07-03T14:01:45.000Z",
+  },
+  { name: "cold-critic", status: "pending" },
+  { name: "solution-designer", status: "pending" },
+];
 
-    render(<RunDetailPage runId={RUNNING_ID} />);
+const runningDetail: RunDetail = {
+  state: makeState(RUNNING_STEPS),
+  status: "running",
+  hasReport: false,
+};
 
-    expect(await screen.findByRole("heading", { name: /시장 조사/ })).toBeDefined();
-    expect(screen.getByRole("heading", { name: /냉정한 비판/ })).toBeDefined();
-    expect(screen.getByRole("heading", { name: /AI 네이티브 재설계/ })).toBeDefined();
-    expect(screen.getAllByText("진행중").length).toBeGreaterThan(0);
+const inProgressDetail: RunDetail = {
+  state: makeState([
+    { ...RUNNING_STEPS[0] },
+    {
+      name: "cold-critic",
+      status: "pending",
+      startedAt: "2026-07-03T14:01:45.000Z",
+    },
+    { name: "solution-designer", status: "pending" },
+  ]),
+  status: "running",
+  hasReport: false,
+};
+
+const errorDetail: RunDetail = {
+  state: makeState([
+    { ...RUNNING_STEPS[0] },
+    {
+      name: "cold-critic",
+      status: "error",
+      startedAt: "2026-07-03T14:01:45.000Z",
+      failedAt: "2026-07-03T14:01:50.000Z",
+      errorMessage: "검색 API 호출에 실패했습니다",
+    },
+    { name: "solution-designer", status: "pending" },
+  ]),
+  status: "error",
+  hasReport: false,
+};
+
+const stalledDetail: RunDetail = {
+  state: makeState(RUNNING_STEPS),
+  status: "stalled",
+  hasReport: false,
+};
+
+const completedDetail: RunDetail = {
+  state: makeState(
+    RUNNING_STEPS.map((s) => ({
+      ...s,
+      status: "completed" as const,
+      startedAt: "2026-07-03T14:00:01.000Z",
+      completedAt: "2026-07-03T14:01:45.000Z",
+    })),
+    "2026-07-03T14:05:00.000Z",
+  ),
+  status: "completed",
+  hasReport: true,
+};
+
+const waitingDetail: RunDetail = {
+  state: {
+    runId: "r1",
+    idea: "AI로 사람들을 도와주는 앱",
+    createdAt: "2026-07-03T14:00:00.000Z",
+    steps: [
+      {
+        name: "interviewer",
+        status: "waiting",
+        startedAt: "2026-07-03T14:00:01.000Z",
+      },
+      { name: "context-hunter", status: "pending" },
+    ],
+    interview: true,
+  },
+  status: "waiting",
+  hasReport: false,
+  questions: {
+    questions: [
+      { id: "q1", question: "핵심 타깃은 누구인가?", why: "검증 방향이 달라진다" },
+    ],
+  },
+};
+
+describe("useRunDetail (폴링)", () => {
+  it("running이면 intervalMs마다 폴링하고 completed면 멈춘다", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(runningDetail))
+      .mockResolvedValueOnce(jsonResponse(runningDetail))
+      .mockResolvedValueOnce(jsonResponse(completedDetail));
+
+    const { result } = renderHook(() => useRunDetail("r1", 2000));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.detail?.status).toBe("completed");
+
+    // completed 이후에는 더 이상 폴링하지 않는다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("error step 메시지와 resume 버튼을 렌더링하고 POST를 호출한다", async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === "POST") {
-        return Promise.resolve(jsonResponse({ runId: ERROR_ID }, 202));
-      }
-      return Promise.resolve(jsonResponse(errorDetail()));
+  it("404면 not-found로 폴링을 멈춘다", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(jsonResponse({ error: "없음" }, 404));
+
+    const { result } = renderHook(() => useRunDetail("missing", 2000));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
     });
+    expect(result.current.notFound).toBe(true);
 
-    render(<RunDetailPage runId={ERROR_ID} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
-    expect(await screen.findByText("모델 호출 실패")).toBeDefined();
+  it("error 상태면 폴링을 멈춘다 (사용자 resume 대기)", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(jsonResponse(errorDetail));
+
+    renderHook(() => useRunDetail("r1", 2000));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("waiting이면 계속 폴링하고 running→completed 전이까지 이어간다", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(waitingDetail))
+      .mockResolvedValueOnce(jsonResponse(waitingDetail))
+      .mockResolvedValueOnce(jsonResponse(runningDetail))
+      .mockResolvedValueOnce(jsonResponse(completedDetail));
+
+    const { result } = renderHook(() => useRunDetail("r1", 2000));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.detail?.status).toBe("waiting");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // waiting에서도 폴링이 계속된다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.detail?.status).toBe("running");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.current.detail?.status).toBe("completed");
+
+    // completed 후에는 멈춘다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("ProgressView", () => {
+  it("내부 step명을 사용자 언어로 번역해 스테퍼를 렌더링한다", () => {
+    render(<ProgressView detail={runningDetail} onResume={() => { }} />);
+    expect(screen.getByText("시장 조사")).toBeDefined();
+    expect(screen.getByText("냉정한 비판")).toBeDefined();
+    expect(screen.getByText("AI 네이티브 재설계")).toBeDefined();
+  });
+
+  it("step 상태를 data-step-status로 노출한다 (완료/대기)", () => {
+    render(<ProgressView detail={runningDetail} onResume={() => { }} />);
+    expect(
+      document
+        .querySelector('[data-step-name="context-hunter"]')
+        ?.getAttribute("data-step-status"),
+    ).toBe("completed");
+    expect(
+      document
+        .querySelector('[data-step-name="cold-critic"]')
+        ?.getAttribute("data-step-status"),
+    ).toBe("pending");
+  });
+
+  it("startedAt 있고 completedAt 없으면 진행중(running)으로 표시한다", () => {
+    render(<ProgressView detail={inProgressDetail} onResume={() => { }} />);
+    expect(
+      document
+        .querySelector('[data-step-name="cold-critic"]')
+        ?.getAttribute("data-step-status"),
+    ).toBe("running");
+  });
+
+  it("step error면 errorMessage와 '이어서 실행'을 보여주고 클릭 시 onResume", () => {
+    const onResume = vi.fn();
+    render(<ProgressView detail={errorDetail} onResume={onResume} />);
+    expect(screen.getByText("검색 API 호출에 실패했습니다")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "이어서 실행" }));
+    expect(onResume).toHaveBeenCalledOnce();
+  });
 
-    await waitFor(() => {
+  it("run이 stalled면 중단 안내와 '이어서 실행'을 보여준다", () => {
+    const onResume = vi.fn();
+    render(<ProgressView detail={stalledDetail} onResume={onResume} />);
+    expect(screen.getByText(/중단된 것 같습니다/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "이어서 실행" }));
+    expect(onResume).toHaveBeenCalledOnce();
+  });
+});
+
+describe("RunDetailClient (분기)", () => {
+  it("completed면 리포트 뷰(제목·다운로드 링크)를 렌더링한다", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(completedDetail));
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", {
+          level: 1,
+          name: completedDetail.state.idea,
+        }),
+      ).toBeDefined(),
+    );
+    expect(
+      screen.getByRole("link", { name: "report.md 다운로드" }),
+    ).toBeDefined();
+  });
+
+  it("running이면 진행 뷰를 렌더링한다", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(runningDetail));
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() => expect(screen.getByText("시장 조사")).toBeDefined());
+  });
+
+  it("404면 not-found 안내를 렌더링한다", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: "없음" }, 404));
+    render(<RunDetailClient runId="missing" />);
+    await waitFor(() =>
+      expect(screen.getByText("run을 찾을 수 없습니다")).toBeDefined(),
+    );
+  });
+
+  it("최초 로딩이 실패하면 에러 카드를 보여주고 '다시 시도'로 복구한다", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue(jsonResponse(runningDetail));
+    render(<RunDetailClient runId="r1" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "다시 시도" }),
+      ).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(screen.getByText("시장 조사")).toBeDefined());
+  });
+
+  it("waiting이면 질문 폼을 렌더링하고, 답변 제출 시 POST answers를 호출한다", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/answers")) {
+        return jsonResponse({ runId: "r1" }, 202);
+      }
+      return jsonResponse(waitingDetail);
+    });
+    render(<RunDetailClient runId="r1" />);
+
+    await waitFor(() =>
+      expect(screen.getByText("몇 가지만 확인할게요")).toBeDefined(),
+    );
+    // 생성된 질문이 라벨로 렌더링된다
+    expect(screen.getByText(/핵심 타깃은 누구인가/)).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "답변 제출하고 분석 계속" }),
+    );
+
+    await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        `/api/runs/${ERROR_ID}/resume`,
+        expect.stringContaining("/api/runs/r1/answers"),
         expect.objectContaining({ method: "POST" }),
-      );
-    });
+      ),
+    );
   });
 
-  it("completed 상태면 리포트 뷰로 전환하고 폴링을 중단한다", async () => {
-    vi.useFakeTimers();
-    fetchMock.mockResolvedValue(jsonResponse(completedDetail()));
-
-    render(<RunDetailPage runId="completed-a" />);
-    await flushAsyncState();
-
-    expect(screen.getByText("① 시장 맥락")).toBeDefined();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+  it("resume 버튼 클릭 시 POST resume를 호출한다", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/resume")) {
+        return jsonResponse({ runId: "r1" }, 202);
+      }
+      return jsonResponse(errorDetail);
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "이어서 실행" }),
+      ).toBeDefined(),
+    );
 
-  it("404 응답이면 not-found 상태를 렌더링하고 폴링을 중단한다", async () => {
-    vi.useFakeTimers();
-    fetchMock.mockResolvedValue(jsonResponse({ error: "not found" }, 404));
-
-    render(<RunDetailPage runId="missing-run" />);
-    await flushAsyncState();
-
-    expect(screen.getByText("run을 찾을 수 없습니다")).toBeDefined();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "이어서 실행" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/runs/r1/resume"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
   });
 });

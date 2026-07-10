@@ -1,0 +1,36 @@
+{
+  "ideaTitle": "반려식물 케어 구독 서비스",
+  "trends": [
+    "홈가드닝 시장이 1인 가구 중심으로 성장하며 '반려식물' 키워드 검색량 증가",
+    "IoT 화분·수분 센서 등 하드웨어 결합형 서비스가 등장했으나 재구매율은 낮음"
+  ],
+  "competitors": [
+    {
+      "name": "Planta",
+      "description": "식물별 물주기 일정을 관리해주는 글로벌 1위 식물 관리 앱",
+      "url": "https://getplanta.com",
+      "pricingHint": "무료 + $7.99/월"
+    },
+    {
+      "name": "그루우",
+      "description": "국내 식물 진단·커머스 결합 앱. 사진으로 병충해 진단 제공",
+      "url": "https://groo.kr",
+      "pricingHint": "무료 + 커머스 수익"
+    }
+  ],
+  "youtubeVoices": [
+    {
+      "videoTitle": "식물 키우기 3년차가 말하는 실패 이유",
+      "videoUrl": "https://www.youtube.com/watch?v=fx02aaa0001",
+      "comment": "물주기 앱 깔아도 알림 무시하게 되더라고요. 결국 식물이 시들어야 정신차려요.",
+      "authorName": "초록손가락",
+      "likeCount": 42
+    }
+  ],
+  "painPointEvidence": [
+    "물주기 알림 앱의 알림 피로로 인한 이탈이 반복적으로 언급됨"
+  ],
+  "sources": [
+    "https://example.com/home-gardening-trend-2026"
+  ]
+}

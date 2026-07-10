@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* 시스템 폰트 스택 — 웹폰트 CDN 로드 금지 (docs/UI_GUIDE.md) */
+@theme {
+  --font-sans: Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+    "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* 한국어는 어절 단위로 줄바꿈한다. 없으면 단어 중간에서 끊겨 가독성이 떨어진다.
+   :where()로 특이도 0 — break-all 같은 개별 유틸리티가 언제나 이긴다. */
+:where(p, li, h1, h2, h3, h4, blockquote, summary, td, th, dt, dd) {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}

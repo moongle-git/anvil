@@ -1,0 +1,35 @@
+{
+  "ideaTitle": "직장인 점심 메뉴 추천 앱",
+  "trends": [
+    "점심 메뉴 결정 피로를 다루는 콘텐츠가 직장인 커뮤니티에서 꾸준히 소비됨",
+    "랜덤 추천 룰렛류 앱은 다수 존재하나 리텐션이 극히 낮음"
+  ],
+  "competitors": [
+    {
+      "name": "점심 뭐 먹지 룰렛",
+      "description": "랜덤 룰렛 방식의 점심 메뉴 추천 앱",
+      "pricingHint": "무료(광고)"
+    },
+    {
+      "name": "캐치테이블",
+      "description": "식당 예약·웨이팅 플랫폼. 직장인 점심 예약 수요를 흡수",
+      "url": "https://catchtable.co.kr",
+      "pricingHint": "무료 + 식당 수수료"
+    }
+  ],
+  "youtubeVoices": [
+    {
+      "videoTitle": "직장인 점심 브이로그",
+      "videoUrl": "https://www.youtube.com/watch?v=fx03aaa0001",
+      "comment": "메뉴 고르는 게 힘든 게 아니라 팀원들 취향 조율이 힘든 거예요. 앱이 그걸 해주진 않잖아요.",
+      "authorName": "회사원A",
+      "likeCount": 88
+    }
+  ],
+  "painPointEvidence": [
+    "개인 메뉴 선택보다 그룹 합의 비용이 실제 페인포인트라는 언급이 다수"
+  ],
+  "sources": [
+    "https://example.com/lunch-decision-fatigue"
+  ]
+}

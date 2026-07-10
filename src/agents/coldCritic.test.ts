@@ -4,6 +4,7 @@ import {
   CriticismSchema,
   type Criticism,
   type MarketContext,
+  type Thesis,
 } from "../types/index.js";
 import { runColdCritic, type ColdCriticDeps } from "./coldCritic.js";
 
@@ -31,6 +32,14 @@ const MARKET_CONTEXT: MarketContext = {
   ],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
+};
+
+const THESIS: Thesis = {
+  revenueModel: "산책 대행 수수료 + 반려견 건강 리포트 구독의 이중 수익 구조",
+  growthLevers: ["산책 인증 사진 공유 바이럴", "펫 커머스 크로스셀"],
+  marketTailwinds: ["1인 가구 반려동물 양육 증가"],
+  bestCaseScenario: "2년 내 월 활성 10만 가구 달성",
+  winningThesis: "죄책감이라는 강한 감정 트리거가 반복 결제를 이끈다",
 };
 
 const CRITICISM: Criticism = {
@@ -75,7 +84,7 @@ describe("runColdCritic", () => {
   it("grounding 없이 Criticism 스키마로 Gemini를 호출하고 결과를 반환한다", async () => {
     const { deps, generateStructured } = fakeDeps();
 
-    const result = await runColdCritic(deps, IDEA, MARKET_CONTEXT);
+    const result = await runColdCritic(deps, IDEA, MARKET_CONTEXT, THESIS);
 
     expect(result).toEqual(CRITICISM);
     expect(CriticismSchema.safeParse(result).success).toBe(true);
@@ -89,7 +98,7 @@ describe("runColdCritic", () => {
   it("시스템 프롬프트에 페르소나·3축 비판 기준·근거 인용 강제·severity 판정 기준이 포함된다", async () => {
     const { deps, generateStructured } = fakeDeps();
 
-    await runColdCritic(deps, IDEA, MARKET_CONTEXT);
+    await runColdCritic(deps, IDEA, MARKET_CONTEXT, THESIS);
 
     const system = generateStructured.mock.calls[0][0]
       .systemInstruction as string;
@@ -111,25 +120,31 @@ describe("runColdCritic", () => {
     expect(system).toContain("fatal");
     expect(system).toContain("major");
     expect(system).toContain("minor");
+
+    // 낙관론(Thesis) 반박 지시
+    expect(system).toContain("Thesis");
+    expect(system).toContain("낙관");
   });
 
-  it("유저 프롬프트에 아이디어 원문과 MarketContext 전체가 유실 없이 직렬화된다", async () => {
+  it("유저 프롬프트에 아이디어 원문·MarketContext·Thesis 전체가 유실 없이 직렬화된다", async () => {
     const { deps, generateStructured } = fakeDeps();
 
-    await runColdCritic(deps, IDEA, MARKET_CONTEXT);
+    await runColdCritic(deps, IDEA, MARKET_CONTEXT, THESIS);
 
     const prompt = generateStructured.mock.calls[0][0].prompt as string;
 
     // 아이디어 원문
     expect(prompt).toContain(IDEA);
 
-    // MarketContext 전체 JSON 직렬화 — 필드 하나도 유실되면 안 된다
+    // MarketContext·Thesis 전체 JSON 직렬화 — 필드 하나도 유실되면 안 된다
     expect(prompt).toContain(JSON.stringify(MARKET_CONTEXT, null, 2));
+    expect(prompt).toContain(JSON.stringify(THESIS, null, 2));
 
-    // 개별 데이터 포함 재확인 (경쟁 서비스·댓글 원문·트렌드)
+    // 개별 데이터 포함 재확인 (경쟁 서비스·댓글 원문·트렌드·낙관 논지)
     expect(prompt).toContain("도그메이트");
     expect(prompt).toContain("회당 2만원대");
     expect(prompt).toContain("산책 시킬 시간이 없어서 너무 미안해요...");
     expect(prompt).toContain("펫 시장 성장");
+    expect(prompt).toContain("죄책감이라는 강한 감정 트리거가 반복 결제를 이끈다");
   });
 });

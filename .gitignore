@@ -10,8 +10,13 @@ node_modules/
 dist/
 tsconfig.tsbuildinfo
 
-# pipeline run outputs
-runs/
+# Next.js (web workspace)
+web/.next/
+web/out/
+web/next-env.d.ts
+
+# pipeline run outputs (루트만 — web/src/app/api/runs/ 같은 소스 경로는 무시하지 않는다)
+/runs/
 
 # test coverage
 coverage/

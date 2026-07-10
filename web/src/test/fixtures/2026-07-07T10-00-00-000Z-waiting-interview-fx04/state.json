@@ -1,0 +1,29 @@
+{
+  "runId": "2026-07-07T10-00-00-000Z-waiting-interview-fx04",
+  "idea": "AI로 사람들을 도와주는 앱",
+  "createdAt": "2026-07-07T10:00:00.000Z",
+  "interview": true,
+  "steps": [
+    {
+      "name": "interviewer",
+      "status": "waiting",
+      "startedAt": "2026-07-07T10:00:01.000Z"
+    },
+    {
+      "name": "context-hunter",
+      "status": "pending"
+    },
+    {
+      "name": "thesis",
+      "status": "pending"
+    },
+    {
+      "name": "cold-critic",
+      "status": "pending"
+    },
+    {
+      "name": "solution-designer",
+      "status": "pending"
+    }
+  ]
+}
