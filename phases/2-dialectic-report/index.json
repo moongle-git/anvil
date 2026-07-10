@@ -77,7 +77,10 @@
     {
       "step": 9,
       "name": "pivot-verdict",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T01:20:55+0900",
+      "completed_at": "2026-07-11T01:32:00+0900",
+      "summary": "5단계 서사의 마지막 두 섹션(合·최종 판정) 컴포넌트 신설. (1) SolutionSection.tsx 재작성 — 제목 '④ 인사이트 및 재설계 (合)'(앵커 id=solution), synthesis를 border-neutral-900 강조 카드 '정반합 통찰' 라벨로 섹션 리드에 올림(undefined면 블록 생략, 구 solution.json 하위호환) → revisedConcept '재설계된 컨셉' 강조 → 하위 절 ①최소 입력 구조/②에이전틱 워크플로우/③독점적 데이터 플라이휠/④지속 가능한 비즈니스 모델(=monetization). max-w-3xl·renderRichText. (2) MonetizationSection.tsx 삭제 — 최상위 ⑤ 섹션은 최종 판정 하나뿐, 수익화는 合의 하위 절 ④로 흡수. ReportView.tsx는 삭제로 끊긴 import·usage 2줄만 제거(step 10 재배치는 미수행 — VerdictBanner·섹션 순서·SectionNav 불변). (3) SurvivalGauge.tsx 신설 — props{score,recommendation}, role=meter+aria-valuenow/min/max/label, 트랙 neutral-200·값 부분은 점수 밴드 색(RECOMMENDATION_SCORE_BANDS+isWithinBand에서 파생, 경계 39/40/69/70 하드코딩 0)이며 밴드→bg-red-600/amber-600/green-600(기존 팔레트 재사용, 새 hex 0), tabular-nums, 정적(애니메이션·트랜지션 0, div 바), 훅 data-survival-score/data-recommendation/data-score-band. (4) VerdictSection.tsx 신설 — 제목 '⑤ 최종 판정'(앵커 id=verdict), headline을 text-2xl(페이지<섹션 사이 급)로 선노출, SurvivalGauge+Badge(RECOMMENDATION_LABELS, proceed→success/pivot→warning/abandon→danger 톤 재사용), rationale renderRichText·max-w-3xl, 잔존 리스크는 SeverityBadge+분리된 keyword+note, 생존 조건은 list-decimal <ol>, verdict undefined면 '최종 판정 단계 이전 생성' EmptyState. criticism.verdict는 렌더링 안 함(ADR-010 — 최종 판정 유일 소스는 verdict.json). RECOMMENDATION_LABELS/RECOMMENDATION_SCORE_BANDS는 @anvil/types 단일 소스 import. TDD: verdict.test.tsx 신설(12 — meter/aria, data-recommendation prop 반영, 점수 경계 6케이스 밴드 파생, 0·100 no-throw, headline/rationale, recommendation 3종 라벨 exhaustive, 잔존 리스크 keyword+data-severity, 생존 조건 <ol>, 게이지 점수, undefined EmptyState, id=verdict 앵커+aria-labelledby, 反 소결론 미렌더링), report.test.tsx의 SolutionSection 블록 갱신(새 하위 절 제목·정반합 통찰 라벨·monetization 흡수/단일 section·synthesis 부재 no-throw·MONETIZATION_NUMBERED 회귀 이관)+MonetizationSection describe 삭제+ReportView 조립 단언을 '④ 지속 가능한 비즈니스 모델'로 갱신. 검증: npm run build 통과, npm test 통과(root 322 + web 217→228=550), npm run lint 통과. UI_GUIDE: 새 hex 0·게이지 애니메이션 0·차트 라이브러리 0·max-w-3xl. 삭제 파일 MonetizationSection.tsx, 앵커 id=solution·id=verdict — step 10이 목차/ReportView 재배치."
     },
     {
       "step": 10,

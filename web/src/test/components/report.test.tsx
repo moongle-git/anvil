@@ -10,7 +10,6 @@ import type {
 import type { RunDetail } from "@/lib/server/runs";
 import { CompetitorTable } from "@/components/report/CompetitorTable";
 import { MarketContextSection } from "@/components/report/MarketContextSection";
-import { MonetizationSection } from "@/components/report/MonetizationSection";
 import { SolutionSection } from "@/components/report/SolutionSection";
 import { VerdictBanner } from "@/components/report/VerdictBanner";
 import { ReportView } from "@/components/report/ReportView";
@@ -362,8 +361,9 @@ describe("ReportView (조립)", () => {
     expect(nav.querySelector('a[href="#market"]')).not.toBeNull();
     expect(nav.querySelector('a[href="#thesis"]')).not.toBeNull();
     expect(nav.querySelector('a[href="#solution"]')).not.toBeNull();
-    // 정반합 5개 섹션이 모두 실제로 렌더링된다 (스텁 없음).
+    // ①~④ 서사 섹션이 모두 실제로 렌더링된다 (스텁 없음).
     // ②正/③反은 DialecticSplit의 좌우 컬럼 헤더로 나타난다.
+    // (⑤ 최종 판정 섹션 배치와 목차 갱신은 step 10 범위)
     expect(screen.getByText("① 실시간 시장 맥락")).toBeDefined();
     expect(
       screen.getByRole("heading", { level: 2, name: "② 낙관적 가설 (正)" }),
@@ -372,43 +372,64 @@ describe("ReportView (조립)", () => {
       screen.getByRole("heading", { level: 2, name: "③ 냉정한 비판 (反)" }),
     ).toBeDefined();
     expect(screen.getByText("재설계된 컨셉")).toBeDefined();
-    expect(screen.getByText("⑤ 지속 가능한 비즈니스 모델")).toBeDefined();
+    // monetization은 별도 최상위 섹션이 아니라 合(SolutionSection)의 하위 절 ④로 흡수됐다
+    expect(screen.getByText("④ 지속 가능한 비즈니스 모델")).toBeDefined();
     expect(screen.queryByText("다음 step에서 구현됩니다.")).toBeNull();
   });
 });
 
 describe("SolutionSection", () => {
+  it("synthesis 리드를 revisedConcept보다 먼저 렌더링한다 (合)", () => {
+    const { container } = render(<SolutionSection solution={solution} />);
+    const text = container.textContent ?? "";
+    expect(text).toContain("정반합 통찰");
+    expect(text).toContain(
+      "낙관의 성장성과 반론의 번들 리스크를 종합하면 실행 추적이 해자다.",
+    );
+    // synthesis가 섹션의 리드 — 재설계 컨셉보다 앞에 온다 (DOM 순서)
+    expect(text.indexOf("정반합 통찰")).toBeLessThan(text.indexOf("재설계된 컨셉"));
+  });
+
   it("revisedConcept 리드 블록을 서브섹션보다 먼저 렌더링한다 (역피라미드)", () => {
     const { container } = render(<SolutionSection solution={solution} />);
     const text = container.textContent ?? "";
     expect(text.indexOf("재설계된 컨셉")).toBeGreaterThanOrEqual(0);
     expect(text.indexOf("재설계된 컨셉")).toBeLessThan(
-      text.indexOf("① 데이터 수집 및 최소 입력 구조"),
+      text.indexOf("① 최소 입력 구조"),
     );
   });
 
-  it("3개 서브섹션 제목을 순서대로 보여준다", () => {
-    render(<SolutionSection solution={solution} />);
-    expect(screen.getByText("① 데이터 수집 및 최소 입력 구조")).toBeDefined();
-    expect(screen.getByText("② 에이전틱 워크플로우")).toBeDefined();
-    expect(screen.getByText("③ 독점적 데이터 플라이휠")).toBeDefined();
-  });
-
-  it("synthesis가 있으면 종합 통찰 블록을 재설계 컨셉보다 먼저 보여준다 (合)", () => {
+  it("4개 하위 절 제목을 순서대로 보여준다 (monetization 흡수)", () => {
     const { container } = render(<SolutionSection solution={solution} />);
     const text = container.textContent ?? "";
-    expect(text).toContain("종합 통찰 (正 + 反 → 合)");
-    expect(text).toContain(
-      "낙관의 성장성과 반론의 번들 리스크를 종합하면 실행 추적이 해자다.",
+    expect(screen.getByText("① 최소 입력 구조")).toBeDefined();
+    expect(screen.getByText("② 에이전틱 워크플로우")).toBeDefined();
+    expect(screen.getByText("③ 독점적 데이터 플라이휠")).toBeDefined();
+    expect(screen.getByText("④ 지속 가능한 비즈니스 모델")).toBeDefined();
+    expect(text.indexOf("① 최소 입력 구조")).toBeLessThan(
+      text.indexOf("④ 지속 가능한 비즈니스 모델"),
     );
-    expect(text.indexOf("종합 통찰")).toBeLessThan(text.indexOf("재설계된 컨셉"));
   });
 
-  it("synthesis가 없으면 종합 통찰 블록을 숨긴다 (구 solution 하위호환)", () => {
+  it("monetization을 별도 <section>이 아니라 이 섹션 하위 절로 흡수한다", () => {
+    const { container } = render(<SolutionSection solution={solution} />);
+    // 섹션은 하나뿐이고(monetization 별도 섹션 없음), monetization 본문이 그 안에 있다
+    expect(container.querySelectorAll("section").length).toBe(1);
+    const monetizationNode = screen.getByText("팀 단위 구독. 좌석당 과금 모델.");
+    expect(container.querySelector("section")?.contains(monetizationNode)).toBe(
+      true,
+    );
+  });
+
+  it("synthesis가 없으면 정반합 통찰 블록을 숨긴다 (구 solution 하위호환)", () => {
     const { synthesis, ...withoutSynthesis } = solution;
     void synthesis;
-    render(<SolutionSection solution={withoutSynthesis} />);
-    expect(screen.queryByText("종합 통찰 (正 + 反 → 合)")).toBeNull();
+    expect(() =>
+      render(<SolutionSection solution={withoutSynthesis} />),
+    ).not.toThrow();
+    expect(screen.queryByText("정반합 통찰")).toBeNull();
+    // synthesis가 없어도 나머지는 정상 렌더링된다
+    expect(screen.getByText("재설계된 컨셉")).toBeDefined();
   });
 
   it("재설계 컨셉의 2계층 불릿을 중첩 <ul>로 렌더링한다", () => {
@@ -422,27 +443,11 @@ describe("SolutionSection", () => {
     expect(container.textContent).not.toContain("*");
   });
 
-  it("solution이 없으면 EmptyState를 보여준다", () => {
-    render(<SolutionSection solution={undefined} />);
-    expect(screen.getByText("재설계 데이터가 없습니다")).toBeDefined();
-  });
-});
-
-describe("MonetizationSection", () => {
-  it("monetization 본문을 렌더링한다", () => {
-    render(<MonetizationSection solution={solution} />);
-    expect(screen.getByText("팀 단위 구독. 좌석당 과금 모델.")).toBeDefined();
-  });
-
-  it("solution이 없으면 EmptyState를 보여준다", () => {
-    render(<MonetizationSection solution={undefined} />);
-    expect(screen.getByText("비즈니스 모델 데이터가 없습니다")).toBeDefined();
-  });
-
-  // 실데이터 회귀: 개행 0개짜리 818자 문자열이 통짜 <p> 하나로 렌더링되던 버그
-  it("개행 없는 번호 목록을 <ol> 3개 항목으로 렌더링한다", () => {
+  // 실데이터 회귀: 개행 0개짜리 818자 monetization이 통짜 <p> 하나로 렌더링되던 버그.
+  // monetization이 이 섹션으로 흡수됐으므로 회귀 커버리지도 여기로 옮긴다.
+  it("개행 없는 번호 목록 monetization을 <ol> 3개 항목으로 렌더링한다", () => {
     const { container } = render(
-      <MonetizationSection
+      <SolutionSection
         solution={{ ...solution, monetization: MONETIZATION_NUMBERED }}
       />,
     );
@@ -450,5 +455,10 @@ describe("MonetizationSection", () => {
     expect(container.querySelectorAll("ol > li").length).toBe(3);
     expect(container.querySelectorAll("ol > li > strong").length).toBe(3);
     expect(container.textContent).not.toContain("*");
+  });
+
+  it("solution이 없으면 EmptyState를 보여준다", () => {
+    render(<SolutionSection solution={undefined} />);
+    expect(screen.getByText("재설계 데이터가 없습니다")).toBeDefined();
   });
 });

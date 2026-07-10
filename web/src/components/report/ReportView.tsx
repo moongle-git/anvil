@@ -1,7 +1,6 @@
 import type { RunDetail } from "@/lib/server/runs";
 import { DialecticSplit } from "./DialecticSplit";
 import { MarketContextSection } from "./MarketContextSection";
-import { MonetizationSection } from "./MonetizationSection";
 import { ReportHeader } from "./ReportHeader";
 import { SectionNav } from "./SectionNav";
 import { SolutionSection } from "./SolutionSection";
@@ -33,7 +32,6 @@ export function ReportView({ detail }: ReportViewProps) {
           <MarketContextSection context={context} />
           <DialecticSplit thesis={thesis} criticism={criticism} />
           <SolutionSection solution={solution} />
-          <MonetizationSection solution={solution} />
         </div>
       </div>
     </div>
