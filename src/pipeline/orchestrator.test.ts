@@ -27,6 +27,10 @@ const IDEA = "AI 반려식물 관리 서비스";
 
 const marketContext: MarketContext = {
   ideaTitle: "AI 반려식물 관리 서비스",
+  briefing: "홈가드닝 시장은 성장 중이나 무료 리마인더 앱이 이미 시장을 선점했다.",
+  marketSizeIndicators: ["홈가드닝 시장 연 10% 성장"],
+  competitorInsight: "리마인더는 평준화됐고 경쟁은 진단 정확도에서 벌어진다.",
+  voicesInsight: "유저는 늦은 감지를 가장 큰 고통으로 말한다.",
   trends: ["홈가드닝 시장 성장"],
   competitors: [{ name: "Planta", description: "식물 관리 앱" }],
   youtubeVoices: [
@@ -41,6 +45,26 @@ const marketContext: MarketContext = {
 };
 
 const thesis: Thesis = {
+  points: [
+    {
+      id: "t1",
+      axis: "painPoint",
+      claim: "식물을 죽인 경험은 반복되는 고통이다",
+      rationale: "댓글 '물주기 타이밍을 늘 놓쳐요'가 반복 등장한다",
+    },
+    {
+      id: "t2",
+      axis: "bm",
+      claim: "실패 방지에는 지불 의사가 생긴다",
+      rationale: "Planta가 유료 구독으로 시장을 검증했다",
+    },
+    {
+      id: "t3",
+      axis: "copycat",
+      claim: "가정별 생육 데이터가 해자가 된다",
+      rationale: "경쟁 앱은 개별 환경 데이터를 축적하지 않는다",
+    },
+  ],
   revenueModel: "무료 진단 후 케어 플랜 구독 전환",
   growthLevers: ["공유 바이럴 루프"],
   marketTailwinds: ["홈가드닝 시장 성장"],
@@ -49,14 +73,37 @@ const thesis: Thesis = {
 };
 
 const criticism: Criticism = {
-  painPointReality: [
-    { claim: "페인포인트가 약하다", evidence: "댓글 근거", severity: "major" },
-  ],
-  bmWeakness: [
-    { claim: "지불 의사가 낮다", evidence: "무료 대체재 존재", severity: "fatal" },
-  ],
-  copycatRisk: [
-    { claim: "진입장벽이 없다", evidence: "기존 앱이 기능 추가 가능", severity: "major" },
+  points: [
+    {
+      id: "c1",
+      axis: "painPoint",
+      rebuts: "t1",
+      claim: "페인포인트가 약하다",
+      evidence: "댓글 근거",
+      severity: "major",
+      riskScore: 50,
+      riskKeyword: "약한 페인포인트",
+    },
+    {
+      id: "c2",
+      axis: "bm",
+      rebuts: "t2",
+      claim: "지불 의사가 낮다",
+      evidence: "무료 대체재 존재",
+      severity: "fatal",
+      riskScore: 80,
+      riskKeyword: "무료 대체재",
+    },
+    {
+      id: "c3",
+      axis: "copycat",
+      rebuts: "t3",
+      claim: "진입장벽이 없다",
+      evidence: "기존 앱이 기능 추가 가능",
+      severity: "major",
+      riskScore: 60,
+      riskKeyword: "해자 부재",
+    },
   ],
   verdict: "현재 형태로는 실패 확률이 높다",
 };
@@ -146,15 +193,17 @@ describe("runPipeline", () => {
       SolutionSchema,
     ]);
 
-    // state 전이: 전 step completed + 타임스탬프, run 완료 시각 기록
+    // state 전이: 실행된 step은 completed + 타임스탬프, run 완료 시각 기록.
+    // verdict는 seed만 되고 아직 실행되지 않는다 (에이전트는 step 3에서 붙는다).
     const saved = store.loadRun(result.runId);
     expect(saved.steps.map((s) => s.status)).toEqual([
       "completed",
       "completed",
       "completed",
       "completed",
+      "pending",
     ]);
-    for (const step of saved.steps) {
+    for (const step of saved.steps.filter((s) => s.status === "completed")) {
       expect(step.startedAt).toBeDefined();
       expect(step.completedAt).toBeDefined();
     }
@@ -189,12 +238,13 @@ describe("runPipeline", () => {
     const error = (await promise.catch((e: unknown) => e)) as PipelineStepError;
     expect(error.step).toBe("cold-critic");
 
-    // context-hunter·thesis는 완료, cold-critic 에러, solution-designer 대기
+    // context-hunter·thesis는 완료, cold-critic 에러, solution-designer·verdict 대기
     const saved = store.loadRun(error.runId);
     expect(saved.steps.map((s) => s.status)).toEqual([
       "completed",
       "completed",
       "error",
+      "pending",
       "pending",
     ]);
     expect(saved.steps[2].errorMessage).toContain("Gemini 호출 실패");
@@ -231,6 +281,7 @@ describe("runPipeline", () => {
       "completed",
       "completed",
       "completed",
+      "pending",
     ]);
     expect(saved.steps[2].errorMessage).toBeUndefined();
 

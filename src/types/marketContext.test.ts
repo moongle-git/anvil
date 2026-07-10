@@ -87,6 +87,13 @@ describe("YoutubeVoiceSchema", () => {
 describe("MarketContextSchema", () => {
   const validContext = {
     ideaTitle: "AI 기반 반려식물 관리 서비스",
+    briefing:
+      "반려식물 시장은 팬데믹 이후 연 10% 성장했다. 무료 리마인더 앱이 시장을 선점했고, 유료 전환은 진단 정확도에 달려 있다.",
+    marketSizeIndicators: ["국내 반려식물 시장 연 10% 성장"],
+    competitorInsight:
+      "리마인더 기능은 무료로 평준화됐고, 유료 경쟁은 사진 기반 진단 정확도에서 벌어진다.",
+    voicesInsight:
+      "유저는 물주기 타이밍보다 '이미 시들기 시작한 뒤에야 알아차린다'는 늦은 감지를 더 큰 고통으로 말한다.",
     trends: ["반려식물 시장은 팬데믹 이후 연 10% 성장 중"],
     competitors: [
       { name: "Planta", description: "식물 관리 리마인더 앱" },
@@ -114,6 +121,42 @@ describe("MarketContextSchema", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("marketSizeIndicators가 빈 배열이어도 허용한다 (지표를 못 찾는 아이디어가 있다)", () => {
+    const result = MarketContextSchema.safeParse({
+      ...validContext,
+      marketSizeIndicators: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("youtubeVoices가 빈 배열이어도 허용한다 (quota 초과 시 발생)", () => {
+    const result = MarketContextSchema.safeParse({
+      ...validContext,
+      youtubeVoices: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it.each(["briefing", "competitorInsight", "voicesInsight"] as const)(
+    "빈 %s를 거부한다 (Summary에 노출되는 정제된 인사이트)",
+    (field) => {
+      const result = MarketContextSchema.safeParse({
+        ...validContext,
+        [field]: "",
+      });
+      expect(result.success).toBe(false);
+    },
+  );
+
+  it.each(["briefing", "competitorInsight", "voicesInsight"] as const)(
+    "%s가 빠지면 거부한다",
+    (field) => {
+      const withoutField: Record<string, unknown> = { ...validContext };
+      delete withoutField[field];
+      expect(MarketContextSchema.safeParse(withoutField).success).toBe(false);
+    },
+  );
 
   it("빈 ideaTitle을 거부한다", () => {
     const result = MarketContextSchema.safeParse({

@@ -18,6 +18,10 @@ import { RunStore, STEP_OUTPUT_FILES, deriveRunStatus } from "./runStore.js";
 
 const validMarketContext: MarketContext = {
   ideaTitle: "AI 반려식물 관리 서비스",
+  briefing: "홈가드닝 시장은 성장 중이나 무료 리마인더 앱이 이미 시장을 선점했다.",
+  marketSizeIndicators: ["홈가드닝 시장 연 10% 성장"],
+  competitorInsight: "리마인더는 평준화됐고 경쟁은 진단 정확도에서 벌어진다.",
+  voicesInsight: "유저는 늦은 감지를 가장 큰 고통으로 말한다.",
   trends: ["홈가드닝 시장 성장"],
   competitors: [{ name: "Planta", description: "식물 관리 앱" }],
   youtubeVoices: [
@@ -32,14 +36,34 @@ const validMarketContext: MarketContext = {
 };
 
 const validCriticism: Criticism = {
-  painPointReality: [
-    { claim: "페인포인트가 약하다", evidence: "댓글 근거", severity: "major" },
-  ],
-  bmWeakness: [
-    { claim: "지불 의사가 낮다", evidence: "무료 대체재 존재", severity: "fatal" },
-  ],
-  copycatRisk: [
-    { claim: "진입장벽이 없다", evidence: "기존 앱이 기능 추가 가능", severity: "major" },
+  points: [
+    {
+      id: "c1",
+      axis: "painPoint",
+      claim: "페인포인트가 약하다",
+      evidence: "댓글 근거",
+      severity: "major",
+      riskScore: 50,
+      riskKeyword: "약한 페인포인트",
+    },
+    {
+      id: "c2",
+      axis: "bm",
+      claim: "지불 의사가 낮다",
+      evidence: "무료 대체재 존재",
+      severity: "fatal",
+      riskScore: 80,
+      riskKeyword: "무료 대체재",
+    },
+    {
+      id: "c3",
+      axis: "copycat",
+      claim: "진입장벽이 없다",
+      evidence: "기존 앱이 기능 추가 가능",
+      severity: "major",
+      riskScore: 60,
+      riskKeyword: "해자 부재",
+    },
   ],
   verdict: "현재 형태로는 실패 확률이 높다",
 };
@@ -89,6 +113,7 @@ describe("RunStore", () => {
         "thesis",
         "cold-critic",
         "solution-designer",
+        "verdict",
       ]);
       expect(state.steps.every((s) => s.status === "pending")).toBe(true);
       expect(state.interview).toBe(false);
@@ -171,6 +196,7 @@ describe("RunStore", () => {
         thesis: "thesis.json",
         "cold-critic": "criticism.json",
         "solution-designer": "solution.json",
+        verdict: "verdict.json",
       });
     });
 

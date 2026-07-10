@@ -13,7 +13,10 @@
     {
       "step": 1,
       "name": "dialectic-schema",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-10T23:52:03+0900",
+      "summary": "정반합 타입 계층 신설. (1) src/types/dialectic.ts — DIALECTIC_AXES(painPoint|bm|copycat)·DialecticAxisSchema·DIALECTIC_AXIS_LABELS(페인포인트/수익 모델/해자와 카피캣), 순환 import 회피를 위해 CriticismSeveritySchema를 criticism.ts에서 이곳으로 이관(criticism.ts는 재export 안 함 — 배럴 src/types/index.ts로 노출), SEVERITY_SCORE_BANDS(minor 0~33, major 34~66, fatal 67~100), 헬퍼 coversAllAxes/hasUniqueIds/isWithinBand(밴드는 양 끝 포함). dialectic.ts는 zod만 import하는 leaf. (2) src/types/verdict.ts — VerdictSchema{survivalScore:int 0~100, recommendation, headline, rationale, residualRisks:ResidualRiskSchema{keyword,severity,note}[] min1, conditions:string[] min1} + RECOMMENDATIONS(proceed|pivot|abandon)·RECOMMENDATION_LABELS(추진/피벗/철회)·RECOMMENDATION_SCORE_BANDS(abandon 0~39, pivot 40~69, proceed 70~100), refine으로 점수-권고 자기모순 차단. (3) ThesisSchema에 points:ThesisPointSchema{id,axis,claim,rationale}[] min3 추가(기존 서사 필드 유지). (4) CriticismSchema를 points:CriticismPointSchema{id,axis,rebuts?,claim,evidence,severity,riskScore,riskKeyword}[] min3 + verdict(反 소결론)로 평탄화 — painPointReality/bmWeakness/copycatRisk 삭제(ADR-011). refine: 축 커버리지·id 고유·riskScore가 severity 밴드 내. (5) MarketContextSchema에 briefing·marketSizeIndicators(빈 배열 허용)·competitorInsight·voicesInsight 추가, 기존 원시 배열 유지. (6) PIPELINE_STEPS 끝에 'verdict' 추가(6 step), STEP_OUTPUT_FILES.verdict='verdict.json'. (7) src/lib/report.ts는 criticism.points를 axis로 그룹핑해 컴파일만 보전(서사 재배치는 step 4). 에이전트 프롬프트 문자열·src/agents/verdict.ts는 손대지 않음. 검증: npx tsc --noEmit 통과, npx vitest run 249 tests 전부 통과(report.md 스냅샷 불변), eslint 통과, 컴파일 산출물 배럴 런타임 import로 순환 참조 없음 확인. web/는 미수정(step 5 범위) — 복구 대상 7개 파일: src/components/progress/ProgressView.tsx(STEP_LABELS에 verdict 라벨 누락), src/components/report/CriticismSection.tsx, src/lib/severity.ts, src/lib/client/format.ts, src/test/clientFixtures.ts, src/test/components/{report,compare}.test.tsx, src/test/lib/severity.test.ts.",
+      "completed_at": "2026-07-11T00:05:00+0900"
     },
     {
       "step": 2,

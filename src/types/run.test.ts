@@ -14,6 +14,7 @@ describe("PIPELINE_STEPS", () => {
       "thesis",
       "cold-critic",
       "solution-designer",
+      "verdict",
     ]);
   });
 });

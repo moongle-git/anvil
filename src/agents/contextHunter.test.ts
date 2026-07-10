@@ -12,6 +12,13 @@ const IDEA = "반려견 산책 대행 매칭 서비스";
 
 const MARKET_CONTEXT: MarketContext = {
   ideaTitle: "반려견 산책 대행 매칭 서비스",
+  briefing:
+    "1인 가구 반려동물 양육이 늘며 펫 시장이 성장 중이다. 도그메이트 등 매칭 플랫폼이 이미 자리잡았다.",
+  marketSizeIndicators: ["1인 가구 반려동물 양육 가구 지속 증가"],
+  competitorInsight:
+    "매칭 기능 자체는 평준화됐고, 경쟁은 산책자 신뢰도 검증에서 벌어진다.",
+  voicesInsight:
+    "반려인은 산책 대행 자체보다 '내가 못 해준다'는 죄책감을 더 크게 말한다.",
   trends: ["펫 시장 성장"],
   competitors: [{ name: "도그메이트", description: "펫시터 매칭" }],
   youtubeVoices: [

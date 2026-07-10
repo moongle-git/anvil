@@ -6,6 +6,7 @@ export const PIPELINE_STEPS = [
   "thesis",
   "cold-critic",
   "solution-designer",
+  "verdict",
 ] as const;
 export type PipelineStepName = (typeof PIPELINE_STEPS)[number];
 

@@ -2,6 +2,7 @@ import type {
   CompetitorService,
   Criticism,
   CriticismPoint,
+  DialecticAxis,
   MarketContext,
   Solution,
   Thesis,
@@ -29,11 +30,16 @@ function voiceBlock(voice: YoutubeVoice): string {
   return `> "${comment}"\n> — ${voice.videoTitle} (${voice.videoUrl}${likes})`;
 }
 
-function criticismLines(points: CriticismPoint[]): string[] {
-  return points.map(
-    (p) =>
-      `    *   **[${p.severity.toUpperCase()}]** ${p.claim} — 근거: ${p.evidence}`,
-  );
+function criticismLines(
+  points: CriticismPoint[],
+  axis: DialecticAxis,
+): string[] {
+  return points
+    .filter((p) => p.axis === axis)
+    .map(
+      (p) =>
+        `    *   **[${p.severity.toUpperCase()}]** ${p.claim} — 근거: ${p.evidence}`,
+    );
 }
 
 /**
@@ -89,11 +95,11 @@ export function renderReport(
     "",
   );
   lines.push("*   **페인포인트의 허구성:**");
-  lines.push(...criticismLines(criticism.painPointReality));
+  lines.push(...criticismLines(criticism.points, "painPoint"));
   lines.push("*   **수익 모델(BM)의 취약성:**");
-  lines.push(...criticismLines(criticism.bmWeakness));
+  lines.push(...criticismLines(criticism.points, "bm"));
   lines.push("*   **카피캣 리스크:**");
-  lines.push(...criticismLines(criticism.copycatRisk));
+  lines.push(...criticismLines(criticism.points, "copycat"));
   lines.push("", `**최종 평결:** ${criticism.verdict}`, "");
 
   lines.push("## 4. 종합과 재설계 (Synthesis / 合)", "");

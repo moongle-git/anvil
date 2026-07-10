@@ -19,6 +19,7 @@ export const STEP_OUTPUT_FILES: Record<PipelineStepName, string> = {
   thesis: "thesis.json",
   "cold-critic": "criticism.json",
   "solution-designer": "solution.json",
+  verdict: "verdict.json",
 };
 
 const STATE_FILE = "state.json";
