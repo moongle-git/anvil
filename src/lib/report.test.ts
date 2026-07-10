@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type {
-  Criticism,
-  MarketContext,
-  Solution,
-  Thesis,
-  Verdict,
+import {
+  DIALECTIC_AXIS_LABELS,
+  RECOMMENDATION_LABELS,
+  type Criticism,
+  type MarketContext,
+  type Solution,
+  type Thesis,
+  type Verdict,
 } from "../types/index.js";
 import { renderReport } from "./report.js";
 
@@ -137,20 +139,26 @@ const verdict: Verdict = {
   conditions: ["출시 6개월 내 유료 전환율 5% 확보"],
 };
 
+/** 첫 번째 <details> 블록(1절 원시 근거)의 경계 */
+function firstDetailsRange(report: string): { open: number; close: number } {
+  const open = report.indexOf("<details>");
+  const close = report.indexOf("</details>");
+  expect(open).toBeGreaterThan(-1);
+  expect(close).toBeGreaterThan(open);
+  return { open, close };
+}
+
 describe("renderReport", () => {
   const report = renderReport(IDEA, context, thesis, criticism, solution, verdict);
 
-  it("정반합 리포트 규격의 섹션 제목이 순서대로 모두 존재한다", () => {
+  it("5단계 서사의 최상위 섹션이 순서대로 등장한다 (ADR-008)", () => {
     const headings = [
       `# [컨설팅 리포트] ${context.ideaTitle}`,
-      "## 1. 실시간 시장 맥락 (Market Context)",
-      "## 2. 낙관적 논제 (Thesis / 正)",
-      "## 3. 냉정한 반론 (Antithesis / 反)",
-      "## 4. 종합과 재설계 (Synthesis / 合)",
-      "### ① 데이터 수집 및 최소 입력 구조 (Minimal Input)",
-      "### ② 에이전틱 워크플로우 (Agentic Workflow)",
-      "### ③ 독점적 데이터 플라이휠 (Data Flywheel)",
-      "## 5. 지속 가능한 비즈니스 모델 (Monetization Model)",
+      "## 1. 시장 맥락 (Context)",
+      "## 2. 낙관적 가설 (正 / Thesis)",
+      "## 3. 냉정한 비판 (反 / Antithesis)",
+      "## 4. 인사이트 및 재설계 (合 / Synthesis)",
+      "## 5. 최종 판정 (Verdict)",
     ];
     let cursor = -1;
     for (const heading of headings) {
@@ -160,98 +168,260 @@ describe("renderReport", () => {
     }
   });
 
-  it("PRD 규격의 고정 문구(경고 블록, 3축 비판 라벨)를 그대로 포함한다", () => {
+  it("결론(최종 판정)이 反의 소결론보다 뒤에 온다 (ADR-008 / ADR-010)", () => {
+    expect(report.indexOf(criticism.verdict)).toBeLessThan(
+      report.indexOf(verdict.headline),
+    );
+  });
+
+  it("입력 아이디어 원문과 경고 블록을 포함한다", () => {
+    expect(report).toContain(`> 입력 아이디어: ${IDEA}`);
     expect(report).toContain(
       "> [경고] 본 아이디어가 실패할 확률이 높은 구조적 이유를 나열합니다.",
     );
-    expect(report).toContain("**수집된 유사/경쟁 서비스 현황:**");
-    expect(report).toContain("**YouTube/커뮤니티 내 타겟 유저의 실제 목소리:**");
-    expect(report).toContain("**페인포인트의 허구성:**");
-    expect(report).toContain("**수익 모델(BM)의 취약성:**");
-    expect(report).toContain("**카피캣 리스크:**");
   });
 
-  it("youtubeVoices를 인용 블록으로 렌더링한다", () => {
-    expect(report).toContain('> "물주기 타이밍을 늘 놓쳐요"');
-    expect(report).toContain("식물 키우기 실패담");
-    expect(report).toContain('> "앱 알림은 결국 다 꺼버리게 되더라고요"');
+  describe("1. 시장 맥락 — Summary는 본문, 원시 근거는 <details>", () => {
+    it("briefing·competitorInsight·voicesInsight는 <details> 밖 본문에 있다", () => {
+      const { open } = firstDetailsRange(report);
+      for (const summary of [
+        context.briefing,
+        context.competitorInsight,
+        context.voicesInsight,
+      ]) {
+        const index = report.indexOf(summary);
+        expect(index).toBeGreaterThan(-1);
+        expect(index).toBeLessThan(open);
+      }
+    });
+
+    it("경쟁사·유저 목소리·트렌드·출처 원문은 <details> 안에 있다", () => {
+      const { open, close } = firstDetailsRange(report);
+      const raw = [
+        context.competitors[0].name,
+        context.competitors[0].description,
+        context.youtubeVoices[0].comment,
+        context.trends[0],
+        context.painPointEvidence[0],
+        context.sources[0],
+      ];
+      for (const value of raw) {
+        const index = report.indexOf(value);
+        expect(index, `누락된 원시 근거: ${value}`).toBeGreaterThan(open);
+        expect(index).toBeLessThan(close);
+      }
+    });
+
+    it("<summary>에 원시 근거 건수를 표기한다", () => {
+      expect(report).toContain(
+        `원시 근거 — 경쟁 서비스 ${context.competitors.length}개 · 유저 목소리 ${context.youtubeVoices.length}건 · 트렌드 ${context.trends.length}건 · 출처 ${context.sources.length}개`,
+      );
+    });
+
+    it("marketSizeIndicators가 있으면 소제목과 지표를 렌더링한다", () => {
+      expect(report).toContain("### 시장 규모 지표");
+      expect(report).toContain(context.marketSizeIndicators[0]);
+    });
+
+    it("marketSizeIndicators가 비면 소제목 자체를 출력하지 않는다", () => {
+      const rendered = renderReport(
+        IDEA,
+        { ...context, marketSizeIndicators: [] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      expect(rendered).not.toContain("시장 규모 지표");
+    });
+
+    it("youtubeVoices가 비면 <details> 안에 수집 실패 안내를 넣는다", () => {
+      const rendered = renderReport(
+        IDEA,
+        { ...context, youtubeVoices: [] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      const { open, close } = firstDetailsRange(rendered);
+      const index = rendered.indexOf("수집된 YouTube 목소리 없음");
+      expect(index).toBeGreaterThan(open);
+      expect(index).toBeLessThan(close);
+    });
+
+    it("댓글 원문의 줄바꿈이 인용 블록을 깨뜨리지 않는다", () => {
+      const rendered = renderReport(
+        IDEA,
+        {
+          ...context,
+          youtubeVoices: [
+            { ...context.youtubeVoices[0], comment: "첫 줄\n둘째 줄" },
+          ],
+        },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      expect(rendered).toContain('> "첫 줄\n> 둘째 줄"');
+    });
   });
 
-  it("CriticismPoint를 severity 표시와 함께 렌더링한다", () => {
-    expect(report).toContain("[FATAL]");
-    expect(report).toContain("[MAJOR]");
-    expect(report).toContain("[MINOR]");
-    expect(report).toContain(criticism.verdict);
+  describe("2. 正 — 낙관적 가설", () => {
+    it("서사 필드가 모두 본문에 포함된다", () => {
+      expect(report).toContain(thesis.winningThesis);
+      expect(report).toContain(thesis.revenueModel);
+      expect(report).toContain(thesis.bestCaseScenario);
+      for (const value of [...thesis.growthLevers, ...thesis.marketTailwinds]) {
+        expect(report).toContain(value);
+      }
+    });
+
+    it("points를 축 라벨 아래에 렌더링한다", () => {
+      expect(report).toContain("### 축별 낙관 주장");
+      for (const point of thesis.points) {
+        expect(report).toContain(point.claim);
+        expect(report).toContain(point.rationale);
+      }
+    });
   });
 
-  it("Thesis(正)의 필드가 모두 본문에 포함된다", () => {
-    expect(report).toContain(thesis.revenueModel);
-    expect(report).toContain(thesis.bestCaseScenario);
-    expect(report).toContain(thesis.winningThesis);
-    for (const lever of thesis.growthLevers) {
-      expect(report).toContain(lever);
-    }
-    for (const tailwind of thesis.marketTailwinds) {
-      expect(report).toContain(tailwind);
-    }
+  describe("3. 反 — 냉정한 비판", () => {
+    it("축 라벨은 DIALECTIC_AXIS_LABELS에서 오고 축 순서대로 그룹핑된다", () => {
+      // 2절에도 `### 수익 모델`(revenueModel)이 있으므로 3절 본문으로 범위를 좁힌다
+      const section = report.slice(
+        report.indexOf("## 3."),
+        report.indexOf("## 4."),
+      );
+      const positions = (["painPoint", "bm", "copycat"] as const).map((axis) =>
+        section.indexOf(`\n### ${DIALECTIC_AXIS_LABELS[axis]}\n`),
+      );
+      for (const position of positions) {
+        expect(position).toBeGreaterThan(-1);
+      }
+      expect(positions[0]).toBeLessThan(positions[1]);
+      expect(positions[1]).toBeLessThan(positions[2]);
+    });
+
+    it("각 point의 severity·riskScore·riskKeyword·claim을 렌더링한다", () => {
+      for (const point of criticism.points) {
+        expect(report).toContain(
+          `**[${point.severity.toUpperCase()} · ${point.riskScore}/100 · ${point.riskKeyword}]** ${point.claim}`,
+        );
+      }
+    });
+
+    it("evidence는 <details> 안에 접어 넣는다", () => {
+      for (const point of criticism.points) {
+        expect(report).toContain(point.evidence);
+      }
+      expect(report).toContain("<summary>근거</summary>");
+    });
+
+    it("rebuts가 유효한 id를 가리키면 대응하는 正의 claim을 함께 렌더링한다", () => {
+      const point = criticism.points[0];
+      const [target] = thesis.points.filter((t) => t.id === point.rebuts);
+      expect(target).toBeDefined();
+
+      const claimAt = report.indexOf(point.claim);
+      const nearby = report.slice(claimAt, claimAt + 300);
+      expect(nearby).toContain("반박 대상");
+      expect(nearby).toContain(target.claim);
+    });
+
+    it("rebuts가 존재하지 않는 id를 가리켜도 throw하지 않고 조용히 무시한다", () => {
+      const broken: Criticism = {
+        ...criticism,
+        points: criticism.points.map((p, i) =>
+          i === 0 ? { ...p, rebuts: "t999" } : p,
+        ),
+      };
+      let rendered = "";
+      expect(() => {
+        rendered = renderReport(
+          IDEA,
+          context,
+          thesis,
+          broken,
+          solution,
+          verdict,
+        );
+      }).not.toThrow();
+      expect(rendered).toContain(broken.points[0].claim);
+      expect(rendered).not.toContain("t999");
+    });
+
+    it("反의 소결론을 최종 판정과 구분해 표기한다", () => {
+      expect(report).toContain(`**反의 소결론:** ${criticism.verdict}`);
+    });
   });
 
-  it("Solution의 필드(synthesis 포함)가 모두 본문에 포함된다", () => {
-    for (const value of Object.values(solution)) {
-      expect(report).toContain(value);
-    }
+  describe("4. 合 — 인사이트 및 재설계", () => {
+    it("Solution의 모든 필드가 본문에 포함된다", () => {
+      for (const value of Object.values(solution)) {
+        expect(report).toContain(value);
+      }
+    });
+
+    it("synthesis가 undefined여도 throw하지 않고 해당 블록만 생략한다", () => {
+      const withoutSynthesis: Solution = { ...solution, synthesis: undefined };
+      let rendered = "";
+      expect(() => {
+        rendered = renderReport(
+          IDEA,
+          context,
+          thesis,
+          criticism,
+          withoutSynthesis,
+          verdict,
+        );
+      }).not.toThrow();
+      expect(rendered).not.toContain("**종합 통찰:**");
+      expect(rendered).toContain(solution.revisedConcept);
+    });
+
+    it("monetization은 合의 하위 절(④)이지 최상위 섹션이 아니다", () => {
+      expect(report).toContain("### ④ 지속 가능한 비즈니스 모델 (Monetization Model)");
+      const topLevel = report
+        .split("\n")
+        .filter((line) => line.startsWith("## "));
+      expect(topLevel).toHaveLength(5);
+      for (const heading of topLevel) {
+        expect(heading).not.toContain("비즈니스 모델");
+      }
+    });
+
+    it("monetization 본문이 최종 판정보다 앞에 온다", () => {
+      expect(report.indexOf(solution.monetization)).toBeLessThan(
+        report.indexOf("## 5. 최종 판정 (Verdict)"),
+      );
+    });
   });
 
-  it("synthesis가 없으면 종합 통찰 문구 없이도 렌더링된다 (구 solution 하위호환)", () => {
-    const { synthesis, ...withoutSynthesis } = solution;
-    void synthesis;
-    const rendered = renderReport(
-      IDEA,
-      context,
-      thesis,
-      criticism,
-      withoutSynthesis,
-      verdict,
-    );
-    expect(rendered).not.toContain("**종합 통찰:**");
-    expect(rendered).toContain("## 4. 종합과 재설계 (Synthesis / 合)");
-    expect(rendered).toContain(solution.revisedConcept);
+  describe("5. 최종 판정", () => {
+    it("headline·점수·권고 라벨·rationale을 렌더링한다", () => {
+      expect(report).toContain(`**${verdict.headline}**`);
+      expect(report).toContain(
+        `생존 점수 ${verdict.survivalScore}/100 · 판정: ${RECOMMENDATION_LABELS[verdict.recommendation]}`,
+      );
+      expect(report).toContain(verdict.rationale);
+    });
+
+    it("잔존 리스크와 생존 조건을 렌더링한다", () => {
+      expect(report).toContain("### 잔존 리스크");
+      const risk = verdict.residualRisks[0];
+      expect(report).toContain(
+        `**[${risk.severity.toUpperCase()}]** ${risk.keyword} — ${risk.note}`,
+      );
+      expect(report).toContain("### 생존 조건");
+      expect(report).toContain(`1. ${verdict.conditions[0]}`);
+    });
   });
 
   it("순수 함수다 — 같은 입력이면 같은 출력", () => {
     expect(
       renderReport(IDEA, context, thesis, criticism, solution, verdict),
     ).toBe(report);
-  });
-
-  it("youtubeVoices가 비어 있으면 수집 실패 안내를 렌더링한다", () => {
-    const empty = renderReport(
-      IDEA,
-      { ...context, youtubeVoices: [] },
-      thesis,
-      criticism,
-      solution,
-      verdict,
-    );
-    expect(empty).toContain("수집된 YouTube 목소리 없음");
-  });
-
-  it("최종 판정(合 이후)을 反의 소결론과 구분해 렌더링한다", () => {
-    expect(report).toContain("## 6. 최종 판정 (Verdict)");
-    expect(report).toContain(verdict.headline);
-    expect(report).toContain(`${verdict.survivalScore} / 100`);
-    expect(report).toContain("피벗"); // RECOMMENDATION_LABELS.pivot
-    expect(report).toContain(verdict.rationale);
-    expect(report).toContain(verdict.residualRisks[0].keyword);
-    expect(report).toContain(verdict.conditions[0]);
-
-    // 反의 소결론(criticism.verdict)은 3절에 남고, 최종 판정에 흡수되지 않는다 (ADR-010)
-    expect(report.indexOf(criticism.verdict)).toBeLessThan(
-      report.indexOf(verdict.headline),
-    );
-  });
-
-  it("고정 입력 → 고정 출력 (스냅샷)", () => {
-    expect(report).toMatchSnapshot();
   });
 });
