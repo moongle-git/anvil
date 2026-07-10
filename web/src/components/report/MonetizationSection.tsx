@@ -4,9 +4,9 @@ import { renderRichText } from "@/lib/richText";
 
 export function MonetizationSection({ solution }: { solution?: Solution }) {
   return (
-    <section aria-labelledby="monetization" className="flex flex-col gap-4">
+    <section aria-labelledby="monetization" className="flex flex-col gap-6">
       <SectionHeading id="monetization">
-        ④ 지속 가능한 비즈니스 모델
+        ⑤ 지속 가능한 비즈니스 모델
       </SectionHeading>
 
       {solution === undefined ? (

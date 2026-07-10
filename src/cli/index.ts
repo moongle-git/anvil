@@ -74,6 +74,13 @@ async function main(): Promise<void> {
 
   try {
     const result = await runPipeline(deps, args);
+    // 방어적 처리: CLI-direct run은 interview:false라 waiting에 도달하지 않는다.
+    if (result.status === "waiting") {
+      console.error(
+        "사용자 답변 대기 중 — 웹 UI에서 질문에 답한 뒤 재개된다.",
+      );
+      return;
+    }
     console.log(result.reportPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

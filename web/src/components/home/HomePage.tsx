@@ -182,7 +182,7 @@ export function HomePage() {
           <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
             새 컨설팅 시작
           </h1>
-          <p className="mt-2 text-[15px] leading-relaxed text-neutral-500">
+          <p className="mt-2 text-[15px] leading-[1.8] text-neutral-500">
             검증하고 싶은 AI 서비스 아이디어를 입력하세요.
           </p>
         </div>

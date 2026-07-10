@@ -20,10 +20,11 @@ const EXAMPLE_IDEAS = [
   "냉장고 속 재료로 오늘 점심 메뉴를 추천해주는 서비스",
 ];
 
-// 필터 select에 노출할 상태 순서 (전체 + PRD 명시 4종)
+// 필터 select에 노출할 상태 순서
 const FILTER_STATUSES: RunDisplayStatus[] = [
   "completed",
   "running",
+  "waiting",
   "stalled",
   "error",
 ];

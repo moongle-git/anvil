@@ -9,7 +9,9 @@ import { useNow } from "./useNow";
 
 // 내부 step명 → 사용자 언어 (PRD 진행 뷰 번역 표)
 const STEP_LABELS: Record<PipelineStepName, string> = {
+  interviewer: "질문 준비",
   "context-hunter": "시장 조사",
+  thesis: "낙관적 논제",
   "cold-critic": "냉정한 비판",
   "solution-designer": "AI 네이티브 재설계",
 };
@@ -18,6 +20,7 @@ const STEP_LABELS: Record<PipelineStepName, string> = {
 function stepVisual(step: StepState): StepVisualStatus {
   if (step.status === "completed") return "completed";
   if (step.status === "error") return "error";
+  if (step.status === "waiting") return "waiting";
   if (step.startedAt && !step.completedAt) return "running";
   return "pending";
 }
@@ -57,7 +60,7 @@ export function ProgressView({ detail, onResume }: ProgressViewProps) {
 
       {detail.status === "stalled" ? (
         <Card className="flex flex-col gap-3 border-amber-200 bg-amber-50">
-          <p className="text-[15px] leading-relaxed text-neutral-700">
+          <p className="text-[15px] leading-[1.8] text-neutral-700">
             실행이 중단된 것 같습니다. 실행 프로세스가 종료되었을 수 있어요.
           </p>
           <div>

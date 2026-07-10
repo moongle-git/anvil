@@ -48,7 +48,7 @@ function VerdictCallout({ verdict }: { verdict: string }) {
 export function CriticismSection({ criticism }: { criticism?: Criticism }) {
   return (
     <section aria-labelledby="criticism" className="flex flex-col gap-6">
-      <SectionHeading id="criticism">② 냉정한 현실 인식 및 비판</SectionHeading>
+      <SectionHeading id="criticism">③ 냉정한 반론 (反)</SectionHeading>
 
       {criticism === undefined ? (
         <EmptyState

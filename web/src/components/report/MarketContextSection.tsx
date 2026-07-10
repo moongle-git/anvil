@@ -5,7 +5,7 @@ import { CompetitorTable } from "./CompetitorTable";
 function YoutubeVoiceCard({ voice }: { voice: YoutubeVoice }) {
   return (
     <figure className="border-l-2 border-neutral-300 pl-4">
-      <blockquote className="text-[15px] leading-relaxed text-neutral-700">
+      <blockquote className="text-[15px] leading-[1.8] text-neutral-700">
         {voice.comment}
       </blockquote>
       <figcaption className="mt-2 text-xs text-neutral-500">
@@ -54,7 +54,7 @@ export function MarketContextSection({
           {context.trends.length > 0 ? (
             <div className="flex flex-col gap-2">
               <Subheading>트렌드</Subheading>
-              <ul className="list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-neutral-700">
+              <ul className="list-disc space-y-2 pl-5 text-[15px] leading-[1.8] text-neutral-700 marker:text-neutral-400">
                 {context.trends.map((trend) => (
                   <li key={trend}>{trend}</li>
                 ))}
@@ -83,7 +83,7 @@ export function MarketContextSection({
           {context.painPointEvidence.length > 0 ? (
             <div className="flex flex-col gap-2">
               <Subheading>페인포인트 근거</Subheading>
-              <ul className="list-disc space-y-1 pl-5 text-[15px] leading-relaxed text-neutral-700">
+              <ul className="list-disc space-y-2 pl-5 text-[15px] leading-[1.8] text-neutral-700 marker:text-neutral-400">
                 {context.painPointEvidence.map((evidence) => (
                   <li key={evidence}>{evidence}</li>
                 ))}

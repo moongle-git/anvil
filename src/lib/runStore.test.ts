@@ -81,11 +81,25 @@ describe("RunStore", () => {
       expect(onDisk).toEqual(state);
     });
 
-    it("initializes every pipeline step as pending", () => {
+    it("CLI 기본(interview 미지정)은 interviewer를 제외한 스텝만 pending으로 seed한다", () => {
       const state = store.createRun("아이디어");
+
+      expect(state.steps.map((s) => s.name)).toEqual([
+        "context-hunter",
+        "thesis",
+        "cold-critic",
+        "solution-designer",
+      ]);
+      expect(state.steps.every((s) => s.status === "pending")).toBe(true);
+      expect(state.interview).toBe(false);
+    });
+
+    it("interview:true면 interviewer 스텝까지 seed하고 interview=true를 기록한다", () => {
+      const state = store.createRun("아이디어", { interview: true });
 
       expect(state.steps.map((s) => s.name)).toEqual([...PIPELINE_STEPS]);
       expect(state.steps.every((s) => s.status === "pending")).toBe(true);
+      expect(state.interview).toBe(true);
     });
 
     it("generates unique runIds for repeated calls", () => {
@@ -152,7 +166,9 @@ describe("RunStore", () => {
   describe("saveStepOutput / loadStepOutput", () => {
     it("maps each step to its output filename", () => {
       expect(STEP_OUTPUT_FILES).toEqual({
+        interviewer: "questions.json",
         "context-hunter": "context.json",
+        thesis: "thesis.json",
         "cold-critic": "criticism.json",
         "solution-designer": "solution.json",
       });
@@ -231,6 +247,63 @@ describe("RunStore", () => {
       expect(store.loadStepOutput(runId, "context-hunter", schema)).toEqual({
         foo: "bar",
       });
+    });
+  });
+
+  describe("interview questions / answers", () => {
+    const questions = {
+      questions: [
+        { id: "q1", question: "핵심 타깃은 누구인가?", why: "UX가 달라진다" },
+      ],
+    };
+    const answers = {
+      answers: [{ questionId: "q1", answer: "초보 식집사" }],
+    };
+
+    it("saveInterviewQuestions는 questions.json에 저장하고 왕복한다", () => {
+      const { runId } = store.createRun("아이디어", { interview: true });
+
+      store.saveInterviewQuestions(runId, questions);
+
+      expect(fs.existsSync(path.join(baseDir, runId, "questions.json"))).toBe(
+        true,
+      );
+      expect(store.loadInterviewQuestions(runId)).toEqual(questions);
+    });
+
+    it("빈 질문 목록도 왕복한다", () => {
+      const { runId } = store.createRun("아이디어", { interview: true });
+
+      store.saveInterviewQuestions(runId, { questions: [] });
+
+      expect(store.loadInterviewQuestions(runId)).toEqual({ questions: [] });
+    });
+
+    it("saveInterviewAnswers는 answers.json에 저장하고 왕복한다", () => {
+      const { runId } = store.createRun("아이디어", { interview: true });
+
+      store.saveInterviewAnswers(runId, answers);
+
+      expect(fs.existsSync(path.join(baseDir, runId, "answers.json"))).toBe(
+        true,
+      );
+      expect(store.loadInterviewAnswers(runId)).toEqual(answers);
+    });
+
+    it("loadInterviewAnswers는 파일이 없으면 null을 반환한다", () => {
+      const { runId } = store.createRun("아이디어", { interview: true });
+
+      expect(store.loadInterviewAnswers(runId)).toBeNull();
+    });
+
+    it("loadInterviewAnswers는 손상된 JSON이면 null을 반환한다", () => {
+      const { runId } = store.createRun("아이디어", { interview: true });
+      fs.writeFileSync(
+        path.join(baseDir, runId, "answers.json"),
+        "{ not json",
+      );
+
+      expect(store.loadInterviewAnswers(runId)).toBeNull();
     });
   });
 
@@ -398,6 +471,7 @@ describe("deriveRunStatus", () => {
         name,
         status: "pending" as const,
       })),
+      interview: false,
       ...overrides,
     };
   }
@@ -436,6 +510,27 @@ describe("deriveRunStatus", () => {
     expect(deriveRunStatus(state, NOW_MS - 60 * MINUTE_MS, NOW_MS)).toBe(
       "error",
     );
+  });
+
+  it("returns waiting when a step is waiting, even if mtime is old (stalled 오판 방지)", () => {
+    const state = makeState({
+      steps: [{ name: "interviewer", status: "waiting" as const }],
+    });
+
+    expect(deriveRunStatus(state, NOW_MS - 60 * MINUTE_MS, NOW_MS)).toBe(
+      "waiting",
+    );
+  });
+
+  it("prefers error over waiting when both apply", () => {
+    const state = makeState({
+      steps: [
+        { name: "interviewer", status: "waiting" as const },
+        { name: "context-hunter", status: "error" as const },
+      ],
+    });
+
+    expect(deriveRunStatus(state, NOW_MS, NOW_MS)).toBe("error");
   });
 
   it("returns running when mtime is within 10 minutes of now", () => {

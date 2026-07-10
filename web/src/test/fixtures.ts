@@ -15,7 +15,10 @@ export const COMPLETED_RUN_ID = "2026-07-01T09-00-00-000Z-ai-meeting-notes-fx01"
 export const RUNNING_RUN_ID = "2026-07-03T14-00-00-000Z-plant-care-fx02";
 /** cold-critic이 error (errorMessage 포함) */
 export const ERROR_RUN_ID = "2026-07-05T20-00-00-000Z-lunch-pick-fx03";
+/** interviewer가 waiting — 답변 대기 중 (questions.json 보유, interview:true) */
+export const WAITING_RUN_ID = "2026-07-07T10-00-00-000Z-waiting-interview-fx04";
 
+// ALL_RUN_IDS는 목록/정렬 테스트가 순서를 단언하므로 WAITING은 제외한다
 export const ALL_RUN_IDS = [
   COMPLETED_RUN_ID,
   RUNNING_RUN_ID,

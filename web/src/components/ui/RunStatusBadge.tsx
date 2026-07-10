@@ -5,14 +5,16 @@ import { Badge, type BadgeTone } from "./Badge";
 export const RUN_STATUS_LABELS: Record<RunDisplayStatus, string> = {
   completed: "완료",
   error: "실패",
+  waiting: "답변 대기",
   running: "진행중",
   stalled: "중단됨",
 };
 
-// run 상태 → 시맨틱 톤 (완료=success / 실패=danger / 진행중=info / 중단=neutral)
+// run 상태 → 시맨틱 톤 (완료=success / 실패=danger / 답변 대기=warning / 진행중=info / 중단=neutral)
 const STATUS_TONES: Record<RunDisplayStatus, BadgeTone> = {
   completed: "success",
   error: "danger",
+  waiting: "warning",
   running: "info",
   stalled: "neutral",
 };

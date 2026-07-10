@@ -4,6 +4,7 @@ import type {
   CriticismPoint,
   MarketContext,
   Solution,
+  Thesis,
   YoutubeVoice,
 } from "../types/index.js";
 
@@ -36,12 +37,13 @@ function criticismLines(points: CriticismPoint[]): string[] {
 }
 
 /**
- * PRD "리포트 출력 규격"의 마크다운 구조를 그대로 따르는 순수 렌더러.
- * 섹션 제목·순서는 PRD 규격에서 벗어나면 안 된다.
+ * 정반합(正反合) 구조의 마크다운 컨설팅 리포트를 렌더링하는 순수 함수.
+ * 1. 시장 맥락 → 2. 낙관적 논제(正) → 3. 냉정한 반론(反) → 4. 종합과 재설계(合) → 5. 비즈니스 모델.
  */
 export function renderReport(
   idea: string,
   context: MarketContext,
+  thesis: Thesis,
   criticism: Criticism,
   solution: Solution,
 ): string {
@@ -68,7 +70,20 @@ export function renderReport(
     }
   }
 
-  lines.push("## 2. 냉정한 현실 인식 및 비판 (Cold Criticism)", "");
+  lines.push("## 2. 낙관적 논제 (Thesis / 正)", "");
+  lines.push(
+    "> 이 사업이 왜 크게 성공할 수 있는가 — 수익 모델을 적극 긍정하는 관점.",
+    "",
+  );
+  lines.push(`**수익 모델:** ${thesis.revenueModel}`, "");
+  lines.push("*   **성장 지렛대 (Growth Levers):**");
+  lines.push(...thesis.growthLevers.map((g) => `    *   ${g}`));
+  lines.push("*   **시장 순풍 (Market Tailwinds):**");
+  lines.push(...thesis.marketTailwinds.map((t) => `    *   ${t}`));
+  lines.push("", `**최상 시나리오:** ${thesis.bestCaseScenario}`, "");
+  lines.push(`**핵심 논지:** ${thesis.winningThesis}`, "");
+
+  lines.push("## 3. 냉정한 반론 (Antithesis / 反)", "");
   lines.push(
     "> [경고] 본 아이디어가 실패할 확률이 높은 구조적 이유를 나열합니다.",
     "",
@@ -81,7 +96,10 @@ export function renderReport(
   lines.push(...criticismLines(criticism.copycatRisk));
   lines.push("", `**최종 평결:** ${criticism.verdict}`, "");
 
-  lines.push("## 3. AI 네이티브 관점의 해결책 (Solution Architecture)", "");
+  lines.push("## 4. 종합과 재설계 (Synthesis / 合)", "");
+  if (solution.synthesis !== undefined) {
+    lines.push(`**종합 통찰:** ${solution.synthesis}`, "");
+  }
   lines.push(`**재설계된 컨셉:** ${solution.revisedConcept}`, "");
   lines.push("### ① 데이터 수집 및 최소 입력 구조 (Minimal Input)", "");
   lines.push(solution.minimalInput, "");
@@ -90,7 +108,7 @@ export function renderReport(
   lines.push("### ③ 독점적 데이터 플라이휠 (Data Flywheel)", "");
   lines.push(solution.dataFlywheel, "");
 
-  lines.push("## 4. 지속 가능한 비즈니스 모델 (Monetization Model)", "");
+  lines.push("## 5. 지속 가능한 비즈니스 모델 (Monetization Model)", "");
   lines.push(solution.monetization, "");
 
   return lines.join("\n");

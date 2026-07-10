@@ -68,6 +68,7 @@ function formatYoutubeSection(
 export async function runContextHunter(
   deps: ContextHunterDeps,
   idea: string,
+  clarifications?: string,
 ): Promise<MarketContext> {
   let voices: { video: YoutubeVideo; comments: YoutubeComment[] }[] = [];
   try {
@@ -80,10 +81,15 @@ export async function runContextHunter(
     );
   }
 
-  const prompt = CONTEXT_HUNTER_PROMPT_TEMPLATE.replace("{idea}", idea).replace(
+  let prompt = CONTEXT_HUNTER_PROMPT_TEMPLATE.replace("{idea}", idea).replace(
     "{youtubeSection}",
     formatYoutubeSection(voices),
   );
+
+  // 인터뷰 답변이 있으면 아이디어의 핵심 맥락으로 반영한다 (웹 인터뷰 흐름)
+  if (clarifications !== undefined && clarifications.trim().length > 0) {
+    prompt += `\n\n## 사용자 추가 설명 (인터뷰 답변)\n${clarifications}\n\n위 사용자 추가 설명을 아이디어의 핵심 맥락으로 반영해 조사하라.`;
+  }
 
   return deps.gemini.generateStructured({
     systemInstruction: CONTEXT_HUNTER_SYSTEM_PROMPT,

@@ -28,6 +28,7 @@ const ALL_SEVERITIES: CriticismSeverity[] = ["fatal", "major", "minor"];
 const ALL_STATUSES: RunDisplayStatus[] = [
   "completed",
   "error",
+  "waiting",
   "running",
   "stalled",
 ];
@@ -97,10 +98,11 @@ describe("RunStatusBadge", () => {
     }
   });
 
-  it("RUN_STATUS_LABELS는 상태 4종을 정확히 매핑한다 (단일 소스)", () => {
+  it("RUN_STATUS_LABELS는 상태 5종을 정확히 매핑한다 (단일 소스)", () => {
     expect(RUN_STATUS_LABELS).toEqual({
       completed: "완료",
       error: "실패",
+      waiting: "답변 대기",
       running: "진행중",
       stalled: "중단됨",
     });
@@ -112,6 +114,7 @@ describe("RunStatusBadge", () => {
   it.each([
     ["completed", "success"],
     ["error", "danger"],
+    ["waiting", "warning"],
     ["running", "info"],
     ["stalled", "neutral"],
   ] as const)(

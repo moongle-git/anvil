@@ -116,6 +116,37 @@ describe("runContextHunter (정상 흐름)", () => {
   });
 });
 
+describe("runContextHunter (인터뷰 답변 반영)", () => {
+  it("clarifications가 있으면 프롬프트에 인터뷰 답변 섹션을 추가한다", async () => {
+    const { deps, generateStructured } = fakeDeps([]);
+    const clarifications = "Q: 핵심 타깃은?\nA: 바쁜 1인 가구 직장인";
+
+    await runContextHunter(deps, IDEA, clarifications);
+
+    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+    expect(prompt).toContain("사용자 추가 설명");
+    expect(prompt).toContain("바쁜 1인 가구 직장인");
+  });
+
+  it("clarifications가 없으면 인터뷰 답변 섹션을 넣지 않는다 (기존 동작 유지)", async () => {
+    const { deps, generateStructured } = fakeDeps([]);
+
+    await runContextHunter(deps, IDEA);
+
+    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+    expect(prompt).not.toContain("사용자 추가 설명");
+  });
+
+  it("clarifications가 공백뿐이면 섹션을 넣지 않는다", async () => {
+    const { deps, generateStructured } = fakeDeps([]);
+
+    await runContextHunter(deps, IDEA, "   ");
+
+    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+    expect(prompt).not.toContain("사용자 추가 설명");
+  });
+});
+
 describe("runContextHunter (YouTube 실패 내성)", () => {
   it("YouTube 수집이 실패해도 웹검색만으로 진행하고 실패를 로깅한다", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);

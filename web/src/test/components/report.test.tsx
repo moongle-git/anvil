@@ -5,6 +5,7 @@ import type {
   Criticism,
   MarketContext,
   Solution,
+  Thesis,
 } from "@anvil/types";
 import type { RunDetail } from "@/lib/server/runs";
 import { CompetitorTable } from "@/components/report/CompetitorTable";
@@ -12,8 +13,14 @@ import { CriticismSection } from "@/components/report/CriticismSection";
 import { MarketContextSection } from "@/components/report/MarketContextSection";
 import { MonetizationSection } from "@/components/report/MonetizationSection";
 import { SolutionSection } from "@/components/report/SolutionSection";
+import { ThesisSection } from "@/components/report/ThesisSection";
 import { VerdictBanner } from "@/components/report/VerdictBanner";
 import { ReportView } from "@/components/report/ReportView";
+import {
+  LEVER_BOLD_LEADIN,
+  MONETIZATION_NUMBERED,
+  REVISED_CONCEPT_NESTED,
+} from "../richTextFixtures";
 
 afterEach(cleanup);
 
@@ -47,6 +54,15 @@ const solution: Solution = {
   agenticWorkflow: "관측 → 요약 → 액션 추출을 자동 실행한다.",
   dataFlywheel: "사용자 수정 피드백이 요약 품질을 높인다.",
   monetization: "팀 단위 구독. 좌석당 과금 모델.",
+  synthesis: "낙관의 성장성과 반론의 번들 리스크를 종합하면 실행 추적이 해자다.",
+};
+
+const thesis: Thesis = {
+  revenueModel: "팀 좌석당 구독으로 확장한다.",
+  growthLevers: ["조직 내 바이럴 확산", "캘린더 생태계 번들"],
+  marketTailwinds: ["원격근무 확산", "AI 요약 수요 증가"],
+  bestCaseScenario: "2년 내 팀 침투율 20% 달성 시 카테고리 리더.",
+  winningThesis: "회의 데이터 진입점을 선점하면 실행 추적 시장을 장악한다.",
 };
 
 const marketContext: MarketContext = {
@@ -74,10 +90,12 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
       createdAt: "2026-07-01T09:00:00.000Z",
       steps: [],
       completedAt: "2026-07-01T09:05:00.000Z",
+      interview: false,
     },
     status: "completed",
     hasReport: true,
     context: marketContext,
+    thesis,
     criticism,
     solution,
     ...overrides,
@@ -104,6 +122,20 @@ describe("VerdictBanner", () => {
   it("criticism이 없으면 안내 문구를 보여준다", () => {
     render(<VerdictBanner criticism={undefined} />);
     expect(screen.getByText("비판 데이터를 불러올 수 없습니다.")).toBeDefined();
+  });
+
+  it("verdict의 볼드를 <strong>으로 렌더링하되 <p>를 중첩하지 않는다", () => {
+    const { container } = render(
+      <VerdictBanner
+        criticism={{ ...criticism, verdict: "**치명적**이라고 판단한다." }}
+      />,
+    );
+
+    expect(container.querySelector("p > strong")?.textContent).toBe("치명적");
+    expect(container.textContent).not.toContain("**");
+    // renderRichText를 쓰면 <p> 안에 <div><p>가 들어가 HTML이 무효가 된다
+    expect(container.querySelector("p p")).toBeNull();
+    expect(container.querySelector("p div")).toBeNull();
   });
 });
 
@@ -161,13 +193,49 @@ describe("ReportView (조립)", () => {
     // 목차 앵커
     const nav = screen.getByRole("navigation", { name: "리포트 목차" });
     expect(nav.querySelector('a[href="#market"]')).not.toBeNull();
+    expect(nav.querySelector('a[href="#thesis"]')).not.toBeNull();
     expect(nav.querySelector('a[href="#solution"]')).not.toBeNull();
-    // 4개 섹션이 모두 실제로 렌더링된다 (스텁 없음)
+    // 정반합 5개 섹션이 모두 실제로 렌더링된다 (스텁 없음)
     expect(screen.getByText("① 실시간 시장 맥락")).toBeDefined();
+    expect(screen.getByText("② 낙관적 논제 (正)")).toBeDefined();
     expect(screen.getByText("페인포인트의 허구성")).toBeDefined();
     expect(screen.getByText("재설계된 컨셉")).toBeDefined();
-    expect(screen.getByText("④ 지속 가능한 비즈니스 모델")).toBeDefined();
+    expect(screen.getByText("⑤ 지속 가능한 비즈니스 모델")).toBeDefined();
     expect(screen.queryByText("다음 step에서 구현됩니다.")).toBeNull();
+  });
+});
+
+describe("ThesisSection", () => {
+  it("낙관 논제의 핵심 논지·수익 모델·성장 지렛대·시장 순풍을 렌더링한다", () => {
+    render(<ThesisSection thesis={thesis} />);
+    expect(
+      screen.getByText(
+        "회의 데이터 진입점을 선점하면 실행 추적 시장을 장악한다.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByText("팀 좌석당 구독으로 확장한다.")).toBeDefined();
+    expect(screen.getByText("조직 내 바이럴 확산")).toBeDefined();
+    expect(screen.getByText("원격근무 확산")).toBeDefined();
+  });
+
+  it("thesis가 없으면 EmptyState를 보여준다 (구 run 하위호환)", () => {
+    render(<ThesisSection thesis={undefined} />);
+    expect(screen.getByText("낙관 논제 데이터가 없습니다")).toBeDefined();
+  });
+
+  it("성장 지렛대·시장 순풍의 볼드 리드인을 <strong>으로 렌더링한다 (** 노출 금지)", () => {
+    const { container } = render(
+      <ThesisSection
+        thesis={{
+          ...thesis,
+          growthLevers: [LEVER_BOLD_LEADIN],
+          marketTailwinds: [LEVER_BOLD_LEADIN],
+        }}
+      />,
+    );
+
+    expect(container.querySelectorAll("li > strong").length).toBe(2);
+    expect(container.textContent).not.toContain("**");
   });
 });
 
@@ -219,6 +287,34 @@ describe("SolutionSection", () => {
     expect(screen.getByText("③ 독점적 데이터 플라이휠")).toBeDefined();
   });
 
+  it("synthesis가 있으면 종합 통찰 블록을 재설계 컨셉보다 먼저 보여준다 (合)", () => {
+    const { container } = render(<SolutionSection solution={solution} />);
+    const text = container.textContent ?? "";
+    expect(text).toContain("종합 통찰 (正 + 反 → 合)");
+    expect(text).toContain(
+      "낙관의 성장성과 반론의 번들 리스크를 종합하면 실행 추적이 해자다.",
+    );
+    expect(text.indexOf("종합 통찰")).toBeLessThan(text.indexOf("재설계된 컨셉"));
+  });
+
+  it("synthesis가 없으면 종합 통찰 블록을 숨긴다 (구 solution 하위호환)", () => {
+    const { synthesis, ...withoutSynthesis } = solution;
+    void synthesis;
+    render(<SolutionSection solution={withoutSynthesis} />);
+    expect(screen.queryByText("종합 통찰 (正 + 反 → 合)")).toBeNull();
+  });
+
+  it("재설계 컨셉의 2계층 불릿을 중첩 <ul>로 렌더링한다", () => {
+    const { container } = render(
+      <SolutionSection
+        solution={{ ...solution, revisedConcept: REVISED_CONCEPT_NESTED }}
+      />,
+    );
+
+    expect(container.querySelectorAll("ul ul > li").length).toBe(7);
+    expect(container.textContent).not.toContain("*");
+  });
+
   it("solution이 없으면 EmptyState를 보여준다", () => {
     render(<SolutionSection solution={undefined} />);
     expect(screen.getByText("재설계 데이터가 없습니다")).toBeDefined();
@@ -234,5 +330,18 @@ describe("MonetizationSection", () => {
   it("solution이 없으면 EmptyState를 보여준다", () => {
     render(<MonetizationSection solution={undefined} />);
     expect(screen.getByText("비즈니스 모델 데이터가 없습니다")).toBeDefined();
+  });
+
+  // 실데이터 회귀: 개행 0개짜리 818자 문자열이 통짜 <p> 하나로 렌더링되던 버그
+  it("개행 없는 번호 목록을 <ol> 3개 항목으로 렌더링한다", () => {
+    const { container } = render(
+      <MonetizationSection
+        solution={{ ...solution, monetization: MONETIZATION_NUMBERED }}
+      />,
+    );
+
+    expect(container.querySelectorAll("ol > li").length).toBe(3);
+    expect(container.querySelectorAll("ol > li > strong").length).toBe(3);
+    expect(container.textContent).not.toContain("*");
   });
 });

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunStateSchema } from "@anvil/types";
 import { GET as getRuns, POST as postRun } from "@/app/api/runs/route";
 import { GET as getRunById } from "@/app/api/runs/[id]/route";
+import { POST as postAnswers } from "@/app/api/runs/[id]/answers/route";
 import { GET as getReport } from "@/app/api/runs/[id]/report/route";
 import { POST as postResume } from "@/app/api/runs/[id]/resume/route";
 import { spawnConsult } from "@/lib/server/spawnConsult";
@@ -14,6 +15,7 @@ import {
   ERROR_RUN_ID,
   FIXTURES_DIR,
   RUNNING_RUN_ID,
+  WAITING_RUN_ID,
   ageStateFile,
   cleanupTempRunsDir,
   copyFixtureRun,
@@ -113,6 +115,9 @@ describe("POST /api/runs", () => {
       JSON.parse(fs.readFileSync(path.join(runsDir, runId, "state.json"), "utf-8")),
     );
     expect(onDisk.idea).toBe("AI 이력서 첨삭 서비스");
+    // 웹 생성 run은 인터뷰가 활성화된다
+    expect(onDisk.interview).toBe(true);
+    expect(onDisk.steps[0]?.name).toBe("interviewer");
   });
 
   it("idea가 공백뿐이면 400이고 spawn하지 않는다", async () => {
@@ -255,6 +260,82 @@ describe("POST /api/runs/[id]/resume", () => {
     const res = await resume(COMPLETED_RUN_ID);
 
     expect(res.status).toBe(409);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/runs/[id]/answers", () => {
+  const validBody = { answers: [{ questionId: "q1", answer: "초보 식집사" }] };
+
+  function answers(id: string, body: unknown): Promise<Response> {
+    return postAnswers(
+      new Request(`http://localhost/api/runs/${id}/answers`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      params(id),
+    );
+  }
+
+  it("waiting run은 answers.json을 기록하고 spawn 후 202", async () => {
+    copyFixtureRun(runsDir, WAITING_RUN_ID);
+
+    const res = await answers(WAITING_RUN_ID, validBody);
+
+    expect(res.status).toBe(202);
+    expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(WAITING_RUN_ID);
+    const onDisk = JSON.parse(
+      fs.readFileSync(
+        path.join(runsDir, WAITING_RUN_ID, "answers.json"),
+        "utf-8",
+      ),
+    );
+    expect(onDisk).toEqual(validBody);
+  });
+
+  it("빈 답변(전체 스킵)도 202로 재개한다", async () => {
+    copyFixtureRun(runsDir, WAITING_RUN_ID);
+
+    const res = await answers(WAITING_RUN_ID, { answers: [] });
+
+    expect(res.status).toBe(202);
+    expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(WAITING_RUN_ID);
+  });
+
+  it("없는 run은 404이고 spawn하지 않는다", async () => {
+    const res = await answers("nope", validBody);
+
+    expect(res.status).toBe(404);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+
+  it("waiting이 아닌 run은 409이고 spawn하지 않는다", async () => {
+    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+
+    const res = await answers(COMPLETED_RUN_ID, validBody);
+
+    expect(res.status).toBe(409);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+
+  it("answers 형식이 잘못되면 400이고 spawn하지 않는다", async () => {
+    const res = await answers(WAITING_RUN_ID, { answers: [{ answer: "no id" }] });
+
+    expect(res.status).toBe(400);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+
+  it("본문이 JSON이 아니면 400", async () => {
+    const res = await postAnswers(
+      new Request(`http://localhost/api/runs/${WAITING_RUN_ID}/answers`, {
+        method: "POST",
+        body: "oops",
+      }),
+      params(WAITING_RUN_ID),
+    );
+
+    expect(res.status).toBe(400);
     expect(spawnConsult).not.toHaveBeenCalled();
   });
 });

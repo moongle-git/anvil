@@ -43,6 +43,7 @@ function makeState(steps: StepState[], completedAt?: string): RunState {
     idea: "반려식물 케어 구독 서비스",
     createdAt: "2026-07-03T14:00:00.000Z",
     steps,
+    interview: false,
     ...(completedAt ? { completedAt } : {}),
   };
 }
@@ -114,6 +115,30 @@ const completedDetail: RunDetail = {
   hasReport: true,
 };
 
+const waitingDetail: RunDetail = {
+  state: {
+    runId: "r1",
+    idea: "AI로 사람들을 도와주는 앱",
+    createdAt: "2026-07-03T14:00:00.000Z",
+    steps: [
+      {
+        name: "interviewer",
+        status: "waiting",
+        startedAt: "2026-07-03T14:00:01.000Z",
+      },
+      { name: "context-hunter", status: "pending" },
+    ],
+    interview: true,
+  },
+  status: "waiting",
+  hasReport: false,
+  questions: {
+    questions: [
+      { id: "q1", question: "핵심 타깃은 누구인가?", why: "검증 방향이 달라진다" },
+    ],
+  },
+};
+
 describe("useRunDetail (폴링)", () => {
   it("running이면 intervalMs마다 폴링하고 completed면 멈춘다", async () => {
     vi.useFakeTimers();
@@ -177,6 +202,47 @@ describe("useRunDetail (폴링)", () => {
       await vi.advanceTimersByTimeAsync(6000);
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("waiting이면 계속 폴링하고 running→completed 전이까지 이어간다", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(waitingDetail))
+      .mockResolvedValueOnce(jsonResponse(waitingDetail))
+      .mockResolvedValueOnce(jsonResponse(runningDetail))
+      .mockResolvedValueOnce(jsonResponse(completedDetail));
+
+    const { result } = renderHook(() => useRunDetail("r1", 2000));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.detail?.status).toBe("waiting");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // waiting에서도 폴링이 계속된다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.detail?.status).toBe("running");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.current.detail?.status).toBe("completed");
+
+    // completed 후에는 멈춘다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -273,6 +339,33 @@ describe("RunDetailClient (분기)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(screen.getByText("시장 조사")).toBeDefined());
+  });
+
+  it("waiting이면 질문 폼을 렌더링하고, 답변 제출 시 POST answers를 호출한다", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/answers")) {
+        return jsonResponse({ runId: "r1" }, 202);
+      }
+      return jsonResponse(waitingDetail);
+    });
+    render(<RunDetailClient runId="r1" />);
+
+    await waitFor(() =>
+      expect(screen.getByText("몇 가지만 확인할게요")).toBeDefined(),
+    );
+    // 생성된 질문이 라벨로 렌더링된다
+    expect(screen.getByText(/핵심 타깃은 누구인가/)).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "답변 제출하고 분석 계속" }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/runs/r1/answers"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
   });
 
   it("resume 버튼 클릭 시 POST resume를 호출한다", async () => {

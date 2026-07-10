@@ -10,10 +10,13 @@ import {
   CriticismSchema,
   MarketContextSchema,
   SolutionSchema,
+  ThesisSchema,
   type Criticism,
+  type InterviewQuestions,
   type MarketContext,
   type RunState,
   type Solution,
+  type Thesis,
 } from "@anvil/types";
 
 export function getRunsDir(): string {
@@ -31,7 +34,9 @@ export function getRunStore(): RunStore {
 export interface RunDetail {
   state: RunState;
   status: RunDisplayStatus;
+  questions?: InterviewQuestions;
   context?: MarketContext;
+  thesis?: Thesis;
   criticism?: Criticism;
   solution?: Solution;
   hasReport: boolean;
@@ -51,14 +56,18 @@ export function getRunDetail(runId: string): RunDetail | null {
     return null;
   }
 
+  const questions = store.loadInterviewQuestions(runId);
   const context = store.loadStepOutput(runId, "context-hunter", MarketContextSchema);
+  const thesis = store.loadStepOutput(runId, "thesis", ThesisSchema);
   const criticism = store.loadStepOutput(runId, "cold-critic", CriticismSchema);
   const solution = store.loadStepOutput(runId, "solution-designer", SolutionSchema);
 
   return {
     state,
     status: deriveRunStatus(state, stateFileMtimeMs),
+    ...(questions !== null ? { questions } : {}),
     ...(context !== null ? { context } : {}),
+    ...(thesis !== null ? { thesis } : {}),
     ...(criticism !== null ? { criticism } : {}),
     ...(solution !== null ? { solution } : {}),
     hasReport: fs.existsSync(path.join(runDir, "report.md")),

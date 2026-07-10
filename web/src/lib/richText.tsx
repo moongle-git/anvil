@@ -1,43 +1,68 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
+import {
+  parseInline,
+  parseRichText,
+  type InlineToken,
+  type ListItem,
+} from "./richTextParser";
 
-// 인라인 변환: **볼드**만 <strong>으로. 미종결 **는 정규식에 매칭되지 않아 리터럴로 남는다.
-function renderInline(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const boldPattern = /\*\*(.+?)\*\*/g;
-  let lastIndex = 0;
-  let key = 0;
-  let match: RegExpExecArray | null;
-  while ((match = boldPattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-    nodes.push(<strong key={key++}>{match[1]}</strong>);
-    lastIndex = boldPattern.lastIndex;
-  }
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-  return nodes;
+// 본문 규격 (docs/UI_GUIDE.md). 한국어 장문이라 줄간격을 1.8로 둔다.
+const PROSE = "text-[15px] leading-[1.8] text-neutral-700";
+const ORDERED = `${PROSE} list-decimal space-y-3 pl-6 marker:font-medium marker:text-neutral-500`;
+const UNORDERED = `${PROSE} list-disc space-y-2 pl-5 marker:text-neutral-400`;
+const NESTED = "mt-2 list-[circle] space-y-1.5 pl-5";
+
+function renderTokens(spans: InlineToken[]): ReactNode[] {
+  return spans.map((span, index) =>
+    span.type === "strong" ? (
+      <strong key={index}>{span.value}</strong>
+    ) : (
+      <Fragment key={index}>{span.value}</Fragment>
+    ),
+  );
 }
 
-// 에이전트 산출물의 장문 텍스트를 문단(<p>)으로 분리하고 **볼드**만 변환한다.
-// 그 외 마크다운 문법은 처리하지 않고 일반 텍스트로 둔다 (의존성 없는 최소 렌더).
-export function renderRichText(text: string): ReactNode {
-  const paragraphs = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+function renderItems(items: ListItem[]): ReactNode[] {
+  return items.map((item, index) => (
+    <li key={index}>
+      {renderTokens(item.spans)}
+      {item.children.length > 0 ? (
+        <ul className={NESTED}>{renderItems(item.children)}</ul>
+      ) : null}
+    </li>
+  ));
+}
 
+// 블록 래퍼 없이 인라인 조각만 반환한다. 이미 <p>/<li> 안에 있는 문자열에 쓴다.
+export function renderInline(text: string): ReactNode {
+  return renderTokens(parseInline(text));
+}
+
+// 장문 텍스트를 문단·번호 목록·불릿 목록으로 렌더링한다.
+export function renderRichText(text: string): ReactNode {
   return (
-    <div className="flex flex-col gap-3">
-      {paragraphs.map((paragraph, index) => (
-        <p
-          key={index}
-          className="text-[15px] leading-relaxed text-neutral-700"
-        >
-          {renderInline(paragraph)}
-        </p>
-      ))}
+    <div className="flex flex-col gap-4">
+      {parseRichText(text).map((block, index) => {
+        if (block.type === "paragraph") {
+          return (
+            <p key={index} className={PROSE}>
+              {renderTokens(block.spans)}
+            </p>
+          );
+        }
+        if (block.type === "orderedList") {
+          return (
+            <ol key={index} className={ORDERED}>
+              {renderItems(block.items)}
+            </ol>
+          );
+        }
+        return (
+          <ul key={index} className={UNORDERED}>
+            {renderItems(block.items)}
+          </ul>
+        );
+      })}
     </div>
   );
 }

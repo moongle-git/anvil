@@ -58,8 +58,10 @@ export function useRunDetail(
       if (cancelled) return;
       setDetail(data);
       setError(null);
-      // 실행 중일 때만 계속 폴링한다 (completed/error/stalled는 사용자 액션 대기).
-      if (data.status === "running") {
+      // 실행 중이거나 답변 대기 중일 때 계속 폴링한다.
+      // waiting에서도 폴링을 유지해야 답변 제출 후 waiting→running→completed 전이를 잡는다.
+      // (completed/error/stalled는 사용자 액션 대기 → 멈춤)
+      if (data.status === "running" || data.status === "waiting") {
         timer = setTimeout(poll, intervalMs);
       }
     }

@@ -14,7 +14,7 @@ const PARTS: { key: SolutionPartKey; title: string }[] = [
 export function SolutionSection({ solution }: { solution?: Solution }) {
   return (
     <section aria-labelledby="solution" className="flex flex-col gap-6">
-      <SectionHeading id="solution">③ AI 네이티브 관점의 해결책</SectionHeading>
+      <SectionHeading id="solution">④ 종합과 재설계 (合)</SectionHeading>
 
       {solution === undefined ? (
         <EmptyState
@@ -23,7 +23,17 @@ export function SolutionSection({ solution }: { solution?: Solution }) {
         />
       ) : (
         <>
-          {/* 처방의 결론(재설계된 컨셉)을 먼저, 강조 테두리로 (역피라미드) */}
+          {/* 合: 정(正)과 반(反)을 종합한 통찰을 맨 위에 (있을 때만) */}
+          {solution.synthesis !== undefined ? (
+            <Card className="flex flex-col gap-2 border-neutral-900 bg-neutral-50">
+              <span className="text-sm font-medium text-neutral-500">
+                종합 통찰 (正 + 反 → 合)
+              </span>
+              {renderRichText(solution.synthesis)}
+            </Card>
+          ) : null}
+
+          {/* 처방의 결론(재설계된 컨셉)을 강조 테두리로 (역피라미드) */}
           <Card className="flex flex-col gap-2 border-neutral-900">
             <span className="text-sm font-medium text-neutral-500">
               재설계된 컨셉

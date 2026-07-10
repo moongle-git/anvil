@@ -19,7 +19,7 @@ export function ErrorState({
     >
       <h2 className="text-base font-semibold text-neutral-900">{title}</h2>
       {message ? (
-        <p className="text-[15px] leading-relaxed text-neutral-700">{message}</p>
+        <p className="text-[15px] leading-[1.8] text-neutral-700">{message}</p>
       ) : null}
       {onRetry ? (
         <div className="mt-1">

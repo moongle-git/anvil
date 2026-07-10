@@ -4,9 +4,15 @@ import {
   type Criticism,
   type MarketContext,
   type Solution,
+  type Thesis,
 } from "../types/index.js";
 
-export const SOLUTION_DESIGNER_SYSTEM_PROMPT = `당신은 AI 네이티브 서비스 설계 전문가다. 기존 아이디어를 화면·수동 입력 중심의 낡은 기획에서 벗어나, AI 시대에 생존 가능한 형태로 재설계한다.
+export const SOLUTION_DESIGNER_SYSTEM_PROMPT = `당신은 AI 네이티브 서비스 설계 전문가이자 변증법적 종합가(synthesizer)다. 기존 아이디어를 화면·수동 입력 중심의 낡은 기획에서 벗어나, AI 시대에 생존 가능한 형태로 재설계한다.
+
+## 정반합(正反合) 종합 강제
+당신은 낙관론(正, Thesis)과 냉정한 반론(反, Criticism)을 모두 전달받는다. 두 대립 관점을 변증법적으로 종합하라.
+synthesis 필드에는 낙관론의 성장 동력과 반론의 치명적 리스크를 **함께** 반영한, 어느 한쪽에도 매몰되지 않는 새로운 통찰과 최종 결론을 한두 단락으로 작성하라.
+단순 절충("장점도 있고 단점도 있다")이 아니라, 대립을 넘어서는 더 높은 차원의 재구성이어야 한다.
 
 ## 4대 설계 원칙
 아래 4개 원칙 각각에 대응하는 필드를 작성하라:
@@ -30,13 +36,19 @@ export const SOLUTION_DESIGNER_PROMPT_TEMPLATE = `## 아이디어 원문
 {marketContext}
 \`\`\`
 
-## 냉정한 비판 (Criticism — Cold Critic의 3축 비판)
+## 낙관적 논제 (正, Thesis — 낙관론자의 적극 긍정)
+\`\`\`json
+{thesis}
+\`\`\`
+
+## 냉정한 반론 (反, Criticism — Cold Critic의 3축 비판)
 \`\`\`json
 {criticism}
 \`\`\`
 
 ## 지시사항
-위 비판을 전부 수용하여 아이디어를 4대 설계 원칙(Minimal Input / Agentic Workflow / Data Flywheel / Monetization)에 따라 AI 네이티브 형태로 재설계하라.
+1. 낙관적 논제(正)와 냉정한 반론(反)을 변증법적으로 종합해 synthesis에 새로운 통찰과 최종 결론을 작성하라.
+2. 반론을 전부 수용하여 아이디어를 4대 설계 원칙(Minimal Input / Agentic Workflow / Data Flywheel / Monetization)에 따라 AI 네이티브 형태로 재설계하라.
 revisedConcept에는 fatal/major 비판 각각에 대한 대응이 드러나야 한다.`;
 
 export interface SolutionDesignerDeps {
@@ -48,9 +60,11 @@ export async function runSolutionDesigner(
   idea: string,
   context: MarketContext,
   criticism: Criticism,
+  thesis: Thesis,
 ): Promise<Solution> {
   const prompt = SOLUTION_DESIGNER_PROMPT_TEMPLATE.replace("{idea}", idea)
     .replace("{marketContext}", JSON.stringify(context, null, 2))
+    .replace("{thesis}", JSON.stringify(thesis, null, 2))
     .replace("{criticism}", JSON.stringify(criticism, null, 2));
 
   return deps.gemini.generateStructured({

@@ -3,25 +3,38 @@ import fs from "node:fs";
 import path from "node:path";
 import type { z } from "zod";
 import {
+  InterviewAnswersSchema,
+  InterviewQuestionsSchema,
   PIPELINE_STEPS,
   RunStateSchema,
+  type InterviewAnswers,
+  type InterviewQuestions,
   type PipelineStepName,
   type RunState,
 } from "../types/index.js";
 
 export const STEP_OUTPUT_FILES: Record<PipelineStepName, string> = {
+  interviewer: "questions.json",
   "context-hunter": "context.json",
+  thesis: "thesis.json",
   "cold-critic": "criticism.json",
   "solution-designer": "solution.json",
 };
 
 const STATE_FILE = "state.json";
 const REPORT_FILE = "report.md";
+// 인터뷰 답변은 스텝 산출물이 아니라 사람이 제출하는 아티팩트다
+const ANSWERS_FILE = "answers.json";
 
 // state.json이 이 시간보다 오래 갱신되지 않으면 실행 프로세스가 죽은 것으로 간주한다 (PRD "run 상태 파생 규칙")
 const STALLED_THRESHOLD_MS = 10 * 60 * 1000;
 
-export type RunDisplayStatus = "completed" | "error" | "running" | "stalled";
+export type RunDisplayStatus =
+  | "completed"
+  | "error"
+  | "waiting"
+  | "running"
+  | "stalled";
 
 export interface RunSummary {
   runId: string;
@@ -41,6 +54,11 @@ export function deriveRunStatus(
   }
   if (state.steps.some((step) => step.status === "error")) {
     return "error";
+  }
+  // 인터뷰 답변 대기는 프로세스가 정상 종료된 상태다.
+  // mtime(stalled) 판정보다 먼저 확인해야 10분 후 stalled로 오판되지 않는다.
+  if (state.steps.some((step) => step.status === "waiting")) {
+    return "waiting";
   }
   return nowMs - stateFileMtimeMs <= STALLED_THRESHOLD_MS
     ? "running"
@@ -68,7 +86,8 @@ export class RunStore {
     return path.join(this.baseDir, runId);
   }
 
-  createRun(idea: string): RunState {
+  createRun(idea: string, opts?: { interview?: boolean }): RunState {
+    const interview = opts?.interview ?? false;
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const suffix = crypto.randomBytes(3).toString("hex");
     const slug = slugify(idea);
@@ -78,15 +97,49 @@ export class RunStore {
       runId,
       idea,
       createdAt: new Date().toISOString(),
-      steps: PIPELINE_STEPS.map((name) => ({
+      // interviewer 스텝은 인터뷰가 켜진 run(웹)에서만 seed한다
+      steps: PIPELINE_STEPS.filter(
+        (name) => name !== "interviewer" || interview,
+      ).map((name) => ({
         name,
         status: "pending" as const,
       })),
+      interview,
     };
 
     fs.mkdirSync(this.runDir(runId), { recursive: true });
     this.saveRun(state);
     return state;
+  }
+
+  saveInterviewQuestions(runId: string, questions: InterviewQuestions): void {
+    this.saveStepOutput(runId, "interviewer", questions);
+  }
+
+  loadInterviewQuestions(runId: string): InterviewQuestions | null {
+    return this.loadStepOutput(runId, "interviewer", InterviewQuestionsSchema);
+  }
+
+  saveInterviewAnswers(runId: string, answers: InterviewAnswers): void {
+    atomicWriteFileSync(
+      path.join(this.runDir(runId), ANSWERS_FILE),
+      JSON.stringify(answers, null, 2),
+    );
+  }
+
+  loadInterviewAnswers(runId: string): InterviewAnswers | null {
+    const filePath = path.join(this.runDir(runId), ANSWERS_FILE);
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    } catch {
+      return null;
+    }
+    const result = InterviewAnswersSchema.safeParse(parsed);
+    return result.success ? result.data : null;
   }
 
   loadRun(runId: string): RunState {

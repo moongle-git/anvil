@@ -14,6 +14,7 @@ import {
   COMPLETED_RUN_ID,
   ERROR_RUN_ID,
   RUNNING_RUN_ID,
+  WAITING_RUN_ID,
   ageStateFile,
   cleanupTempRunsDir,
   copyFixtureRun,
@@ -102,6 +103,41 @@ describe("getRunDetail", () => {
     expect(
       detail?.state.steps.find((s) => s.name === "cold-critic")?.errorMessage,
     ).toContain("CriticismSchema");
+  });
+
+  it("답변 대기 run: status는 waiting이고 questions를 노출한다", () => {
+    copyFixtureRun(runsDir, WAITING_RUN_ID);
+
+    const detail = getRunDetail(WAITING_RUN_ID);
+
+    expect(detail?.status).toBe("waiting");
+    expect(detail?.questions?.questions.length).toBe(2);
+    expect(detail?.state.interview).toBe(true);
+  });
+
+  it("mtime이 오래돼도 waiting run은 stalled로 바뀌지 않는다", () => {
+    copyFixtureRun(runsDir, WAITING_RUN_ID);
+    ageStateFile(runsDir, WAITING_RUN_ID, ELEVEN_MINUTES_MS);
+
+    expect(getRunDetail(WAITING_RUN_ID)?.status).toBe("waiting");
+  });
+
+  it("thesis.json이 있으면 thesis 필드를 조립한다", () => {
+    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+    fs.writeFileSync(
+      path.join(runsDir, COMPLETED_RUN_ID, "thesis.json"),
+      JSON.stringify({
+        revenueModel: "구독 전환",
+        growthLevers: ["바이럴 루프"],
+        marketTailwinds: ["시장 성장"],
+        bestCaseScenario: "국내 1위 달성",
+        winningThesis: "명확한 가치가 유료 전환을 이끈다",
+      }),
+    );
+
+    expect(getRunDetail(COMPLETED_RUN_ID)?.thesis?.revenueModel).toBe(
+      "구독 전환",
+    );
   });
 
   it("mtime이 10분을 넘긴 미완료 run은 stalled다", () => {

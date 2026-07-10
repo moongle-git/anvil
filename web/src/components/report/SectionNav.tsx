@@ -1,9 +1,10 @@
 // 리포트 섹션 순서(근거→진단→처방→수익화)는 PRD가 정한 내러티브 — 바꾸지 않는다.
 export const REPORT_SECTIONS = [
   { id: "market", label: "① 시장 맥락" },
-  { id: "criticism", label: "② 냉정한 비판" },
-  { id: "solution", label: "③ AI 네이티브 재설계" },
-  { id: "monetization", label: "④ 비즈니스 모델" },
+  { id: "thesis", label: "② 낙관적 논제" },
+  { id: "criticism", label: "③ 냉정한 반론" },
+  { id: "solution", label: "④ 종합과 재설계" },
+  { id: "monetization", label: "⑤ 비즈니스 모델" },
 ] as const;
 
 // 앵커 목차. 위치(데스크톱 좌측 sticky / 모바일 상단 가로)는 부모 레이아웃이 정한다.

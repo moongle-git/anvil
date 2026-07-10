@@ -76,8 +76,9 @@ inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium
 - 전체 너비: max-w-5xl mx-auto px-6
 - 리포트 본문(장문 텍스트): max-w-3xl — 문서 가독 폭 유지
 - 정렬: 좌측 정렬 기본. 중앙 정렬 금지(빈 상태 안내 제외)
-- 간격: 요소 간 gap-3~4, 섹션 간 space-y-10
+- 간격: 요소 간 gap-3~4, 섹션 간 space-y-10. 리포트 섹션 내부는 gap-6로 통일
 - 리포트 목차 네비: 데스크톱 좌측 sticky, 모바일 상단 가로 스크롤
+- 한국어 줄바꿈: globals.css가 텍스트 엘리먼트에 `word-break: keep-all`을 전역 적용한다(어절 중간 줄바꿈 방지). 긴 URL 등 끊어야 하는 곳에만 `break-all`을 개별 지정
 
 ## 타이포그래피
 | 용도 | 스타일 |
@@ -86,11 +87,17 @@ inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium
 | 섹션 제목 | text-xl font-semibold text-neutral-900 |
 | 서브섹션 제목 | text-base font-semibold text-neutral-900 |
 | 카드 제목/라벨 | text-sm font-medium text-neutral-500 |
-| 본문 | text-[15px] text-neutral-700 leading-relaxed |
+| 본문 | text-[15px] text-neutral-700 leading-[1.8] |
+| 번호 목록 | list-decimal pl-6 space-y-3 marker:text-neutral-500 marker:font-medium |
+| 불릿 목록 | list-disc pl-5 space-y-2 marker:text-neutral-400 (중첩: list-[circle] pl-5 space-y-1.5) |
 | 메타(일시, 카운트) | text-xs text-neutral-500 tabular-nums |
-| 인용(YouTube 목소리) | text-[15px] text-neutral-700 leading-relaxed, 좌측 2px border-neutral-300 |
+| 인용(YouTube 목소리) | text-[15px] text-neutral-700 leading-[1.8], 좌측 2px border-neutral-300 |
 
 폰트는 시스템 폰트 스택(한국어: Pretendard 있으면 사용, 없으면 system-ui 폴백). 웹폰트 CDN 로드 금지 — 로컬 도구다.
+
+본문 줄간격은 1.8이다. 한국어 장문은 leading-relaxed(1.625)로는 촘촘하다. 입력 필드(TextAreaField)는 본문이 아니라 입력 규격이므로 예외.
+
+에이전트 산출물의 마크다운(**볼드**, `N. **항목:**` 번호 목록, `*   ` 2계층 불릿)은 `web/src/lib/richText.tsx`의 `renderRichText`가 `<p>/<ol>/<ul>`로 변환한다. 이미 `<p>`나 `<li>` 안에 있는 문자열에는 블록 래퍼가 없는 `renderInline`을 쓴다. 산출물 문자열을 그대로 JSX에 넣지 말 것 — `**`가 화면에 노출된다.
 
 ## 애니메이션
 - 허용: fade-in (0.3s, 페이지/섹션 진입), 진행 스테퍼의 현재 step 스피너(animate-spin)

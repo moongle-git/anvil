@@ -15,7 +15,7 @@ export function HomeClient() {
         <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
           새 컨설팅 시작
         </h1>
-        <p className="max-w-3xl text-[15px] leading-relaxed text-neutral-700">
+        <p className="max-w-3xl text-[15px] leading-[1.8] text-neutral-700">
           비즈니스 아이디어를 입력하면 실시간 시장 데이터를 근거로 냉정한 비판과
           AI 네이티브 재설계안을 담은 컨설팅 리포트를 생성합니다.
         </p>

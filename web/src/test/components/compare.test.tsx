@@ -66,6 +66,7 @@ function makeDetail(
       idea,
       createdAt: "2026-07-01T09:00:00.000Z",
       steps: [],
+      interview: false,
       ...(status === "completed"
         ? { completedAt: "2026-07-01T09:05:00.000Z" }
         : {}),

@@ -1,9 +1,15 @@
-export type StepVisualStatus = "completed" | "running" | "error" | "pending";
+export type StepVisualStatus =
+  | "completed"
+  | "running"
+  | "error"
+  | "waiting"
+  | "pending";
 
 const STATUS_LABELS: Record<StepVisualStatus, string> = {
   completed: "완료",
   running: "진행중",
   error: "실패",
+  waiting: "답변 대기",
   pending: "대기",
 };
 
@@ -43,6 +49,16 @@ export function StepStatusIcon({ status }: { status: StepVisualStatus }) {
       <svg {...common} className="shrink-0 animate-spin text-blue-700">
         <circle cx="12" cy="12" r="9" className="opacity-25" />
         <path d="M21 12a9 9 0 0 0-9-9" />
+      </svg>
+    );
+  }
+  if (status === "waiting") {
+    // 답변 대기 — 물음표 원 (amber)
+    return (
+      <svg {...common} className="shrink-0 text-amber-600">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7" />
+        <path d="M12 16.5h.01" />
       </svg>
     );
   }

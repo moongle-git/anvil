@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { Criticism, MarketContext, Solution } from "../types/index.js";
+import type {
+  Criticism,
+  MarketContext,
+  Solution,
+  Thesis,
+} from "../types/index.js";
 import { renderReport } from "./report.js";
 
 const IDEA = "AI가 반려식물 상태를 진단하고 관리 일정을 챙겨주는 서비스";
@@ -34,6 +39,14 @@ const context: MarketContext = {
   sources: ["https://example.com/trend"],
 };
 
+const thesis: Thesis = {
+  revenueModel: "무료 진단으로 유입 후 생존 보장형 케어 구독으로 전환한다",
+  growthLevers: ["케어 성공 사진 공유 바이럴", "화원 대상 진단 API 번들"],
+  marketTailwinds: ["홈가드닝 시장 성장", "온디바이스 비전 모델 단가 하락"],
+  bestCaseScenario: "2년 내 구독 전환율 8% 달성 시 국내 식물 케어 1위",
+  winningThesis: "'실패 없는 케어'라는 명확한 가치가 유료 전환을 이끈다",
+};
+
 const criticism: Criticism = {
   painPointReality: [
     {
@@ -65,21 +78,24 @@ const solution: Solution = {
   dataFlywheel: "가정별 생육 환경·실패 이력 데이터를 축적한다",
   monetization: "식물 생존 보장형 구독 모델",
   revisedConcept: "제로 UI 식물 집사 — fatal 비판(지불 의사)에 보장형 과금으로 대응한다",
+  synthesis:
+    "낙관의 성장 동력과 반론의 지불 의사 한계를 종합하면 '생존 보장'이 유일한 해자다",
 };
 
 describe("renderReport", () => {
-  const report = renderReport(IDEA, context, criticism, solution);
+  const report = renderReport(IDEA, context, thesis, criticism, solution);
 
-  it("PRD 리포트 규격의 섹션 제목이 순서대로 모두 존재한다", () => {
+  it("정반합 리포트 규격의 섹션 제목이 순서대로 모두 존재한다", () => {
     const headings = [
       `# [컨설팅 리포트] ${context.ideaTitle}`,
       "## 1. 실시간 시장 맥락 (Market Context)",
-      "## 2. 냉정한 현실 인식 및 비판 (Cold Criticism)",
-      "## 3. AI 네이티브 관점의 해결책 (Solution Architecture)",
+      "## 2. 낙관적 논제 (Thesis / 正)",
+      "## 3. 냉정한 반론 (Antithesis / 反)",
+      "## 4. 종합과 재설계 (Synthesis / 合)",
       "### ① 데이터 수집 및 최소 입력 구조 (Minimal Input)",
       "### ② 에이전틱 워크플로우 (Agentic Workflow)",
       "### ③ 독점적 데이터 플라이휠 (Data Flywheel)",
-      "## 4. 지속 가능한 비즈니스 모델 (Monetization Model)",
+      "## 5. 지속 가능한 비즈니스 모델 (Monetization Model)",
     ];
     let cursor = -1;
     for (const heading of headings) {
@@ -113,20 +129,50 @@ describe("renderReport", () => {
     expect(report).toContain(criticism.verdict);
   });
 
-  it("Solution의 5개 필드가 모두 본문에 포함된다", () => {
+  it("Thesis(正)의 필드가 모두 본문에 포함된다", () => {
+    expect(report).toContain(thesis.revenueModel);
+    expect(report).toContain(thesis.bestCaseScenario);
+    expect(report).toContain(thesis.winningThesis);
+    for (const lever of thesis.growthLevers) {
+      expect(report).toContain(lever);
+    }
+    for (const tailwind of thesis.marketTailwinds) {
+      expect(report).toContain(tailwind);
+    }
+  });
+
+  it("Solution의 필드(synthesis 포함)가 모두 본문에 포함된다", () => {
     for (const value of Object.values(solution)) {
       expect(report).toContain(value);
     }
   });
 
+  it("synthesis가 없으면 종합 통찰 문구 없이도 렌더링된다 (구 solution 하위호환)", () => {
+    const { synthesis, ...withoutSynthesis } = solution;
+    void synthesis;
+    const rendered = renderReport(
+      IDEA,
+      context,
+      thesis,
+      criticism,
+      withoutSynthesis,
+    );
+    expect(rendered).not.toContain("**종합 통찰:**");
+    expect(rendered).toContain("## 4. 종합과 재설계 (Synthesis / 合)");
+    expect(rendered).toContain(solution.revisedConcept);
+  });
+
   it("순수 함수다 — 같은 입력이면 같은 출력", () => {
-    expect(renderReport(IDEA, context, criticism, solution)).toBe(report);
+    expect(renderReport(IDEA, context, thesis, criticism, solution)).toBe(
+      report,
+    );
   });
 
   it("youtubeVoices가 비어 있으면 수집 실패 안내를 렌더링한다", () => {
     const empty = renderReport(
       IDEA,
       { ...context, youtubeVoices: [] },
+      thesis,
       criticism,
       solution,
     );
