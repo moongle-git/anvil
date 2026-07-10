@@ -208,22 +208,140 @@ describe("CompetitorTable", () => {
 });
 
 describe("MarketContextSection", () => {
-  it("YouTube 인용 카드에 댓글·좋아요·새 탭 영상 링크를 렌더링한다", () => {
-    render(<MarketContextSection context={marketContext} />);
+  it("정제된 인사이트(briefing·competitorInsight·voicesInsight)를 접히지 않은 본문에 보여준다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const details = container.querySelector("details");
+    expect(details).not.toBeNull();
 
-    expect(
-      screen.getByText("회의 끝나고 정리에 한 시간씩 써요"),
-    ).toBeDefined();
-    expect(screen.getByText(/좋아요 42/)).toBeDefined();
+    const briefingNode = screen.getByText(marketContext.briefing);
+    const competitorInsightNode = screen.getByText(
+      marketContext.competitorInsight,
+    );
+    const voicesInsightNode = screen.getByText(marketContext.voicesInsight);
+
+    expect(details?.contains(briefingNode)).toBe(false);
+    expect(details?.contains(competitorInsightNode)).toBe(false);
+    expect(details?.contains(voicesInsightNode)).toBe(false);
+  });
+
+  it("원시 근거(첫 경쟁사·첫 YouTube 댓글 원문)는 <details> 안에 접어 둔다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const details = container.querySelector("details");
+
+    const firstCompetitor = screen.getByText("경쟁사 1");
+    const firstComment = screen.getByText("회의 끝나고 정리에 한 시간씩 써요");
+
+    expect(details?.contains(firstCompetitor)).toBe(true);
+    expect(details?.contains(firstComment)).toBe(true);
+  });
+
+  it("근거 <details>는 기본 닫힘이고 summary 클릭으로 열린다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const details = container.querySelector("details") as HTMLDetailsElement;
+    expect(details.hasAttribute("open")).toBe(false);
+
+    fireEvent.click(container.querySelector("summary") as HTMLElement);
+    expect(details.open).toBe(true);
+  });
+
+  it("summary 문자열에 경쟁사·유저 목소리 건수를 표기한다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const summary = container.querySelector("summary")?.textContent ?? "";
+    expect(summary).toContain("경쟁 서비스 9개");
+    expect(summary).toContain("유저 목소리 1건");
+  });
+
+  it("marketSizeIndicators가 비면 '시장 규모 지표' 소제목을 렌더링하지 않는다", () => {
+    render(
+      <MarketContextSection
+        context={{ ...marketContext, marketSizeIndicators: [] }}
+      />,
+    );
+    expect(screen.queryByText("시장 규모 지표")).toBeNull();
+  });
+
+  it("marketSizeIndicators가 있으면 소제목과 지표를 접히지 않은 본문에 보여준다", () => {
+    const { container } = render(
+      <MarketContextSection
+        context={{ ...marketContext, marketSizeIndicators: ["연 30% 성장"] }}
+      />,
+    );
+    const heading = screen.getByText("시장 규모 지표");
+    const indicator = screen.getByText("연 30% 성장");
+    const details = container.querySelector("details");
+
+    expect(details?.contains(heading)).toBe(false);
+    expect(details?.contains(indicator)).toBe(false);
+  });
+
+  it("youtubeVoices가 비면 접힌 영역에 '수집된 YouTube 목소리 없음'을 표시하고 voicesInsight는 본문에 남긴다", () => {
+    const { container } = render(
+      <MarketContextSection context={{ ...marketContext, youtubeVoices: [] }} />,
+    );
+    const details = container.querySelector("details");
+    const emptyVoices = screen.getByText("수집된 YouTube 목소리 없음");
+    expect(details?.contains(emptyVoices)).toBe(true);
+
+    const voicesInsightNode = screen.getByText(marketContext.voicesInsight);
+    expect(details?.contains(voicesInsightNode)).toBe(false);
+  });
+
+  it("원시 배열이 모두 비면 <details> 자체를 렌더링하지 않는다", () => {
+    const { container } = render(
+      <MarketContextSection
+        context={{
+          ...marketContext,
+          trends: [],
+          competitors: [],
+          youtubeVoices: [],
+          painPointEvidence: [],
+          sources: [],
+        }}
+      />,
+    );
+    expect(container.querySelector("details")).toBeNull();
+  });
+
+  it("YouTube 영상 링크가 새 탭(target·rel)으로 열린다", () => {
+    render(<MarketContextSection context={marketContext} />);
     const link = screen.getByRole("link", { name: "회의록 자동화 후기" });
     expect(link.getAttribute("href")).toBe("https://youtube.com/watch?v=abc");
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
-  it("context가 없으면 데이터 없음 EmptyState를 보여준다", () => {
-    render(<MarketContextSection context={undefined} />);
+  it("briefing의 **볼드**를 <strong>으로 변환해 ** 문자를 노출하지 않는다", () => {
+    const { container } = render(
+      <MarketContextSection
+        context={{ ...marketContext, briefing: "**핵심**은 번들 흡수다." }}
+      />,
+    );
+    expect(container.querySelector("strong")?.textContent).toBe("핵심");
+    expect(container.textContent).not.toContain("**");
+  });
+
+  it("context가 없으면 데이터 없음 EmptyState를 보여주고 throw하지 않는다", () => {
+    expect(() =>
+      render(<MarketContextSection context={undefined} />),
+    ).not.toThrow();
     expect(screen.getByText("시장 맥락 데이터가 없습니다")).toBeDefined();
+  });
+
+  it("aria-labelledby로 섹션이 제목과 연결된다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const section = container.querySelector("section");
+    expect(section?.getAttribute("aria-labelledby")).toBe("market");
+    expect(container.querySelector("#market")?.tagName).toBe("H2");
   });
 });
 
