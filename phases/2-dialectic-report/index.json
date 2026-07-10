@@ -53,7 +53,10 @@
     {
       "step": 6,
       "name": "risk-radar",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T00:52:29+0900",
+      "completed_at": "2026-07-11T01:00:00+0900",
+      "summary": "리스크 프리미티브 2종 + 순수 기하 함수 신설(ADR-009 인라인 SVG, 차트 라이브러리 0). (1) web/src/lib/radar.ts — React import 0의 순수 기하: radarVertices(values:readonly number[], size, maxValue=100):Point2D[]가 12시(-90°) 시작·시계방향으로 n각형 꼭짓점 계산(값 0→중심, 음수·초과는 0~maxValue 클램프, 빈 배열→빈 배열 no-throw, 소수점 2자리 반올림·-0 정규화로 결정적 출력), toPolygonPoints(vertices):string→'x,y x,y', axisLabelPositions(count,size):Point2D[]는 최대 반지름(size/2 - LABEL_MARGIN 28px)*LABEL_OFFSET 1.12 바깥 좌표. (2) web/src/components/report/RiskRadar.tsx — props{profile:RiskAxisScore[], maxSeverity:CriticismSeverity, size?=200}: 격자 동심 3겹·축선 neutral-200, 데이터 폴리곤 stroke=maxSeverity 색(fatal red-600/major amber-600/minor gray-500 — UI_GUIDE 팔레트 재사용, 새 hex 0)·fillOpacity 0.08, 축 라벨 fill-neutral-500 text-xs, 정적 SVG(애니메이션·트랜지션 0, 둥근 배경 컨테이너로 감싸지 않음). 접근성: <svg role='img' aria-label='리스크 레이더 — {축 점수}'> + sr-only <ul aria-label='축별 리스크 점수'> 텍스트 대안. 훅: 축 라벨마다 data-axis(=profile.length개), 루트 div에 data-max-severity. (3) web/src/components/report/RiskScoreBadge.tsx — props{severity, score, keyword}: SeverityBadge 재사용(뱃지 신규 0)·{score}/100 tabular-nums·키워드는 뱃지 바깥 text-xs neutral-500 분리 노출, 훅 data-risk-score·data-risk-keyword. ui/ 배럴 미추가(도메인 결합 프리미티브라 report/에 둠). TDD: radar.test.ts(12: 12시 시작·전(全)0 중심·클램프·빈 배열·2자리 반올림·결정성·라벨 바깥), risk.test.tsx(8: data-axis 개수·data-max-severity·role img+aria 축명·sr-only 점수·전0 no-throw·라벨/점수/키워드 노출·키워드 뱃지 밖·data-* 일치·severity 3종 exhaustive). 검증: npm run build 통과, npm test 통과(root 322 + web 177→197=519), npm run lint 통과. radar.ts 순수·React 0, 타입은 @anvil/types 단일 소스, ReportView/CriticismSection/DialecticSplit 미수정(배치는 step 7·9·10)."
     },
     {
       "step": 7,
