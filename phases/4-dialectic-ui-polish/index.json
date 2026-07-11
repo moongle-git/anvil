@@ -7,7 +7,8 @@
       "name": "design-docs",
       "status": "completed",
       "started_at": "2026-07-11T23:38:00+0900",
-      "summary": "UI_GUIDE에 이후 step의 가드레일 5종 신설/갱신 — 正/反 미러 액센트 레일 카드 규격(동일 골격 + 방향만 다른 레일, 正 무채색 / 反 severity 색), 테두리 블록 내부 여백 규격표(카드 p-6 / 레일 콜아웃은 Card 재사용 / 레일 인용 py-1 pl-4), 번호 목록 space-y-5 + 볼드 라벨 줄 분리, RiskRadar figure+figcaption 카드 골격 및 SVG 가로 중앙 정렬, '중앙 정렬 금지'를 텍스트 한정으로 좁혀 도형 중앙 정렬 예외 추가. 코드 무변경."
+      "summary": "UI_GUIDE에 이후 step의 가드레일 5종 신설/갱신 — 正/反 미러 액센트 레일 카드 규격(동일 골격 + 방향만 다른 레일, 正 무채색 / 反 severity 색), 테두리 블록 내부 여백 규격표(카드 p-6 / 레일 콜아웃은 Card 재사용 / 레일 인용 py-1 pl-4), 번호 목록 space-y-5 + 볼드 라벨 줄 분리, RiskRadar figure+figcaption 카드 골격 및 SVG 가로 중앙 정렬, '중앙 정렬 금지'를 텍스트 한정으로 좁혀 도형 중앙 정렬 예외 추가. 코드 무변경.",
+      "completed_at": "2026-07-11T23:40:27+0900"
     },
     {
       "step": 1,
