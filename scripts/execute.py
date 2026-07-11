@@ -93,9 +93,8 @@ class StepExecutor:
         self._print_header()
         self._check_blockers()
         self._checkout_branch()
-        guardrails = self._load_guardrails()
         self._ensure_created_at()
-        self._execute_all_steps(guardrails)
+        self._execute_all_steps()
         self._finalize()
 
     # --- timestamps ---
@@ -402,7 +401,7 @@ class StepExecutor:
 
         return False  # unreachable
 
-    def _execute_all_steps(self, guardrails: str):
+    def _execute_all_steps(self):
         while True:
             index = self._read_json(self._index_file)
             pending = next((s for s in index["steps"] if s["status"] == "pending"), None)
@@ -417,7 +416,8 @@ class StepExecutor:
                     self._write_json(self._index_file, index)
                     break
 
-            self._execute_single_step(pending, guardrails)
+            # step이 CLAUDE.md·docs/를 수정할 수 있으므로 매 step 다시 읽는다.
+            self._execute_single_step(pending, self._load_guardrails())
 
     def _finalize(self):
         index = self._read_json(self._index_file)
