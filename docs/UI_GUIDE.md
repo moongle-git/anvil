@@ -52,6 +52,41 @@ severity 뱃지는 옅은 배경 + 진한 텍스트 조합(예: fatal → bg-red
 rounded-md bg-white border border-neutral-200 p-6
 ```
 
+### 테두리가 있는 블록은 내부 여백을 반드시 확보한다
+테두리(또는 액센트 레일)를 그었으면 텍스트와 그 선 사이에 여백이 있어야 한다. 여백 없이 붙은 텍스트는 잘린 것처럼 보인다.
+
+| 블록 종류 | 규격 |
+|---|---|
+| 카드 | `p-6` |
+| 레일 + 배경 콜아웃 (反의 소결론, 구버전 안내 배너 등) | 카드와 같은 컨테이너를 쓴다 — `Card` + accent + `bg-neutral-50`. 별도 골격을 손으로 만들지 마라 |
+| 레일 인용 (배경 없음 — 커뮤니티 목소리, 반박 대상 인용 등) | `border-l-2 border-neutral-300 py-1 pl-4` — **상하 여백을 0으로 두지 마라.** `pl-3`·`pl-4`만 주면 텍스트가 레일 위아래 끝에 딱 붙는다 |
+
+예외:
+- 진행 화면(`ProgressView`)의 스텝 리스트 아이템은 조밀함이 목적이므로 `p-4`를 허용한다.
+- 목차 네비(`SectionNav`)의 활성 표시와 비교 뷰(`CompareMatrix`)의 컬럼 헤더는 콜아웃이 아니라 표시자다 — 이 규격의 대상이 아니다.
+
+### 정반합 카드 (正/反)
+正과 反의 **골격은 완전히 동일**하다.
+```
+rounded-md border border-neutral-200 bg-white p-6
+```
+한쪽만 카드가 아니거나, 모서리가 각지거나, padding이 다르면 안 된다. 그건 의도된 차이가 아니라 통일 실패로 읽힌다.
+
+주장이 서로 반대라는 사실은 **액센트 레일의 방향**으로만 표현한다 — 미러 액센트 레일.
+
+| 쪽 | 레일 | 색 |
+|---|---|---|
+| 正 | **왼쪽** 2px | 무채색 `neutral-900` |
+| 反 | **오른쪽** 2px | 해당 항목의 severity 색 (fatal → red-600 / major → amber-600 / minor → gray-500) |
+
+두 레일이 가운데 거터를 사이에 두고 마주 보며 정면 대치를 만든다. 이것이 좌우 컬럼의 정체성 신호다 — 컬럼 헤더가 화면 밖으로 스크롤돼도 어느 쪽 주장인지 알 수 있다.
+
+正에 색을 쓰지 않는 이유: 낙관 주장에는 severity가 없다. 색은 데이터의 의미에만 쓴다(원칙 3).
+
+좌우 카드는 모두 **"제목 → 메타 → 근거"** 순서를 지킨다. 反의 `RiskScoreBadge`는 제목 **아래** 메타 줄에 놓는다 — 제목 위에 두면 좌우 카드의 첫 줄 baseline이 어긋나 같은 축의 두 주장이 나란히 읽히지 않는다.
+
+레일 색 등 정확한 Tailwind 클래스는 `Card` 컴포넌트 내부 구현으로 격리하고, 호출부는 의미(side/tone)만 넘긴다 — `Badge`가 tone→색을 격리한 것과 같은 규율이다.
+
 ### 버튼
 ```
 Primary:   rounded-md bg-neutral-900 text-white hover:bg-neutral-700 px-4 py-2 text-sm font-medium
@@ -79,6 +114,8 @@ inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium
 - 데이터 폴리곤: stroke는 해당 리포트의 최고 severity 색, fill은 같은 색 opacity 0.08
 - 축 라벨: `text-xs text-neutral-500`
 - 좌표 애니메이션·트랜지션 금지(정적 SVG). 아이콘 컨테이너로 감싸지 않는다
+- `<figure>` + `<figcaption>`(캡션: "축별 최고 위험도")으로 감싸고, **SVG는 컨테이너 안에서 가로 중앙 정렬**한다. 고정폭 SVG를 블록 컨테이너에 그냥 넣으면 좌측에 붙어 컬럼 안에서 치우쳐 보인다
+- figure는 카드 골격(`rounded-md border border-neutral-200 p-6`)을 쓴다. 테두리 없이 두면 그림이 허공에 떠 보인다
 
 ### SurvivalGauge
 최종 판정의 생존 점수(0~100)를 표시한다.
@@ -103,7 +140,7 @@ inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium
 - 전체 너비: max-w-5xl mx-auto px-6
 - 리포트 본문(장문 텍스트): max-w-3xl — 문서 가독 폭 유지
   - 예외: 正/反 Split View 섹션은 `max-w-5xl`을 쓴다. `max-w-3xl`(768px)을 좌우로 나누면 컬럼당 약 360px가 되어 한국어 본문 가독 폭에 못 미친다. 이 섹션만 넓히고, 나머지 장문 섹션은 3xl을 유지한다.
-- 정렬: 좌측 정렬 기본. 중앙 정렬 금지(빈 상태 안내 제외)
+- 정렬: 좌측 정렬 기본. **텍스트의** 중앙 정렬 금지(빈 상태 안내 제외). 단, 차트·다이어그램 같은 **도형(figure)은 자기 컨테이너 안에서 가로 중앙 정렬**한다 — 고정폭 도형을 좌측에 붙이면 컬럼 안에서 치우쳐 보인다
 - 간격: 요소 간 gap-3~4, 섹션 간 space-y-10. 리포트 섹션 내부는 gap-6로 통일
 - 리포트 목차 네비: 데스크톱 좌측 sticky, 모바일 상단 가로 스크롤
 - 한국어 줄바꿈: globals.css가 텍스트 엘리먼트에 `word-break: keep-all`을 전역 적용한다(어절 중간 줄바꿈 방지). 긴 URL 등 끊어야 하는 곳에만 `break-all`을 개별 지정
@@ -116,16 +153,22 @@ inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium
 | 서브섹션 제목 | text-base font-semibold text-neutral-900 |
 | 카드 제목/라벨 | text-sm font-medium text-neutral-500 |
 | 본문 | text-[15px] text-neutral-700 leading-[1.8] |
-| 번호 목록 | list-decimal pl-6 space-y-3 marker:text-neutral-500 marker:font-medium |
+| 번호 목록 | list-decimal pl-6 space-y-5 marker:text-neutral-500 marker:font-medium (항목 내부는 아래 "번호 목록" 절 참조) |
 | 불릿 목록 | list-disc pl-5 space-y-2 marker:text-neutral-400 (중첩: list-[circle] pl-5 space-y-1.5) |
 | 메타(일시, 카운트) | text-xs text-neutral-500 tabular-nums |
-| 인용(YouTube 목소리) | text-[15px] text-neutral-700 leading-[1.8], 좌측 2px border-neutral-300 |
+| 인용(커뮤니티 목소리) | text-[15px] text-neutral-700 leading-[1.8], 좌측 2px border-neutral-300 — 내부 여백은 "테두리가 있는 블록" 규격의 레일 인용(`py-1 pl-4`)을 따른다 |
 
 폰트는 시스템 폰트 스택(한국어: Pretendard 있으면 사용, 없으면 system-ui 폴백). 웹폰트 CDN 로드 금지 — 로컬 도구다.
 
 본문 줄간격은 1.8이다. 한국어 장문은 leading-relaxed(1.625)로는 촘촘하다. 입력 필드(TextAreaField)는 본문이 아니라 입력 규격이므로 예외.
 
 에이전트 산출물의 마크다운(**볼드**, `N. **항목:**` 번호 목록, `*   ` 2계층 불릿)은 `web/src/lib/richText.tsx`의 `renderRichText`가 `<p>/<ol>/<ul>`로 변환한다. 이미 `<p>`나 `<li>` 안에 있는 문자열에는 블록 래퍼가 없는 `renderInline`을 쓴다. 산출물 문자열을 그대로 JSX에 넣지 말 것 — `**`가 화면에 노출된다.
+
+### 번호 목록
+- 항목 간격은 `space-y-5`다. 본문 줄간격이 1.8이라 `space-y-3`으로는 항목 사이 여백이 줄 사이 여백과 구분되지 않아 경계가 안 보인다.
+- 에이전트 산출물의 번호 목록은 `N. **라벨:** 본문…` 꼴이다. **볼드 라벨을 별도 줄로 띄우고, 본문은 그 아래 블록으로 내린다.** 라벨과 본문이 한 줄에 이어붙으면 1·2·3 번호가 있어도 통짜 문단이 되어 스캔이 안 된다.
+- 내어쓰기는 `list-decimal`의 기본 동작(marker outside)이 이미 처리한다. 별도 지시가 필요 없다.
+- 이 라벨 분리는 **번호 목록에만** 적용한다. 불릿 목록은 항목 전체가 볼드인 경우가 많아, 분리하면 본문 없는 라벨만 남는다.
 
 ## 애니메이션
 - 허용: fade-in (0.3s, 페이지/섹션 진입), 진행 스테퍼의 현재 step 스피너(animate-spin)
