@@ -14,6 +14,7 @@ import {
   type Criticism,
   type MarketContext,
   type Solution,
+  type SourceCoverage,
   type Thesis,
   type Verdict,
 } from "@anvil/types";
@@ -472,6 +473,100 @@ describe("MarketContextSection", () => {
       const link = screen.getByRole("link", { name: voice.title });
       expect(link.getAttribute("href")).toBe(voice.url);
     }
+  });
+
+  // ── 자료조사 커버리지 (ADR-013): 수집되지 않은 소스를 침묵으로 숨기지 않는다 ──
+
+  describe("자료조사 커버리지", () => {
+    const coverage: SourceCoverage[] = [
+      { source: "youtube", status: "collected", count: 12 },
+      { source: "hackernews", status: "collected", count: 0 },
+      { source: "naver", status: "unconfigured", count: 0 },
+    ];
+
+    function renderCovered(overrides: Partial<MarketContext> = {}) {
+      return render(
+        <MarketContextSection
+          context={{ ...marketContext, researchCoverage: coverage, ...overrides }}
+        />,
+      );
+    }
+
+    it("키가 없어 조사조차 안 한 소스를 미설정 상태로 렌더링한다", () => {
+      const { container } = renderCovered();
+      const naver = container.querySelector(
+        '[data-coverage-source="naver"]',
+      ) as HTMLElement;
+
+      expect(naver).not.toBeNull();
+      expect(naver.getAttribute("data-coverage-status")).toBe("unconfigured");
+      expect(naver.textContent).toContain(SOURCE_LABELS.naver);
+      expect(naver.textContent).toContain("미설정");
+    });
+
+    it("세 상태(collected N건 · collected 0건 · unconfigured)를 서로 다른 텍스트로 구분한다", () => {
+      const { container } = renderCovered();
+      const textOf = (source: string) =>
+        container.querySelector(`[data-coverage-source="${source}"]`)
+          ?.textContent ?? "";
+
+      expect(textOf("youtube")).toContain("12건");
+      // "조사했는데 0건"은 시장 신호다 — "미설정"으로 뭉개면 안 된다
+      expect(textOf("hackernews")).toContain("0건");
+      expect(textOf("hackernews")).not.toContain("미설정");
+      expect(textOf("naver")).not.toContain("0건");
+    });
+
+    it("수집 실패는 사유(error)와 함께 보여준다", () => {
+      const { container } = renderCovered({
+        researchCoverage: [
+          { source: "naver", status: "failed", count: 0, error: "quota exceeded" },
+        ],
+      });
+      const naver = container.querySelector(
+        '[data-coverage-source="naver"]',
+      ) as HTMLElement;
+
+      expect(naver.getAttribute("data-coverage-status")).toBe("failed");
+      expect(naver.textContent).toContain("수집 실패");
+      expect(naver.textContent).toContain("quota exceeded");
+    });
+
+    it("커버리지는 접히지 않은 본문에 있다 — 근거의 범위를 먼저 알린다", () => {
+      const { container } = renderCovered();
+      const list = container.querySelector("[data-coverage-list]");
+      expect(container.querySelector("details")?.contains(list!)).toBe(false);
+    });
+
+    it("citations가 0건이면 인용이 없다는 사실을 명시한다", () => {
+      const { container } = renderCovered({ citations: [] });
+      const note = container.querySelector(
+        '[data-citation-coverage="empty"]',
+      ) as HTMLElement;
+
+      expect(note).not.toBeNull();
+      expect(note.textContent).toContain("인용 없음");
+    });
+
+    it("researchCoverage가 비면(구 run) 커버리지 영역을 렌더링하지 않는다", () => {
+      const { container } = render(
+        <MarketContextSection context={marketContext} />,
+      );
+      expect(container.querySelector("[data-coverage-list]")).toBeNull();
+      expect(container.querySelector("[data-citation-coverage]")).toBeNull();
+    });
+
+    it("접기 요약줄의 소스별 내역이 0건·미설정 소스를 더 이상 숨기지 않는다", () => {
+      const { container } = renderCovered({
+        communityVoices: marketContext.communityVoices.filter(
+          (voice) => voice.source === "youtube",
+        ),
+      });
+      const summary = container.querySelector("summary")?.textContent ?? "";
+      expect(summary).toContain(
+        `${SOURCE_LABELS.youtube} 1 · ${SOURCE_LABELS.hackernews} 0 · ${SOURCE_LABELS.naver} 미설정`,
+      );
+    });
   });
 
   it("구 형식(youtubeVoices) run도 승격 후 목소리를 렌더링한다 (ADR-012 하위호환)", () => {

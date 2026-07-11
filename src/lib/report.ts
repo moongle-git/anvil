@@ -15,6 +15,7 @@ import type {
   MarketContext,
   ResidualRisk,
   Solution,
+  SourceCoverage,
   Thesis,
   ThesisPoint,
   Verdict,
@@ -108,15 +109,58 @@ function citationSection(citations: readonly Citation[]): string[] {
   return lines;
 }
 
-/** 소스별 수집 편중이 <summary> 한 줄에 드러나야 한다 — HN 0건은 근거 편향이다 */
-function voiceBreakdown(voices: readonly CommunityVoice[]): string {
-  const parts = RESEARCH_SOURCE_IDS.map((source) => ({
-    label: SOURCE_LABELS[source],
-    count: voices.filter((voice) => voice.source === source).length,
-  }))
-    .filter(({ count }) => count > 0)
-    .map(({ label, count }) => `${label} ${count}`);
-  return parts.length === 0 ? "" : `(${parts.join(" · ")})`;
+/**
+ * 세 상태를 절대 뭉개지 않는다 (ADR-013): "조사했는데 0건"은 시장 신호이고,
+ * "키가 없어 조사조차 안 했다"는 우리 설정 문제다. 같은 문구로 쓰면 리포트가 근거 부재를 숨긴다.
+ */
+function coverageLine(coverage: SourceCoverage): string {
+  const label = SOURCE_LABELS[coverage.source];
+  switch (coverage.status) {
+    case "collected":
+      return coverage.count === 0
+        ? `${label} — 0건 (검색됐으나 결과 없음)`
+        : `${label} — ${coverage.count}건`;
+    case "unconfigured":
+      return `${label} — 미설정으로 수집하지 않음`;
+    case "failed":
+      return `${label} — 수집 실패: ${coverage.error ?? "원인 미상"}`;
+  }
+}
+
+/**
+ * 근거를 보여주기 전에 근거의 범위부터 밝힌다 (ADR-013).
+ * researchCoverage가 비면 구 run(수집 기록 이전)이므로 블록째 생략한다 — 모르는 것을 지어내지 않는다.
+ */
+function coverageSection(context: MarketContext): string[] {
+  if (context.researchCoverage.length === 0) return [];
+
+  const items = context.researchCoverage.map(coverageLine);
+  // grounding이 인용을 하나도 안 돌려준 채로 8/8 run이 조용히 지나갔다 — 침묵하지 않는다
+  items.push(
+    context.citations.length === 0
+      ? "웹검색 — 인용 없음 (grounding이 인용을 반환하지 않았다)"
+      : `웹검색 — 인용 ${context.citations.length}건`,
+  );
+  return ["### 자료조사 커버리지", "", ...bullets(items), ""];
+}
+
+/**
+ * 소스별 수집 편중이 <summary> 한 줄에 드러나야 한다 — HN 0건은 근거 편향이다.
+ * 0건 소스를 목록에서 지우면 독자는 그 소스가 빠졌다는 사실 자체를 알 수 없다.
+ */
+function voiceBreakdown(
+  voices: readonly CommunityVoice[],
+  coverage: readonly SourceCoverage[],
+): string {
+  const parts = RESEARCH_SOURCE_IDS.map((source) => {
+    const label = SOURCE_LABELS[source];
+    const status = coverage.find((entry) => entry.source === source)?.status;
+    if (status === "unconfigured") return `${label} 미설정`;
+    if (status === "failed") return `${label} 수집 실패`;
+    const count = voices.filter((voice) => voice.source === source).length;
+    return `${label} ${count}`;
+  });
+  return `(${parts.join(" · ")})`;
 }
 
 /** 접힌 근거의 건수 표기. 0인 항목은 뺀다 (UI_GUIDE 정보 밀도) */
@@ -127,7 +171,7 @@ function evidenceSummary(context: MarketContext): string {
   }
   if (context.communityVoices.length > 0) {
     parts.push(
-      `유저 목소리 ${context.communityVoices.length}건${voiceBreakdown(context.communityVoices)}`,
+      `유저 목소리 ${context.communityVoices.length}건${voiceBreakdown(context.communityVoices, context.researchCoverage)}`,
     );
   }
   if (context.trends.length > 0) {
@@ -265,6 +309,8 @@ export function renderReport(
 
   // ── 1. 시장 맥락 ──
   lines.push("## 1. 시장 맥락 (Context)", "");
+  // 근거의 범위를 먼저 알리고 그 다음에 근거를 보여준다 (ADR-013)
+  lines.push(...coverageSection(context));
   lines.push(context.briefing, "");
   if (context.marketSizeIndicators.length > 0) {
     lines.push("### 시장 규모 지표", "");

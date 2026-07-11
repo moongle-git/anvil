@@ -4,8 +4,15 @@ import {
   type Citation,
   type CommunityVoice,
   type MarketContext,
+  type SourceCoverage,
 } from "@anvil/types";
-import { Badge, Collapsible, EmptyState, SectionHeading } from "@/components/ui";
+import {
+  Badge,
+  Card,
+  Collapsible,
+  EmptyState,
+  SectionHeading,
+} from "@/components/ui";
 import { renderInline, renderRichText } from "@/lib/richText";
 import { CompetitorTable } from "./CompetitorTable";
 
@@ -126,6 +133,84 @@ function CitationList({ citations }: { citations: Citation[] }) {
   );
 }
 
+// 세 상태는 서로 다른 사실이다 (ADR-013): collected 0건은 "조사했는데 결과가 없다"는 시장 신호이고,
+// unconfigured는 "키가 없어 조사조차 안 했다"는 우리 설정 문제다. 같은 문구로 뭉개면 근거 부재가 숨는다.
+function coverageDetail(coverage: SourceCoverage): string {
+  switch (coverage.status) {
+    case "collected":
+      return coverage.count === 0
+        ? "0건 — 검색됐으나 결과 없음"
+        : `${coverage.count}건 수집`;
+    case "unconfigured":
+      return "API 키가 없어 조사하지 않았습니다";
+    case "failed":
+      return coverage.error ?? "원인 미상";
+  }
+}
+
+// 뱃지는 읽는 눈이 놓치면 안 되는 두 상태에만 붙인다 — 정상 수집은 뱃지 없이 건수만.
+const COVERAGE_BADGES: Partial<Record<SourceCoverage["status"], string>> = {
+  unconfigured: "미설정",
+  failed: "수집 실패",
+};
+
+// 근거를 보여주기 전에 근거의 범위부터 밝힌다 (ADR-013). 색은 쓰지 않는다 —
+// 커버리지는 위험도가 아니라서 severity 팔레트를 빌려 쓰면 "네이버 미설정"이 위험으로 읽힌다
+// (UI_GUIDE 원칙 3). 무채색 뱃지 + 굵기/명도 위계로만 눈에 띄게 한다.
+function ResearchCoverage({ context }: { context: MarketContext }) {
+  return (
+    <Card className="flex flex-col gap-3">
+      <MinorHeading>자료조사 커버리지</MinorHeading>
+      <ul data-coverage-list className="flex flex-col gap-2">
+        {context.researchCoverage.map((coverage) => {
+          const badge = COVERAGE_BADGES[coverage.status];
+          return (
+            <li
+              key={coverage.source}
+              data-coverage-source={coverage.source}
+              data-coverage-status={coverage.status}
+              className="flex flex-wrap items-center gap-2 text-sm"
+            >
+              <span className="font-medium text-neutral-900">
+                {SOURCE_LABELS[coverage.source]}
+              </span>
+              {badge !== undefined ? <Badge tone="neutral">{badge}</Badge> : null}
+              <span
+                className={
+                  badge === undefined
+                    ? "text-neutral-500 tabular-nums"
+                    : "font-medium text-neutral-900"
+                }
+              >
+                {coverageDetail(coverage)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {/* grounding이 인용을 하나도 안 돌려준 채로 8/8 run이 조용히 지나갔다 — 침묵하지 않는다 */}
+      <p
+        data-citation-coverage={context.citations.length === 0 ? "empty" : "present"}
+        className="flex flex-wrap items-center gap-2 text-sm"
+      >
+        <span className="font-medium text-neutral-900">웹검색</span>
+        {context.citations.length === 0 ? (
+          <>
+            <Badge tone="neutral">인용 없음</Badge>
+            <span className="font-medium text-neutral-900">
+              grounding이 인용을 반환하지 않았습니다
+            </span>
+          </>
+        ) : (
+          <span className="text-neutral-500 tabular-nums">
+            인용 {context.citations.length}건
+          </span>
+        )}
+      </p>
+    </Card>
+  );
+}
+
 function voicesOf(
   context: MarketContext,
   source: CommunityVoice["source"],
@@ -134,14 +219,18 @@ function voicesOf(
 }
 
 // 소스별 수집 편중이 접힌 영역을 열기 전에도 보여야 한다 — HN 0건은 근거 편향이다.
+// 0건 소스를 목록에서 지우면 독자는 그 소스가 빠졌다는 사실 자체를 알 수 없다.
 function voiceBreakdown(context: MarketContext): string {
-  const parts = RESEARCH_SOURCE_IDS.map((source) => ({
-    label: SOURCE_LABELS[source],
-    count: voicesOf(context, source).length,
-  }))
-    .filter(({ count }) => count > 0)
-    .map(({ label, count }) => `${label} ${count}`);
-  return parts.length === 0 ? "" : `(${parts.join(" · ")})`;
+  const parts = RESEARCH_SOURCE_IDS.map((source) => {
+    const label = SOURCE_LABELS[source];
+    const status = context.researchCoverage.find(
+      (coverage) => coverage.source === source,
+    )?.status;
+    if (status === "unconfigured") return `${label} 미설정`;
+    if (status === "failed") return `${label} 수집 실패`;
+    return `${label} ${voicesOf(context, source).length}`;
+  });
+  return `(${parts.join(" · ")})`;
 }
 
 // 접힌 근거 자료 summary는 정보 밀도를 위해 건수를 노출한다(UI_GUIDE). 0인 항목은 뺀다.
@@ -193,6 +282,11 @@ export function MarketContextSection({
   return (
     <section aria-labelledby="market" className="flex max-w-3xl flex-col gap-6">
       <SectionHeading id="market">① 실시간 시장 맥락</SectionHeading>
+
+      {/* 구 run은 수집 기록이 없다 — 모르는 커버리지를 지어내지 않고 블록째 생략한다 (ADR-013) */}
+      {context.researchCoverage.length > 0 ? (
+        <ResearchCoverage context={context} />
+      ) : null}
 
       {/* 리드 문단: 건조한 팩트 브리핑 */}
       {renderRichText(context.briefing)}

@@ -6,6 +6,7 @@ import {
   type Criticism,
   type MarketContext,
   type Solution,
+  type SourceCoverage,
   type Thesis,
   type Verdict,
 } from "../types/index.js";
@@ -285,6 +286,92 @@ describe("renderReport", () => {
       expect(summary).not.toContain("트렌드");
       expect(summary).not.toContain("검색 인용");
       expect(summary).toContain(`유저 목소리 ${context.communityVoices.length}건`);
+    });
+
+    // ── 자료조사 커버리지 (ADR-013): 수집되지 않은 소스를 침묵으로 숨기지 않는다 ──
+
+    describe("자료조사 커버리지", () => {
+      const COVERAGE: SourceCoverage[] = [
+        { source: "youtube", status: "collected", count: 12 },
+        { source: "hackernews", status: "collected", count: 0 },
+        { source: "naver", status: "unconfigured", count: 0 },
+      ];
+
+      function renderWith(overrides: Partial<MarketContext>): string {
+        return renderReport(
+          IDEA,
+          { ...context, researchCoverage: COVERAGE, ...overrides },
+          thesis,
+          criticism,
+          solution,
+          verdict,
+        );
+      }
+
+      const covered = renderWith({});
+
+      it("커버리지를 근거(<details>)보다 먼저 — 시장 맥락 섹션 상단에 렌더링한다", () => {
+        const heading = covered.indexOf("### 자료조사 커버리지");
+        expect(heading).toBeGreaterThan(covered.indexOf("## 1. 시장 맥락"));
+        expect(heading).toBeLessThan(covered.indexOf("<details>"));
+      });
+
+      it("키가 없어 조사조차 안 한 소스를 '미설정'으로 명시한다", () => {
+        expect(covered).toContain(
+          `${SOURCE_LABELS.naver} — 미설정으로 수집하지 않음`,
+        );
+      });
+
+      it("'조사했으나 0건'과 '미설정'을 서로 다른 문구로 구분한다", () => {
+        // 전자는 시장 신호이고 후자는 우리 설정 문제다 — 뭉개면 근거 부재가 숨는다
+        expect(covered).toContain(
+          `${SOURCE_LABELS.hackernews} — 0건 (검색됐으나 결과 없음)`,
+        );
+        expect(covered).not.toContain(`${SOURCE_LABELS.naver} — 0건`);
+        expect(covered).not.toContain(
+          `${SOURCE_LABELS.hackernews} — 미설정으로 수집하지 않음`,
+        );
+      });
+
+      it("수집 실패는 사유(error)와 함께 보여준다", () => {
+        const rendered = renderWith({
+          researchCoverage: [
+            {
+              source: "naver",
+              status: "failed",
+              count: 0,
+              error: "quota exceeded",
+            },
+          ],
+        });
+        expect(rendered).toContain(
+          `${SOURCE_LABELS.naver} — 수집 실패: quota exceeded`,
+        );
+      });
+
+      it("citations가 0건이면 인용이 없다는 사실을 명시한다", () => {
+        const rendered = renderWith({ citations: [] });
+        expect(rendered).toContain(
+          "웹검색 — 인용 없음 (grounding이 인용을 반환하지 않았다)",
+        );
+      });
+
+      it("researchCoverage가 비면(구 run) 커버리지 블록을 통째로 생략한다", () => {
+        // 수집 기록이 없는 run에 커버리지를 지어내지 않는다
+        expect(report).not.toContain("### 자료조사 커버리지");
+        expect(report).not.toContain("미설정으로 수집하지 않음");
+      });
+
+      it("<summary>의 소스별 내역이 0건·미설정 소스를 더 이상 숨기지 않는다", () => {
+        const rendered = renderWith({
+          communityVoices: context.communityVoices.filter(
+            (voice) => voice.source === "youtube",
+          ),
+        });
+        expect(rendered).toContain(
+          `(${SOURCE_LABELS.youtube} 2 · ${SOURCE_LABELS.hackernews} 0 · ${SOURCE_LABELS.naver} 미설정)`,
+        );
+      });
     });
 
     it("marketSizeIndicators가 있으면 소제목과 지표를 렌더링한다", () => {
