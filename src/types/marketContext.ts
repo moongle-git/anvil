@@ -10,13 +10,21 @@ export const CompetitorServiceSchema = z.object({
 export type CompetitorService = z.infer<typeof CompetitorServiceSchema>;
 
 /**
- * 코드가 groundingMetadata에서 추출한 검증된 검색 인용 (ADR-012).
- * uri는 원 사이트가 아니라 만료되는 vertexaisearch 리다이렉트 URL이다 — 그래서 sources[]를 대체하지 않는다.
+ * 코드가 grounding 응답에서 추출한 검증된 검색 인용 (ADR-012).
+ * 리다이렉트 uri는 원 사이트가 아니라 만료되는 URL이다 — 그래서 sources[]를 대체하지 않는다.
+ *
+ * kind가 없으면 가장 강한 인용과 반드시 깨질 인용을 한 배열에서 구분할 수 없다 (ADR-013).
+ * 구 context.json은 citations가 전부 빈 배열이라 승격할 원소가 없다 — .default()를 걸지 않는다.
  */
 export const CitationSchema = z.object({
   uri: z.url(),
   title: z.string().optional(),
   domain: z.string().optional(),
+  /**
+   * origin   = urlContext가 실제로 읽어낸 원본 URL. 만료되지 않는다 — 가장 강한 인용이다.
+   * redirect = groundingChunks의 vertexaisearch 리다이렉트 URL. 만료되면 404가 된다.
+   */
+  kind: z.enum(["origin", "redirect"]),
 });
 export type Citation = z.infer<typeof CitationSchema>;
 

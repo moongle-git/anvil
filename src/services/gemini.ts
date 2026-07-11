@@ -43,12 +43,19 @@ export interface GenerateGroundedParams<T> {
   useUrlContext?: boolean;
 }
 
-/** 코드가 groundingMetadata에서 추출한 검증된 인용. LLM 자기보고(sources)와 공존한다 (ADR-012) */
+/**
+ * 인용의 출처 종류 (ADR-013). types/marketContext의 CitationSchema.kind와 같은 값이어야 한다.
+ * origin(urlContext가 실제로 읽어낸 원본 URL)은 만료되지 않고, redirect(vertexaisearch)는 만료된다.
+ */
+export type CitationKind = "origin" | "redirect";
+
+/** 코드가 grounding 응답에서 추출한 검증된 인용. LLM 자기보고(sources)와 공존한다 (ADR-012) */
 export interface GroundingCitation {
   /** uri 없는 chunk는 인용으로 쓸 수 없다 — 그래서 필수다 */
   uri: string;
   title?: string;
   domain?: string;
+  kind: CitationKind;
 }
 
 export interface GroundedResult<T> {
@@ -99,56 +106,72 @@ function extractJsonText(text: string): string {
 }
 
 /**
- * grounding 응답에서 검증된 인용을 추출한다 (ADR-012).
+ * grounding 응답들에서 검증된 인용을 추출한다 (ADR-012, ADR-013).
  *
  * 이 함수가 존재하는 이유: 이전에는 응답의 text만 읽고 groundingMetadata를 버렸다.
  * 그래서 리포트의 출처가 LLM이 자기 기억으로 적어낸 URL이었고, 환각을 걸러낼 장치가 없었다.
  *
- * 주의: groundingChunks의 uri는 원 사이트가 아니라 만료되는 vertexaisearch 리다이렉트 URL이다.
- * 반면 urlContext로 실제로 읽어낸 페이지(urlContextMetadata)는 원 URL이라 가장 강한 인용이다.
+ * **재시도의 모든 시도를 함께 받는다.** 인용은 문장별 각주가 아니라 "이 run의 grounding이
+ * 실제로 무엇을 가져왔는가"의 run 단위 기록이다 — 형식 검증에 실패한 시도에서도 검색은 실재했다.
+ *
+ * 주의: groundingChunks의 uri는 원 사이트가 아니라 만료되는 vertexaisearch 리다이렉트 URL이다
+ * (kind: redirect). 반면 urlContext로 실제로 읽어낸 페이지(urlContextMetadata)는 원 URL이라
+ * 가장 강한 인용이다(kind: origin) — 같은 uri가 양쪽에 나오면 origin이 이긴다.
  * metadata가 없어도 throw하지 않는다 — grounding이 아무것도 못 찾는 것은 정상이다.
  */
 export function extractCitations(
-  response: GenerateContentResponse,
+  responses: readonly GenerateContentResponse[],
 ): GroundingCitation[] {
-  const candidate = response.candidates?.[0];
-  const citations: GroundingCitation[] = [];
-  // 같은 소스가 여러 chunk로 쪼개져 온다
-  const seen = new Set<string>();
+  // 같은 소스가 여러 chunk로 쪼개져 오고, 여러 시도가 같은 검색 결과를 다시 물어온다
+  const byUri = new Map<string, GroundingCitation>();
 
-  for (const chunk of candidate?.groundingMetadata?.groundingChunks ?? []) {
-    const web = chunk.web;
-    const uri = web?.uri;
-    if (web === undefined || uri === undefined || uri === "" || seen.has(uri)) {
-      continue;
+  for (const response of responses) {
+    const candidate = response.candidates?.[0];
+
+    for (const chunk of candidate?.groundingMetadata?.groundingChunks ?? []) {
+      const web = chunk.web;
+      const uri = web?.uri;
+      if (
+        web === undefined ||
+        uri === undefined ||
+        uri === "" ||
+        byUri.has(uri)
+      ) {
+        continue;
+      }
+      // exactOptionalPropertyTypes — 값이 없으면 키 자체를 넣지 않는다
+      const citation: GroundingCitation = { uri, kind: "redirect" };
+      if (web.title !== undefined && web.title !== "") {
+        citation.title = web.title;
+      }
+      if (web.domain !== undefined && web.domain !== "") {
+        citation.domain = web.domain;
+      }
+      byUri.set(uri, citation);
     }
-    seen.add(uri);
-    // exactOptionalPropertyTypes — 값이 없으면 키 자체를 넣지 않는다
-    const citation: GroundingCitation = { uri };
-    if (web.title !== undefined && web.title !== "") {
-      citation.title = web.title;
+
+    for (const meta of candidate?.urlContextMetadata?.urlMetadata ?? []) {
+      const uri = meta.retrievedUrl;
+      if (
+        meta.urlRetrievalStatus !==
+          UrlRetrievalStatus.URL_RETRIEVAL_STATUS_SUCCESS ||
+        uri === undefined ||
+        uri === ""
+      ) {
+        continue;
+      }
+      const seen = byUri.get(uri);
+      if (seen === undefined) {
+        byUri.set(uri, { uri, kind: "origin" });
+        continue;
+      }
+      // 이미 본 uri라도 origin이 리다이렉트를 이긴다 — 원본이 더 강한 인용이다.
+      // chunk가 실어온 title·domain은 같은 uri의 설명이므로 그대로 둔다.
+      seen.kind = "origin";
     }
-    if (web.domain !== undefined && web.domain !== "") {
-      citation.domain = web.domain;
-    }
-    citations.push(citation);
   }
 
-  for (const meta of candidate?.urlContextMetadata?.urlMetadata ?? []) {
-    const uri = meta.retrievedUrl;
-    if (
-      meta.urlRetrievalStatus !== UrlRetrievalStatus.URL_RETRIEVAL_STATUS_SUCCESS ||
-      uri === undefined ||
-      uri === "" ||
-      seen.has(uri)
-    ) {
-      continue;
-    }
-    seen.add(uri);
-    citations.push({ uri });
-  }
-
-  return citations;
+  return [...byUri.values()];
 }
 
 export class GeminiService {
@@ -171,8 +194,12 @@ export class GeminiService {
   }
 
   /**
-   * 자가 교정 재시도 루프 (ADR-004). 검증을 통과한 **그 시도**의 raw 응답을 함께 돌려준다 —
-   * 인용은 형식 실패한 시도가 아니라 채택된 시도의 groundingMetadata에서 읽어야 한다.
+   * 자가 교정 재시도 루프 (ADR-004). **모든 시도**의 raw 응답을 함께 돌려준다 (ADR-013).
+   *
+   * 검증에 성공한 시도의 응답만 돌려주던 것을 뒤집었다. 재시도 프롬프트는 `[교정 요청]`이라
+   * 모델이 새로 검색하지 않아 2차 응답에는 groundingMetadata가 아예 없다 — 그래서 1차 시도가
+   * 실제로 수행한 검색의 인용이 통째로 버려졌고, 실측 8개 run 전부에서 citations가 0건이었다.
+   * 형식 실패한 것은 JSON이지 검색이 아니다. 그 시도의 인용은 실재한다.
    */
   private async generateValidated<T>(params: {
     baseConfig: GenerateContentConfig;
@@ -183,9 +210,10 @@ export class GeminiService {
     /** grounding은 responseJsonSchema를 못 써 자유 텍스트에서 JSON을 긁어내야 한다 */
     extractJson: boolean;
     label: string;
-  }): Promise<{ data: T; response: GenerateContentResponse }> {
+  }): Promise<{ data: T; responses: GenerateContentResponse[] }> {
     const { baseConfig, basePrompt, schema, maxRetries, timeoutMs } = params;
 
+    const responses: GenerateContentResponse[] = [];
     let lastError = "";
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       const contents =
@@ -205,6 +233,9 @@ export class GeminiService {
         "Gemini 호출",
       );
 
+      // 검증 결과와 무관하게 누적한다 — 이 시도의 검색은 이미 일어났다
+      responses.push(response);
+
       const text = response.text;
       if (text === undefined || text.trim() === "") {
         lastError = "응답 텍스트가 비어 있다";
@@ -218,7 +249,7 @@ export class GeminiService {
         // LLM이 선택 필드에 넣는 null을 '키 부재'로 정규화한 뒤 검증한다
         const result = schema.safeParse(stripNullProps(parsed));
         if (result.success) {
-          return { data: result.data, response };
+          return { data: result.data, responses };
         }
         lastError = z.prettifyError(result.error);
       } catch (error) {
@@ -263,7 +294,7 @@ export class GeminiService {
       ? [{ googleSearch: {} }, { urlContext: {} }]
       : [{ googleSearch: {} }];
 
-    const { data, response } = await this.generateValidated({
+    const { data, responses } = await this.generateValidated({
       baseConfig: { systemInstruction, tools },
       basePrompt: `${prompt}\n\n${JSON_ONLY_INSTRUCTION}`,
       schema,
@@ -275,9 +306,17 @@ export class GeminiService {
 
     return {
       data,
-      citations: extractCitations(response),
-      webSearchQueries:
-        response.candidates?.[0]?.groundingMetadata?.webSearchQueries ?? [],
+      // 인용·검색어는 채택된 시도가 아니라 run 전체의 기록이다 (ADR-013)
+      citations: extractCitations(responses),
+      webSearchQueries: [
+        ...new Set(
+          responses.flatMap(
+            (response) =>
+              response.candidates?.[0]?.groundingMetadata?.webSearchQueries ??
+              [],
+          ),
+        ),
+      ],
     };
   }
 }
