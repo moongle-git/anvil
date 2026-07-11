@@ -11,6 +11,7 @@ import {
   SolutionSchema,
   type Criticism,
   type MarketContext,
+  type ResearchEvidence,
   type RunState,
   type Solution,
 } from "../types/index.js";
@@ -35,6 +36,7 @@ const validMarketContext: MarketContext = {
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험"],
   sources: ["https://example.com/trend"],
   citations: [],
+  researchCoverage: [],
 };
 
 const validCriticism: Criticism = {
@@ -332,6 +334,71 @@ describe("RunStore", () => {
       );
 
       expect(store.loadInterviewAnswers(runId)).toBeNull();
+    });
+  });
+
+  describe("research evidence", () => {
+    const evidence: ResearchEvidence = {
+      voices: [
+        {
+          source: "youtube",
+          title: "식물 키우기 실패담",
+          url: "https://youtube.com/watch?v=abc",
+          text: "물주기 타이밍을 늘 놓쳐요",
+          authorName: "초보집사",
+          score: 12,
+        },
+      ],
+      coverage: [
+        { source: "youtube", status: "collected", count: 1 },
+        { source: "hackernews", status: "collected", count: 0 },
+        { source: "naver", status: "unconfigured", count: 0 },
+      ],
+    };
+
+    it("saveResearchEvidence는 research.json에 저장하고 왕복한다", () => {
+      const { runId } = store.createRun("아이디어");
+
+      store.saveResearchEvidence(runId, evidence);
+
+      expect(fs.existsSync(path.join(baseDir, runId, "research.json"))).toBe(
+        true,
+      );
+      expect(store.loadResearchEvidence(runId)).toEqual(evidence);
+    });
+
+    it("research.json은 step 산출물이 아니다 (STEP_OUTPUT_FILES에 없다)", () => {
+      // PipelineStepName과 1:1 대응하는 맵이다. 넣으면 resume 판정·웹 진행 뷰까지 파급된다
+      expect(Object.values(STEP_OUTPUT_FILES)).not.toContain("research.json");
+    });
+
+    it("loadResearchEvidence는 파일이 없으면 null을 반환한다 (구 run에는 없다)", () => {
+      const { runId } = store.createRun("아이디어");
+
+      expect(store.loadResearchEvidence(runId)).toBeNull();
+    });
+
+    it("loadResearchEvidence는 손상된 JSON이면 null을 반환한다", () => {
+      const { runId } = store.createRun("아이디어");
+      fs.writeFileSync(
+        path.join(baseDir, runId, "research.json"),
+        "{ not json",
+      );
+
+      expect(store.loadResearchEvidence(runId)).toBeNull();
+    });
+
+    it("loadResearchEvidence는 스키마 검증에 실패하면 null을 반환한다", () => {
+      const { runId } = store.createRun("아이디어");
+      fs.writeFileSync(
+        path.join(baseDir, runId, "research.json"),
+        JSON.stringify({
+          voices: [],
+          coverage: [{ source: "reddit", status: "collected", count: 1 }],
+        }),
+      );
+
+      expect(store.loadResearchEvidence(runId)).toBeNull();
     });
   });
 

@@ -113,6 +113,11 @@ export function completedDetail(
       ],
       painPointEvidence: ["요약 후 후속 추적은 여전히 수작업이다"],
       sources: ["https://example.com/report"],
+      researchCoverage: [
+        { source: "youtube", status: "collected", count: 2 },
+        { source: "hackernews", status: "collected", count: 1 },
+        { source: "naver", status: "unconfigured", count: 0 },
+      ],
       citations: [
         {
           uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",

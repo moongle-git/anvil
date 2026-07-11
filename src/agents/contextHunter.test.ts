@@ -4,13 +4,17 @@ import type { GeminiService } from "../services/gemini.js";
 import type {
   Citation,
   CommunityVoice,
+  MarketContext,
   ResearchSourceId,
   SearchQueries,
+  SourceCoverage,
 } from "../types/index.js";
 import {
   CODE_INJECTED_CONTEXT_KEYS,
   MarketContextDraftSchema,
   MarketContextObjectSchema,
+  RESEARCH_SOURCE_IDS,
+  ResearchEvidenceSchema,
   SearchQueriesSchema,
   SOURCE_LABELS,
   type MarketContextDraft,
@@ -142,6 +146,21 @@ function promptOf(generateGrounded: ReturnType<typeof vi.fn>): string {
   return generateGrounded.mock.calls[0][0].prompt as string;
 }
 
+/** 소스 3종 전체의 coverage를 만든다. 명시하지 않은 소스는 등록되지 않은 것이므로 unconfigured다 */
+function expectedCoverage(
+  overrides: Partial<Record<ResearchSourceId, SourceCoverage>>,
+): SourceCoverage[] {
+  return RESEARCH_SOURCE_IDS.map(
+    (source) =>
+      overrides[source] ?? { source, status: "unconfigured", count: 0 },
+  );
+}
+
+/** LLM 초안(DRAFT) + 코드가 주입한 사실(citations·researchCoverage) = context.json */
+function expectedContext(coverage: SourceCoverage[]): MarketContext {
+  return { ...DRAFT, citations: CITATIONS, researchCoverage: coverage };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -152,9 +171,16 @@ describe("runContextHunter (정상 흐름)", () => {
     const naver = fakeSource("naver", [NAVER_VOICE]);
     const { deps, generateGrounded } = fakeDeps([youtube, naver]);
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(context).toEqual(
+      expectedContext(
+        expectedCoverage({
+          youtube: { source: "youtube", status: "collected", count: 1 },
+          naver: { source: "naver", status: "collected", count: 1 },
+        }),
+      ),
+    );
 
     // 각 소스는 planner가 그 소스에 맞춰 만든 검색어를 받는다 (아이디어 원문이 아니다)
     expect(youtube.collect).toHaveBeenCalledTimes(1);
@@ -189,22 +215,22 @@ describe("runContextHunter (정상 흐름)", () => {
   it("citations는 LLM 산출물이 아니라 코드가 grounding 응답에서 주입한다", async () => {
     const { deps } = fakeDeps([fakeSource("youtube", [])]);
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
     // LLM이 돌려준 draft에는 citations 키가 없다 — 코드가 붙인 것이다
     expect("citations" in DRAFT).toBe(false);
-    expect(result.citations).toEqual(CITATIONS);
+    expect(context.citations).toEqual(CITATIONS);
     // 검증된 인용과 LLM 자기보고 출처는 공존한다 (실패 모드가 상보적이다 — ADR-012)
-    expect(result.sources).toEqual(DRAFT.sources);
+    expect(context.sources).toEqual(DRAFT.sources);
   });
 
   it("webSearchQueries는 로그로만 노출하고 산출물에 넣지 않는다", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { deps } = fakeDeps([fakeSource("youtube", [])]);
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
-    expect(Object.keys(result)).not.toContain("webSearchQueries");
+    expect(Object.keys(context)).not.toContain("webSearchQueries");
     expect(String(error.mock.calls[0][0])).toContain(SEARCH_QUERIES[0]);
   });
 
@@ -285,10 +311,16 @@ describe("runContextHunter (researchPlanner 연동)", () => {
       new Error("Gemini 호출 실패"),
     );
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
     // 검색어 생성 실패는 자료조사를 멈출 이유가 아니다 (ADR-012 fail-soft)
-    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(context).toEqual(
+      expectedContext(
+        expectedCoverage({
+          youtube: { source: "youtube", status: "collected", count: 1 },
+        }),
+      ),
+    );
     expect(youtube.collect).toHaveBeenCalledWith(IDEA);
     expect(generateGrounded).toHaveBeenCalledTimes(1);
     expect(promptOf(generateGrounded)).toContain(IDEA);
@@ -332,9 +364,21 @@ describe("runContextHunter (소스 실패 내성)", () => {
       fakeSource("naver", new Error("네이버 API 일일 호출 한도(25,000)를 초과했다")),
     ]);
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(context).toEqual(
+      expectedContext(
+        expectedCoverage({
+          youtube: { source: "youtube", status: "collected", count: 1 },
+          naver: {
+            source: "naver",
+            status: "failed",
+            count: 0,
+            error: "네이버 API 일일 호출 한도(25,000)를 초과했다",
+          },
+        }),
+      ),
+    );
     const prompt = promptOf(generateGrounded);
     expect(prompt).toContain(YOUTUBE_VOICE.text);
     // 실패한 소스가 프롬프트에 남아야 LLM이 근거 편향을 스스로 진술한다
@@ -351,9 +395,13 @@ describe("runContextHunter (소스 실패 내성)", () => {
       fakeSource("naver", new Error("네이버 API 인증에 실패했다")),
     ]);
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(context.researchCoverage.map((c) => c.status)).toEqual([
+      "failed",
+      "failed",
+      "failed",
+    ]);
     expect(generateGrounded).toHaveBeenCalledTimes(1);
     expect(promptOf(generateGrounded)).toContain("quota");
   });
@@ -361,9 +409,10 @@ describe("runContextHunter (소스 실패 내성)", () => {
   it("등록된 소스가 없으면 빈 수집 안내로 진행한다", async () => {
     const { deps, generateGrounded } = fakeDeps([]);
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    // 소스가 하나도 등록되지 않았어도 3종 전체가 unconfigured로 기록된다
+    expect(context).toEqual(expectedContext(expectedCoverage({})));
     const prompt = promptOf(generateGrounded);
     expect(prompt).toContain("communityVoices는 빈 배열로");
   });
@@ -374,9 +423,16 @@ describe("runContextHunter (소스 실패 내성)", () => {
       fakeSource("hackernews", []),
     ]);
 
-    const result = await runContextHunter(deps, IDEA);
+    const { context } = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(context).toEqual(
+      expectedContext(
+        expectedCoverage({
+          youtube: { source: "youtube", status: "collected", count: 0 },
+          hackernews: { source: "hackernews", status: "collected", count: 0 },
+        }),
+      ),
+    );
     expect(promptOf(generateGrounded)).toContain("communityVoices는 빈 배열로");
   });
 
@@ -391,6 +447,70 @@ describe("runContextHunter (소스 실패 내성)", () => {
     // HN이 한국어 쿼리를 받아 조용히 0건이 되는 실패는 숫자로 적혀야 LLM이 근거 부재를 진술한다
     expect(promptOf(generateGrounded)).toContain(
       `${SOURCE_LABELS.hackernews} — 0건`,
+    );
+  });
+});
+
+// ADR-013: 수집된 증거가 진실의 원천이다. LLM이 다시 받아적은 것이 아니라 코드가 소유한 사실을
+// research.json으로 내보내고, 커버리지는 context.json에 코드가 주입한다.
+describe("runContextHunter (수집 증거 반환)", () => {
+  it("★ 수집한 목소리를 evidence로 함께 반환한다 (research.json의 원본이 된다)", async () => {
+    const { deps } = fakeDeps([
+      fakeSource("youtube", [YOUTUBE_VOICE]),
+      fakeSource("naver", [NAVER_VOICE]),
+    ]);
+
+    const { evidence } = await runContextHunter(deps, IDEA);
+
+    // LLM이 받아적은 draft의 communityVoices가 아니라 수집기가 돌려준 원본 그대로다
+    expect(evidence.voices).toEqual([YOUTUBE_VOICE, NAVER_VOICE]);
+  });
+
+  it("★ context.researchCoverage를 코드가 주입한다 (LLM이 채우는 필드가 아니다)", async () => {
+    const { deps } = fakeDeps([fakeSource("youtube", [YOUTUBE_VOICE])]);
+
+    const { context, evidence } = await runContextHunter(deps, IDEA);
+
+    // "네이버는 키가 없어 조사하지 않았다"는 LLM이 알 수 없는 사실이다
+    expect(context.researchCoverage).toEqual(evidence.coverage);
+    expect(context.researchCoverage).toEqual(
+      expectedCoverage({
+        youtube: { source: "youtube", status: "collected", count: 1 },
+      }),
+    );
+    expect("researchCoverage" in DRAFT).toBe(false);
+  });
+
+  it("evidence는 ResearchEvidence 스키마 검증을 통과한다", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { deps } = fakeDeps([
+      fakeSource("youtube", [YOUTUBE_VOICE]),
+      fakeSource("naver", new Error("네이버 API 인증에 실패했다")),
+    ]);
+
+    const { evidence } = await runContextHunter(deps, IDEA);
+
+    expect(ResearchEvidenceSchema.safeParse(evidence).success).toBe(true);
+  });
+
+  it("전 소스가 실패해도 evidence를 반환한다 (빈 voices + failed coverage)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { deps } = fakeDeps([
+      fakeSource("youtube", new Error("YouTube API quota가 초과되었다")),
+    ]);
+
+    const { evidence } = await runContextHunter(deps, IDEA);
+
+    expect(evidence.voices).toEqual([]);
+    expect(evidence.coverage).toEqual(
+      expectedCoverage({
+        youtube: {
+          source: "youtube",
+          status: "failed",
+          count: 0,
+          error: "YouTube API quota가 초과되었다",
+        },
+      }),
     );
   });
 });

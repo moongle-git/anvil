@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RESEARCH_SOURCE_IDS,
+  ResearchEvidenceSchema,
   SOURCE_LABELS,
   type CommunityVoice,
   type ResearchSourceId,
+  type SourceCoverage,
 } from "../types/index.js";
 import { collectAll } from "./collect.js";
 import type { ResearchSource } from "./types.js";
@@ -174,7 +176,128 @@ describe("collectAll (fail-soft)", () => {
 
     const evidence = await collectAll([], ALL_QUERIES);
 
-    expect(evidence).toEqual({ voices: [], failures: [] });
+    expect(evidence.voices).toEqual([]);
+    expect(evidence.failures).toEqual([]);
     expect(unused.collect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * coverage는 "무엇을 조사했는가"의 기록이다 (ADR-013).
+ * failures[]가 답하지 못하는 질문에 답한다 — 키가 없어 아예 조사되지 않은 소스는 실패가 아니라 부재다.
+ */
+describe("collectAll (coverage)", () => {
+  /** 소스 3종 전체가 언제나 coverage에 나타난다 — 조사 안 한 소스도 기록돼야 침묵이 안 된다 */
+  function coverageOf(
+    evidence: { coverage: SourceCoverage[] },
+    id: ResearchSourceId,
+  ): SourceCoverage {
+    const found = evidence.coverage.find((c) => c.source === id);
+    if (found === undefined) {
+      throw new Error(`coverage에 ${id}가 없다`);
+    }
+    return found;
+  }
+
+  it("등록되지 않은 소스가 unconfigured로 나타난다 (실패가 아니라 부재다)", async () => {
+    // NAVER 키가 없으면 buildResearchSources가 네이버를 배열에 아예 넣지 않는다.
+    // 그 부재가 coverage에 없으면 리포트는 "네이버 조사를 했다"고 거짓말한다.
+    const evidence = await collectAll(
+      [fakeSource("youtube", [voice("youtube", "댓글")])],
+      ALL_QUERIES,
+    );
+
+    expect(coverageOf(evidence, "naver")).toEqual({
+      source: "naver",
+      status: "unconfigured",
+      count: 0,
+    });
+    expect(coverageOf(evidence, "hackernews")).toEqual({
+      source: "hackernews",
+      status: "unconfigured",
+      count: 0,
+    });
+    // 부재는 실패가 아니다 — failures[]를 오염시키지 않는다
+    expect(evidence.failures).toEqual([]);
+  });
+
+  it("수집에 성공한 소스가 collected + 정확한 건수로 나타난다", async () => {
+    const evidence = await collectAll(
+      [
+        fakeSource("youtube", [
+          voice("youtube", "댓글1"),
+          voice("youtube", "댓글2"),
+        ]),
+      ],
+      ALL_QUERIES,
+    );
+
+    expect(coverageOf(evidence, "youtube")).toEqual({
+      source: "youtube",
+      status: "collected",
+      count: 2,
+    });
+  });
+
+  it("★ collected + count 0과 unconfigured를 구분한다", async () => {
+    // "HN을 조사했는데 0건이다"(시장 신호)와 "네이버는 키가 없어 조사조차 안 했다"(우리 설정 문제)는
+    // 완전히 다른 사실이다. 뭉개면 리포트가 근거 부재를 침묵으로 숨긴다.
+    const evidence = await collectAll(
+      [fakeSource("hackernews", [])],
+      ALL_QUERIES,
+    );
+
+    expect(coverageOf(evidence, "hackernews")).toEqual({
+      source: "hackernews",
+      status: "collected",
+      count: 0,
+    });
+    expect(coverageOf(evidence, "naver").status).toBe("unconfigured");
+  });
+
+  it("rejected 소스가 failed + error 메시지로 나타난다", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const evidence = await collectAll(
+      [fakeSource("naver", new Error("네이버 API 인증에 실패했다 (HTTP 401)"))],
+      ALL_QUERIES,
+    );
+
+    expect(coverageOf(evidence, "naver")).toEqual({
+      source: "naver",
+      status: "failed",
+      count: 0,
+      error: "네이버 API 인증에 실패했다 (HTTP 401)",
+    });
+  });
+
+  it("소스가 하나도 없어도 3종 전체가 unconfigured로 기록된다", async () => {
+    const evidence = await collectAll([], ALL_QUERIES);
+
+    expect(evidence.coverage).toEqual(
+      RESEARCH_SOURCE_IDS.map((source) => ({
+        source,
+        status: "unconfigured",
+        count: 0,
+      })),
+    );
+  });
+
+  it("coverage는 스키마 검증을 통과한다 (research.json으로 저장된다)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const evidence = await collectAll(
+      [
+        fakeSource("youtube", [voice("youtube", "댓글")]),
+        fakeSource("hackernews", new Error("HTTP 429")),
+      ],
+      ALL_QUERIES,
+    );
+
+    const result = ResearchEvidenceSchema.safeParse({
+      voices: evidence.voices,
+      coverage: evidence.coverage,
+    });
+    expect(result.success).toBe(true);
   });
 });

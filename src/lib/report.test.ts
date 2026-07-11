@@ -66,6 +66,7 @@ const context: MarketContext = {
   ],
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험이 반복된다"],
   sources: ["https://example.com/trend"],
+  researchCoverage: [],
   citations: [
     {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",

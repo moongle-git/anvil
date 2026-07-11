@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { ResearchSourceIdSchema } from "./research.js";
+import { CommunityVoiceSchema, SourceCoverageSchema } from "./research.js";
+
+/**
+ * CommunityVoice는 개념적으로 자료조사의 타입이라 research.ts가 소유한다.
+ * 여기서 re-export해 기존 import 경로(types/marketContext.js)를 유지한다.
+ */
+export { CommunityVoiceSchema, type CommunityVoice } from "./research.js";
 
 export const CompetitorServiceSchema = z.object({
   name: z.string().min(1),
@@ -27,26 +33,6 @@ export const CitationSchema = z.object({
   kind: z.enum(["origin", "redirect"]),
 });
 export type Citation = z.infer<typeof CitationSchema>;
-
-/**
- * 소스(YouTube·Hacker News·네이버)별 원시 타입을 하나로 정규화한 유저 목소리 (ADR-012).
- * 소비처는 프롬프트 마크다운과 아코디언 렌더 둘뿐이고, 둘 다 "인용문 + 출처 링크 + 작성자 + 인기도"다.
- */
-export const CommunityVoiceSchema = z.object({
-  source: ResearchSourceIdSchema,
-  /** 출처 문서 제목 — 영상·스토리·글 */
-  title: z.string().min(1),
-  /** 출처 퍼머링크 */
-  url: z.url(),
-  /** 인용 원문 */
-  text: z.string().min(1),
-  authorName: z.string().optional(),
-  /** 좋아요·points를 "인기도" 하나로 단일화한다 */
-  score: z.number().int().nonnegative().optional(),
-  /** 소스별 부가 1줄 (검색 스니펫 등) */
-  extra: z.string().optional(),
-});
-export type CommunityVoice = z.infer<typeof CommunityVoiceSchema>;
 
 /**
  * LLM이 프롬프트의 출력 JSON 예시를 보고 채우는 부분.
@@ -82,13 +68,22 @@ export type MarketContextDraft = z.infer<typeof MarketContextDraftSchema>;
 
 /**
  * 코드가 주입하는 키. 프롬프트에 절대 넣지 않는다 —
- * LLM에게 인용을 채우라고 하면 URL을 지어낸다. citations는 판단이 아니라 사실이다.
+ * LLM에게 인용을 채우라고 하면 URL을 지어낸다. 출처는 판단이 아니라 사실이다 (ADR-013).
  */
-export const CODE_INJECTED_CONTEXT_KEYS = ["citations"] as const;
+export const CODE_INJECTED_CONTEXT_KEYS = [
+  "citations",
+  "researchCoverage",
+] as const;
 
 /** 저장·소비되는 최종 형태. `.shape` 접근이 필요한 계약 검증은 이 스키마를 쓴다 */
 export const MarketContextObjectSchema = MarketContextDraftSchema.extend({
   citations: z.array(CitationSchema).default([]),
+  /**
+   * 소스별 수집 커버리지 (ADR-013). collectAll의 결과를 코드가 주입한다 —
+   * "네이버 키가 없어 조사를 안 했다"를 리포트가 침묵으로 숨기지 않게 하려는 필드다.
+   * 구 context.json에는 이 키가 없다. 빈 배열은 "커버리지 정보 없음"을 뜻한다.
+   */
+  researchCoverage: z.array(SourceCoverageSchema).default([]),
 });
 
 /** 구 목소리의 키를 CommunityVoice의 키로 옮긴다. 값 검증은 하지 않는다 — zod의 몫이다 */
@@ -142,6 +137,8 @@ export type MarketContext = z.infer<typeof MarketContextSchema>;
  * 하류 에이전트(正·反·合·판정) 프롬프트용. citations는 코드가 만든 출처 메타데이터라 논증에 쓰이지 않는다.
  * run당 10~30개이고 리다이렉트 URL이 길어서, 그대로 두면 같은 URL 뭉치가 하류 4개 프롬프트에 중복해 실린다.
  * sources는 남긴다 — LLM 자기보고 설명은 하류에 맥락을 준다.
+ * researchCoverage도 남긴다 — "국내 커뮤니티 근거가 아예 없다"를 하류가 알아야 논증에서 근거 부재를
+ * 진술할 수 있다. 소스가 3개뿐이라 프롬프트를 부풀리지도 않는다.
  */
 export function toPromptContext(
   context: MarketContext,

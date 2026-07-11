@@ -33,8 +33,9 @@ const NAVER_VOICE: CommunityVoice = {
   extra: "검색 스니펫",
 };
 
+/** formatEvidenceSection은 coverage를 읽지 않는다 — 프롬프트 포맷의 입력은 voices·failures뿐이다 */
 function evidence(partial: Partial<CollectedEvidence>): CollectedEvidence {
-  return { voices: [], failures: [], ...partial };
+  return { voices: [], failures: [], coverage: [], ...partial };
 }
 
 describe("formatEvidenceSection", () => {

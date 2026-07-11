@@ -51,6 +51,12 @@ const marketContext: MarketContext = {
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험"],
   sources: ["https://example.com/trend"],
   citations: [],
+  // fakeSources()가 3종 모두 등록하고 전부 0건을 돌려주므로, 코드가 주입하는 커버리지는 이 모양이다
+  researchCoverage: [
+    { source: "youtube", status: "collected", count: 0 },
+    { source: "hackernews", status: "collected", count: 0 },
+    { source: "naver", status: "collected", count: 0 },
+  ],
 };
 
 const thesis: Thesis = {
@@ -187,7 +193,9 @@ function fakeGemini(options?: {
         return Promise.reject(new Error("Gemini 호출 실패"));
       }
       if (schema === MarketContextDraftSchema) {
-        const { citations, ...draft } = marketContext;
+        // LLM은 draft만 채운다 — citations·researchCoverage는 코드가 주입하는 사실이다 (ADR-013)
+        const { citations, researchCoverage, ...draft } = marketContext;
+        void researchCoverage;
         return Promise.resolve({
           data: draft,
           citations,
@@ -465,6 +473,50 @@ describe("runPipeline", () => {
         ),
       ),
     ).toEqual(marketContext);
+  });
+
+  // ADR-013: research.json은 step 산출물이 아니라 context-hunter의 부산물이다.
+  // executeStep의 반환값은 context.json에만 저장되므로, 수집 증거는 별도로 영속화한다.
+  describe("research.json 영속화", () => {
+    it("★ context-hunter 실행 시 수집 증거를 research.json으로 저장한다", async () => {
+      const { gemini } = fakeGemini();
+      const save = vi.spyOn(store, "saveResearchEvidence");
+
+      const { runId } = await runPipeline(makeDeps(gemini), { idea: IDEA });
+
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save.mock.calls[0][0]).toBe(runId);
+
+      // 파일로도 남아야 한다 — 리포트 인용을 수집물과 대조할 원본이다
+      const evidence = store.loadResearchEvidence(runId);
+      expect(evidence).not.toBeNull();
+      expect(evidence?.coverage).toEqual(marketContext.researchCoverage);
+    });
+
+    it("research.json은 step 산출물 파일이 아니다", () => {
+      // PIPELINE_STEPS·resume 판정·웹 진행 뷰까지 파급되므로 STEP_OUTPUT_FILES에 넣지 않는다
+      expect(Object.values(STEP_OUTPUT_FILES)).not.toContain("research.json");
+    });
+
+    it("★ resume: context-hunter가 completed면 research.json을 재생성하지 않는다", async () => {
+      // 1차 실행 — cold-critic에서 실패시켜 context-hunter만 completed로 남긴다
+      const first = fakeGemini({ failOn: CriticismSchema });
+      const error = (await runPipeline(makeDeps(first.gemini), {
+        idea: IDEA,
+      }).catch((e: unknown) => e)) as PipelineStepError;
+
+      const save = vi.spyOn(store, "saveResearchEvidence");
+
+      const second = fakeGemini();
+      await runPipeline(makeDeps(second.gemini), {
+        idea: IDEA,
+        resumeRunId: error.runId,
+      });
+
+      // skip된 step은 run()이 호출되지 않는다 — 이미 파일이 있으므로 정상이다
+      expect(save).not.toHaveBeenCalled();
+      expect(store.loadResearchEvidence(error.runId)).not.toBeNull();
+    });
   });
 
   describe("인터뷰 (웹 흐름)", () => {

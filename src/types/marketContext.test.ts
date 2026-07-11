@@ -7,6 +7,7 @@ import {
   MarketContextDraftSchema,
   MarketContextObjectSchema,
   MarketContextSchema,
+  toPromptContext,
 } from "./marketContext.js";
 
 describe("CompetitorServiceSchema", () => {
@@ -281,6 +282,67 @@ describe("MarketContextSchema", () => {
         ...CODE_INJECTED_CONTEXT_KEYS,
       ]);
       expect(union).toEqual(new Set(Object.keys(MarketContextObjectSchema.shape)));
+    });
+  });
+
+  // ADR-013: "네이버 키가 없어 조사를 안 했다"는 LLM이 알 수 없는 사실이다. 코드가 주입한다.
+  describe("researchCoverage (코드 주입 필드)", () => {
+    const coverage = [
+      { source: "youtube" as const, status: "collected" as const, count: 3 },
+      { source: "hackernews" as const, status: "collected" as const, count: 0 },
+      {
+        source: "naver" as const,
+        status: "unconfigured" as const,
+        count: 0,
+      },
+    ];
+
+    it("researchCoverage 키가 없는 구 context.json을 빈 배열로 채워 parse한다", () => {
+      // 구 run에는 이 키가 없다. 빈 배열은 "커버리지 정보 없음"이며 렌더러가 처리한다
+      expect(validContext).not.toHaveProperty("researchCoverage");
+
+      const parsed = MarketContextSchema.parse(validContext);
+
+      expect(parsed.researchCoverage).toEqual([]);
+    });
+
+    it("주입된 researchCoverage를 보존한다", () => {
+      const parsed = MarketContextSchema.parse({
+        ...validContext,
+        researchCoverage: coverage,
+      });
+      expect(parsed.researchCoverage).toEqual(coverage);
+    });
+
+    it("researchCoverage는 LLM이 채우는 draft 스키마에 없다", () => {
+      expect(Object.keys(MarketContextDraftSchema.shape)).not.toContain(
+        "researchCoverage",
+      );
+      expect(CODE_INJECTED_CONTEXT_KEYS).toContain("researchCoverage");
+    });
+
+    it("미지의 status를 거부한다", () => {
+      const result = MarketContextSchema.safeParse({
+        ...validContext,
+        researchCoverage: [
+          { source: "naver", status: "skipped", count: 0 },
+        ],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("★ toPromptContext는 researchCoverage를 덜어내지 않는다 (하류가 근거 부재를 진술해야 한다)", () => {
+      // citations와 달리 이건 논증에 쓰인다 — "국내 커뮤니티 근거가 아예 없다"를 反이 말할 수 있어야 한다
+      const context = MarketContextSchema.parse({
+        ...validContext,
+        researchCoverage: coverage,
+        citations: [{ uri: "https://example.com/a", kind: "origin" as const }],
+      });
+
+      const promptContext = toPromptContext(context);
+
+      expect(promptContext.researchCoverage).toEqual(coverage);
+      expect(promptContext).not.toHaveProperty("citations");
     });
   });
 

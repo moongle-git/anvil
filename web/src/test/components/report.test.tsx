@@ -149,6 +149,7 @@ const marketContext: MarketContext = {
   ],
   painPointEvidence: ["회의록 작성에 주당 3시간"],
   sources: ["https://vertexaisearch.google.com/redirect/very-long-url-aaaaaa"],
+  researchCoverage: [],
   citations: [
     {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",

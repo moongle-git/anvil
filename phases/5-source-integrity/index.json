@@ -21,7 +21,10 @@
     {
       "step": 2,
       "name": "research-artifact",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-12T00:53:34+0900",
+      "completed_at": "2026-07-12T01:06:00+0900",
+      "summary": "수집 증거를 runs/{id}/research.json으로 영속화하고 소스 커버리지를 코드 주입 필드로 만든다 (ADR-013). 신규 타입(src/types/research.ts) — SourceCoverageSchema { source: ResearchSourceId, status: 'collected'|'unconfigured'|'failed', count: number, error?: string }, ResearchEvidenceSchema { voices: CommunityVoice[], coverage: SourceCoverage[] }. CommunityVoiceSchema/CommunityVoice가 marketContext.ts에서 research.ts로 이동(순환 import 회피)하고 marketContext.ts가 re-export하므로 기존 import 경로는 불변. CollectedEvidence에 coverage: SourceCoverage[] 추가 — collectAll은 RESEARCH_SOURCE_IDS 전체를 순회해 등록되지 않은 소스를 unconfigured(count 0)로 기록하고, collected+count 0(조사했으나 0건)과 구분한다. 여전히 throw하지 않고 failures[]도 유지한다. RunStore에 saveResearchEvidence(runId, evidence): void / loadResearchEvidence(runId): ResearchEvidence | null 추가 (없거나 손상·검증 실패면 null) — research.json은 STEP_OUTPUT_FILES에 없다(answers.json과 같은 비-step 아티팩트). MarketContextObjectSchema에 researchCoverage: z.array(SourceCoverageSchema).default([]) 추가, CODE_INJECTED_CONTEXT_KEYS = ['citations','researchCoverage'], MarketContextDraftSchema에는 없음, toPromptContext는 citations만 덜어내고 researchCoverage는 하류 프롬프트에 남긴다. runContextHunter의 새 반환 시그니처 — Promise<ContextHunterResult> = { context: MarketContext (citations + researchCoverage 코드 주입됨), evidence: ResearchEvidence }. orchestrator의 context-hunter executeStep이 evidence를 벗겨 store.saveResearchEvidence(runId, evidence)로 저장하고 context만 반환하므로 context.json은 오염되지 않으며, resume(completed)에서는 run()이 호출되지 않아 research.json을 재생성하지 않는다. 프롬프트·communityVoices 처리는 무변경(step 3의 scope)."
     },
     {
       "step": 3,

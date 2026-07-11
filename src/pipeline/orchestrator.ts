@@ -196,12 +196,22 @@ export async function runPipeline(
     }
   }
 
-  const context = await executeStep("context-hunter", MarketContextSchema, () =>
-    runContextHunter(
-      { gemini: deps.gemini, sources: deps.sources, log },
-      idea,
-      clarifications || undefined,
-    ),
+  // executeStep은 반환값을 그대로 step 산출물로 저장하므로, 수집 증거는 여기서 벗겨내
+  // research.json으로 따로 영속화한다 — research.json은 step 산출물이 아니다 (ADR-013).
+  // resume 시 context-hunter가 completed면 run()이 호출되지 않아 research.json은 재생성되지
+  // 않는다. 이미 파일이 있으므로 정상이다.
+  const context = await executeStep(
+    "context-hunter",
+    MarketContextSchema,
+    async () => {
+      const { context: marketContext, evidence } = await runContextHunter(
+        { gemini: deps.gemini, sources: deps.sources, log },
+        idea,
+        clarifications || undefined,
+      );
+      deps.store.saveResearchEvidence(runId, evidence);
+      return marketContext;
+    },
   );
   const thesis = await executeStep("thesis", ThesisSchema, () =>
     runThesis({ gemini: deps.gemini }, idea, context),

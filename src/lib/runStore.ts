@@ -6,10 +6,12 @@ import {
   InterviewAnswersSchema,
   InterviewQuestionsSchema,
   PIPELINE_STEPS,
+  ResearchEvidenceSchema,
   RunStateSchema,
   type InterviewAnswers,
   type InterviewQuestions,
   type PipelineStepName,
+  type ResearchEvidence,
   type RunState,
 } from "../types/index.js";
 
@@ -26,6 +28,9 @@ const STATE_FILE = "state.json";
 const REPORT_FILE = "report.md";
 // 인터뷰 답변은 스텝 산출물이 아니라 사람이 제출하는 아티팩트다
 const ANSWERS_FILE = "answers.json";
+// 수집 증거는 context-hunter step의 부산물이지 별도 step의 산출물이 아니다 —
+// STEP_OUTPUT_FILES에 넣으면 PipelineStepName과의 1:1 대응이 깨진다 (ADR-013)
+const RESEARCH_FILE = "research.json";
 
 // state.json이 이 시간보다 오래 갱신되지 않으면 실행 프로세스가 죽은 것으로 간주한다 (PRD "run 상태 파생 규칙").
 // executeStep은 step 실행 중에 state.json을 건드리지 않으므로, 이 값은 가장 긴 step보다 커야 한다 —
@@ -142,6 +147,30 @@ export class RunStore {
       return null;
     }
     const result = InterviewAnswersSchema.safeParse(parsed);
+    return result.success ? result.data : null;
+  }
+
+  /** 수집 즉시 영속화한다 — LLM이 손대기 전의 사실이 곧 진실의 원천이다 (ADR-013) */
+  saveResearchEvidence(runId: string, evidence: ResearchEvidence): void {
+    atomicWriteFileSync(
+      path.join(this.runDir(runId), RESEARCH_FILE),
+      JSON.stringify(evidence, null, 2),
+    );
+  }
+
+  /** 구 run에는 research.json이 없다 — 없거나 손상됐으면 throw하지 않고 null이다 */
+  loadResearchEvidence(runId: string): ResearchEvidence | null {
+    const filePath = path.join(this.runDir(runId), RESEARCH_FILE);
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    } catch {
+      return null;
+    }
+    const result = ResearchEvidenceSchema.safeParse(parsed);
     return result.success ? result.data : null;
   }
 

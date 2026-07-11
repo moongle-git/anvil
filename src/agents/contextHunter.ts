@@ -2,7 +2,11 @@ import { collectAll } from "../research/collect.js";
 import { formatEvidenceSection } from "../research/format.js";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
-import { MarketContextDraftSchema, type MarketContext } from "../types/index.js";
+import {
+  MarketContextDraftSchema,
+  type MarketContext,
+  type ResearchEvidence,
+} from "../types/index.js";
 import { planResearchQueries } from "./researchPlanner.js";
 
 export const CONTEXT_HUNTER_SYSTEM_PROMPT = `당신은 신규 서비스 아이디어의 시장 맥락을 수집·정제하는 리서치 애널리스트다.
@@ -66,11 +70,18 @@ export interface ContextHunterDeps {
   log?: (message: string) => void;
 }
 
+export interface ContextHunterResult {
+  /** context.json으로 저장되는 step 산출물 */
+  context: MarketContext;
+  /** research.json으로 저장되는 수집 원본 — LLM 이전의 사실이다 (ADR-013) */
+  evidence: ResearchEvidence;
+}
+
 export async function runContextHunter(
   deps: ContextHunterDeps,
   idea: string,
   clarifications?: string,
-): Promise<MarketContext> {
+): Promise<ContextHunterResult> {
   // 아이디어 원문을 그대로 검색하면 긴 문장이 되어 검색 품질의 하한을 만든다. 인터뷰 답변도
   // 검색어에 반영한다. planner는 실패해도 throw하지 않고 아이디어 원문으로 폴백한다 (ADR-012).
   const queries = await planResearchQueries(
@@ -85,14 +96,14 @@ export async function runContextHunter(
   );
 
   // collectAll은 절대 throw하지 않는다 — 소스가 전부 죽어도 웹검색만으로 진행한다 (fail-soft)
-  const evidence = await collectAll(deps.sources, queries);
+  const collected = await collectAll(deps.sources, queries);
 
   let prompt = CONTEXT_HUNTER_PROMPT_TEMPLATE.replace("{idea}", idea)
     .replace(
       "{webQueryHints}",
       queries.web.map((query) => `   - ${query}`).join("\n"),
     )
-    .replace("{evidenceSection}", formatEvidenceSection(evidence));
+    .replace("{evidenceSection}", formatEvidenceSection(collected));
 
   // 인터뷰 답변이 있으면 아이디어의 핵심 맥락으로 반영한다 (웹 인터뷰 흐름)
   if (clarifications !== undefined && clarifications.trim().length > 0) {
@@ -114,5 +125,14 @@ export async function runContextHunter(
     );
   }
 
-  return { ...data, citations };
+  // citations와 나란히 researchCoverage도 코드가 주입한다. "네이버는 키가 없어 조사하지
+  // 않았다"는 LLM이 알 수 없는 사실이고, 물어보면 지어낸다 (ADR-013).
+  const evidence: ResearchEvidence = {
+    voices: collected.voices,
+    coverage: collected.coverage,
+  };
+  return {
+    context: { ...data, citations, researchCoverage: evidence.coverage },
+    evidence,
+  };
 }

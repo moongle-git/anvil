@@ -1,4 +1,8 @@
-import type { CommunityVoice, ResearchSourceId } from "../types/index.js";
+import type {
+  CommunityVoice,
+  ResearchSourceId,
+  SourceCoverage,
+} from "../types/index.js";
 
 /**
  * 자료조사 소스 하나. services/의 원시 타입을 CommunityVoice로 정규화한 얇은 어댑터다 (ADR-012).
@@ -22,4 +26,9 @@ export interface SourceFailure {
 export interface CollectedEvidence {
   voices: CommunityVoice[];
   failures: SourceFailure[];
+  /**
+   * 소스 3종 전체의 조사 결과. 등록되지 않은 소스도 unconfigured로 반드시 나타난다 —
+   * failures[]는 "실패"만 담고, 키가 없어 조사되지 않은 소스는 실패가 아니라 부재다 (ADR-013).
+   */
+  coverage: SourceCoverage[];
 }

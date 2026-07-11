@@ -46,6 +46,7 @@ const MARKET_CONTEXT: MarketContext = {
   ],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
+  researchCoverage: [],
   citations: [
     {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
