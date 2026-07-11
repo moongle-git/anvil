@@ -57,6 +57,19 @@ export function renderInline(text: string): ReactNode {
   return renderTokens(parseInline(text));
 }
 
+// 이미 항목별로 쪼개진 문자열 배열(verdict.conditions 등)을 번호 목록으로 렌더링한다.
+// 번호 목록 규격(ORDERED·라벨 분리)의 정의는 이 파일 하나뿐이다 — 호출부가 <ol>을 직접 짜면
+// 클래스가 복제되어 같은 리포트 안에 간격이 다른 두 종류의 번호 목록이 생긴다.
+// 항목마다 renderRichText를 태우면 안 된다: 블록 파서가 항목마다 <div>를 씌워 리스트가 깨진다.
+export function OrderedList({ items }: { items: string[] }): ReactNode {
+  const listItems: ListItem[] = items.map((item) => ({
+    spans: parseInline(item),
+    children: [],
+  }));
+
+  return <ol className={ORDERED}>{renderItems(listItems, true)}</ol>;
+}
+
 // 장문 텍스트를 문단·번호 목록·불릿 목록으로 렌더링한다.
 export function renderRichText(text: string): ReactNode {
   return (

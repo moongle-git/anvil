@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup } from "@testing-library/react";
-import { renderInline, renderRichText } from "@/lib/richText";
+import { OrderedList, renderInline, renderRichText } from "@/lib/richText";
 import {
   LEVER_BOLD_LEADIN,
   MONETIZATION_NUMBERED,
@@ -129,5 +129,50 @@ describe("renderInline", () => {
     expect(container.querySelector("li > p")).toBeNull();
     expect(container.querySelector("li > div")).toBeNull();
     expect(container.textContent).not.toContain("**");
+  });
+});
+
+// 이미 항목별로 쪼개진 string[](verdict.conditions 등)을 위한 진입점.
+// renderRichText(블록 파서)를 항목마다 태우면 <div> 래퍼가 생겨 리스트 구조가 깨진다.
+describe("OrderedList", () => {
+  it("항목 배열을 <ol>의 직계 <li>로 렌더링한다 (항목당 블록 래퍼 없음)", () => {
+    const { container } = render(
+      <OrderedList items={["첫째 조건", "둘째 조건"]} />,
+    );
+
+    expect(container.querySelectorAll("ol").length).toBe(1);
+    expect(container.querySelectorAll("ol > li").length).toBe(2);
+    expect(container.querySelectorAll("ol > div").length).toBe(0);
+    expect(container.querySelectorAll("ol > li")[0].textContent).toBe(
+      "첫째 조건",
+    );
+  });
+
+  it("볼드 라벨을 본문과 다른 블록으로 분리한다 (renderRichText의 번호 목록과 같은 규칙)", () => {
+    const { container } = render(
+      <OrderedList items={["**리텐션:** 40% 이상을 6개월 내 달성한다"]} />,
+    );
+
+    const label = container.querySelector("ol > li")?.firstElementChild;
+    expect(label?.tagName).toBe("STRONG");
+    expect(label?.textContent).toBe("리텐션:");
+
+    const body = label?.nextElementSibling;
+    expect(body?.tagName).toBe("DIV");
+    expect(body?.textContent).toContain("40% 이상");
+    expect(container.textContent).not.toContain("**");
+  });
+
+  // 규격이 한 곳에서만 정의된다는 계약. 클래스 문자열을 복제하면 같은 리포트 안에
+  // 간격이 다른 두 종류의 번호 목록이 생긴다 — 이 단언은 그 복제를 잡는다.
+  it("renderRichText의 번호 목록과 같은 <ol> 규격을 공유한다", () => {
+    const { container: viaList } = render(<OrderedList items={["조건"]} />);
+    const { container: viaRichText } = render(
+      <div>{renderRichText(MONETIZATION_NUMBERED)}</div>,
+    );
+
+    expect(viaList.querySelector("ol")?.className).toBe(
+      viaRichText.querySelector("ol")?.className,
+    );
   });
 });

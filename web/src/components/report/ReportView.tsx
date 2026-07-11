@@ -1,4 +1,5 @@
 import type { RunDetail } from "@/lib/server/runs";
+import { Card, type CardAccent } from "@/components/ui";
 import { DialecticSplit } from "./DialecticSplit";
 import { MarketContextSection } from "./MarketContextSection";
 import { ReportHeader } from "./ReportHeader";
@@ -9,6 +10,8 @@ import { VerdictSection } from "./VerdictSection";
 interface ReportViewProps {
   detail: RunDetail;
 }
+
+const LEGACY_ACCENT: CardAccent = { side: "left", tone: "strong" };
 
 // 리포트 뷰(완료 run). 5단계 순차 논증 서사 (ADR-008 결론 후치):
 // 시장 맥락 → 正 → 反 → 合 → 최종 판정. 결론(verdict·생존 점수·severity 집계)을 상단에 두지
@@ -30,10 +33,17 @@ export function ReportView({ detail }: ReportViewProps) {
       />
 
       {isLegacyReport ? (
-        <div className="border-l-2 border-neutral-300 bg-neutral-50 p-4 text-[15px] leading-[1.8] text-neutral-700">
+        // 레일 + 배경 콜아웃은 카드 골격을 그대로 쓴다 (UI_GUIDE 테두리 블록 여백 규격) — padding은
+        // Card 기본값(p-6). severity가 아닌 데이터 상태 안내이므로 레일은 무채색이다.
+        // bg-neutral-50!의 `!`는 필수다: Card 골격의 bg-white와 같은 레이어·같은 명시도인데
+        // 생성 CSS에서 .bg-white가 뒤에 와, 그냥 얹으면 배경이 조용히 흰색으로 진다.
+        <Card
+          accent={LEGACY_ACCENT}
+          className="bg-neutral-50! text-[15px] leading-[1.8] text-neutral-700"
+        >
           이 리포트는 이전 버전 형식으로 생성되었습니다. 전체 내용은 report.md
           다운로드로 확인하세요.
-        </div>
+        </Card>
       ) : null}
 
       <div className="lg:grid lg:grid-cols-[11rem_1fr] lg:gap-10">

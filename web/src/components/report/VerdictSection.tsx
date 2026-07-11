@@ -10,7 +10,7 @@ import {
   SectionHeading,
   SeverityBadge,
 } from "@/components/ui";
-import { renderInline, renderRichText } from "@/lib/richText";
+import { OrderedList, renderInline, renderRichText } from "@/lib/richText";
 import { SurvivalGauge } from "./SurvivalGauge";
 
 // recommendation → 뱃지 시맨틱 톤. 새 색이 아니라 기존 Badge 톤을 재사용한다.
@@ -87,11 +87,8 @@ export function VerdictSection({ verdict }: { verdict?: Verdict }) {
 
       <div className="flex flex-col gap-3">
         <Subheading>생존 조건</Subheading>
-        <ol className="list-decimal space-y-3 pl-6 text-[15px] leading-[1.8] text-neutral-700 marker:font-medium marker:text-neutral-500">
-          {verdict.conditions.map((condition, index) => (
-            <li key={index}>{renderInline(condition)}</li>
-          ))}
-        </ol>
+        {/* 번호 목록 규격은 richText가 단일 소스다 — 클래스를 여기 복제하면 合 섹션과 간격이 갈린다 */}
+        <OrderedList items={verdict.conditions} />
       </div>
     </section>
   );

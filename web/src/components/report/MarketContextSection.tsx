@@ -25,7 +25,9 @@ function CommunityVoiceCard({ voice }: { voice: CommunityVoice }) {
   return (
     <figure
       data-voice-source={voice.source}
-      className="border-l-2 border-neutral-300 pl-4"
+      // 레일 인용 규격 (UI_GUIDE): 상하 여백이 0이면 텍스트가 레일 끝에 붙어 잘린 것처럼 보인다.
+      // DialecticSplit의 반박 인용(RAIL_QUOTE)과 같은 값이어야 한다 — 같은 시맨틱이다.
+      className="border-l-2 border-neutral-300 py-1 pl-4"
     >
       <blockquote className="text-[15px] leading-[1.8] text-neutral-700">
         {voice.text}

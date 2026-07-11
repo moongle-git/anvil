@@ -7,6 +7,7 @@ import {
   type Verdict,
 } from "@anvil/types";
 import { SEVERITY_LABELS } from "@/components/ui";
+import { OrderedList } from "@/lib/richText";
 import { SurvivalGauge } from "@/components/report/SurvivalGauge";
 import { VerdictSection } from "@/components/report/VerdictSection";
 
@@ -133,6 +134,34 @@ describe("VerdictSection", () => {
       verdict.conditions.length,
     );
     expect(screen.getByText("6개월 내 팀 3곳 유료 전환")).toBeDefined();
+  });
+
+  // 생존 조건 목록은 공용 번호 목록 규격을 그대로 쓴다. 클래스를 손으로 복제하면
+  // 合 섹션(renderRichText)과 간격이 갈려 한 리포트에 두 종류의 번호 목록이 생긴다.
+  it("생존 조건 <ol>이 공용 번호 목록과 같은 규격을 쓴다", () => {
+    const { container } = render(<VerdictSection verdict={verdict} />);
+    const { container: shared } = render(<OrderedList items={["조건"]} />);
+
+    expect(container.querySelector("ol")?.className).toBe(
+      shared.querySelector("ol")?.className,
+    );
+  });
+
+  it("생존 조건의 볼드 라벨을 본문과 다른 블록으로 분리한다", () => {
+    const { container } = render(
+      <VerdictSection
+        verdict={{
+          ...verdict,
+          conditions: ["**리텐션:** 실행 추적 리텐션 40% 이상"],
+        }}
+      />,
+    );
+
+    const label = container.querySelector("ol > li")?.firstElementChild;
+    expect(label?.tagName).toBe("STRONG");
+    expect(label?.textContent).toBe("리텐션:");
+    expect(label?.nextElementSibling?.tagName).toBe("DIV");
+    expect(container.textContent).not.toContain("**");
   });
 
   it("SurvivalGauge를 최종 판정 점수와 함께 렌더링한다", () => {
