@@ -22,7 +22,8 @@
     },
     {
       "dir": "4-dialectic-ui-polish",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-07-12T00:02:06+0900"
     }
   ]
 }
