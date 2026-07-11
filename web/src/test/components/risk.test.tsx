@@ -62,6 +62,35 @@ describe("RiskRadar", () => {
     }
   });
 
+  it("figure 카드로 감싸고 '축별 최고 위험도' 캡션을 노출한다", () => {
+    render(<RiskRadar profile={PROFILE} maxSeverity="fatal" />);
+
+    const figure = screen.getByRole("figure");
+    expect(figure.querySelector("figcaption")?.textContent).toBe(
+      "축별 최고 위험도",
+    );
+  });
+
+  it("img role은 SVG 하나뿐이다 — figure가 img role을 중복 부여하지 않는다", () => {
+    render(<RiskRadar profile={PROFILE} maxSeverity="fatal" />);
+
+    // getByRole은 단수 조회다: figure에 role='img'가 붙으면 여기서 깨진다
+    expect(screen.getAllByRole("img")).toHaveLength(1);
+    expect(screen.getByRole("img").tagName.toLowerCase()).toBe("svg");
+  });
+
+  it("figcaption을 추가해도 [data-axis]는 SVG 축 라벨 3개뿐이다", () => {
+    const { container } = render(
+      <RiskRadar profile={PROFILE} maxSeverity="fatal" />,
+    );
+
+    const axisNodes = container.querySelectorAll("[data-axis]");
+    expect(axisNodes).toHaveLength(3);
+    for (const node of axisNodes) {
+      expect(node.tagName.toLowerCase()).toBe("text");
+    }
+  });
+
   it("모든 점수가 0이어도 throw하지 않고 렌더링된다", () => {
     const zeroed: RiskAxisScore[] = PROFILE.map((axisScore) => ({
       ...axisScore,

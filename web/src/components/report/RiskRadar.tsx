@@ -43,13 +43,24 @@ export function RiskRadar({ profile, maxSeverity, size = 200 }: RiskRadarProps) 
     .join(", ");
 
   return (
-    <div data-max-severity={maxSeverity}>
+    // Card 컴포넌트는 <div>라 <figure>/<figcaption> 시맨틱을 잃는다 — 카드 골격만 직접 얹는다.
+    <figure
+      data-max-severity={maxSeverity}
+      className="flex flex-col gap-4 rounded-md border border-neutral-200 bg-white p-6"
+    >
+      {/* 점수는 축별 평균이 아니라 최댓값이다 (risk.ts buildRiskProfile) */}
+      <figcaption className="text-sm font-medium text-neutral-500">
+        축별 최고 위험도
+      </figcaption>
+
       <svg
         role="img"
         aria-label={`리스크 레이더 — ${ariaSummary}`}
         viewBox={`0 0 ${size} ${size}`}
         width={size}
         height={size}
+        // 고정폭 SVG는 block이어야 baseline 여백 없이 mx-auto로 중앙에 놓인다
+        className="mx-auto block"
       >
         {/* 격자: 동심 다각형 3겹 (neutral-200) */}
         {GRID_RINGS.map((ratio) => (
@@ -110,6 +121,6 @@ export function RiskRadar({ profile, maxSeverity, size = 200 }: RiskRadarProps) 
           </li>
         ))}
       </ul>
-    </div>
+    </figure>
   );
 }

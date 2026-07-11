@@ -29,7 +29,10 @@
     {
       "step": 3,
       "name": "risk-radar-figure",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T23:45:20+0900",
+      "summary": "RiskRadar가 이제 레이더 SVG를 <figure> 카드로 렌더링한다 — 루트가 <div>에서 카드 골격(rounded-md border border-neutral-200 bg-white p-6, flex flex-col gap-4)을 직접 얹은 <figure>로 바뀌고, 그 안에 <figcaption>\"축별 최고 위험도\"(text-sm font-medium text-neutral-500, 점수가 평균이 아닌 최댓값임을 명시)와 mx-auto block으로 가로 중앙 정렬된 고정폭 SVG가 온다. Card 컴포넌트 대신 클래스를 직접 얹은 이유는 Card가 <div>라 figure/figcaption 시맨틱을 잃기 때문. data-max-severity는 <figure> 한 곳에만, SVG의 role='img'·aria-label과 sr-only <ul aria-label=\"축별 리스크 점수\">는 유지, [data-axis]는 여전히 축 라벨 <text> 3개뿐이다. 차트 라이브러리 미도입(ADR-009), radar.ts·risk.ts·DialecticSplit.tsx 무변경. risk.test.tsx에 figure+figcaption 문자열·img role 단수(SVG 하나)·[data-axis] 3개 검증 3종 추가(정렬 클래스 단언 없음 — 육안 검증은 step 5).",
+      "completed_at": "2026-07-11T23:47:30+0900"
     },
     {
       "step": 4,
