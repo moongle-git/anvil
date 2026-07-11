@@ -3,10 +3,18 @@ import {
   DIALECTIC_AXIS_LABELS,
   type Criticism,
   type CriticismPoint,
+  type CriticismSeverity,
   type Thesis,
   type ThesisPoint,
 } from "@anvil/types";
-import { Badge, Card, Collapsible, EmptyState } from "@/components/ui";
+import {
+  Badge,
+  Card,
+  Collapsible,
+  EmptyState,
+  type AccentTone,
+  type CardAccent,
+} from "@/components/ui";
 import { renderInline, renderRichText } from "@/lib/richText";
 import {
   buildRiskProfile,
@@ -28,10 +36,30 @@ const CARD_HEADING = "text-base font-semibold text-neutral-900";
 // 헤더 행·리드 행·축 행이 같은 그리드 규격을 공유해야 컬럼이 세로로 정렬된다
 const SPLIT_GRID = "grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-10";
 const LIST = "list-disc space-y-2 pl-5 text-[15px] leading-[1.8] text-neutral-700 marker:text-neutral-400";
+// 레일 인용: 상하 여백이 0이면 텍스트가 레일 끝에 붙어 잘린 것처럼 보인다 (UI_GUIDE)
+const RAIL_QUOTE = "border-l-2 border-neutral-300 py-1 pl-4 text-sm text-neutral-500";
 
+// 正/反의 카드 골격은 완전히 동일하고, 대립은 액센트 레일의 방향으로만 표현한다
+// (UI_GUIDE 정반합 카드 — 미러 액센트 레일). 正은 왼쪽 무채색, 反은 오른쪽 severity 색.
+const THESIS_ACCENT: CardAccent = { side: "left", tone: "strong" };
+
+// severity → 액센트 톤. 색 클래스가 아니라 "의미"를 넘긴다 (Card가 톤을 색으로 변환).
+const SEVERITY_ACCENT_TONES: Record<CriticismSeverity, AccentTone> = {
+  fatal: "danger",
+  major: "warning",
+  minor: "neutral",
+};
+
+function criticismAccent(severity: CriticismSeverity): CardAccent {
+  return { side: "right", tone: SEVERITY_ACCENT_TONES[severity] };
+}
+
+// 正/反 카드는 "제목 → 메타 → 근거" 순서를 공유한다. 순서가 어긋나면 같은 축의 두 주장이
+// 좌우로 나란히 읽히지 않는다 — 正에는 메타가 없고, 反에는 severity 메타 줄이 붙는다.
 function ThesisCard({ point }: { point: ThesisPoint }) {
   return (
     <Card
+      accent={THESIS_ACCENT}
       data-thesis-id={point.id}
       data-axis={point.axis}
       className="flex flex-col gap-3"
@@ -55,11 +83,15 @@ function CriticismCard({
 }) {
   return (
     <Card
+      // 레일 톤은 카드마다 다르다 — 리드 행의 최고 severity가 아니라 이 항목의 severity다
+      accent={criticismAccent(point.severity)}
       data-criticism-id={point.id}
       data-axis={point.axis}
       data-rebuts={point.rebuts}
       className="flex flex-col gap-3"
     >
+      <h4 className={CARD_HEADING}>{renderInline(point.claim)}</h4>
+      {/* 메타 줄: 제목 아래에 둬야 좌우 카드의 첫 줄 baseline이 맞는다 (UI_GUIDE) */}
       <span>
         <RiskScoreBadge
           severity={point.severity}
@@ -67,9 +99,8 @@ function CriticismCard({
           keyword={point.riskKeyword}
         />
       </span>
-      <h4 className={CARD_HEADING}>{renderInline(point.claim)}</h4>
       {rebuttedClaim !== undefined ? (
-        <p className="border-l-2 border-neutral-300 pl-3 text-sm text-neutral-500">
+        <p className={RAIL_QUOTE}>
           이 낙관을 반박: {renderInline(rebuttedClaim)}
         </p>
       ) : null}
@@ -77,6 +108,32 @@ function CriticismCard({
         {renderRichText(point.evidence)}
       </Collapsible>
     </Card>
+  );
+}
+
+// 反 컬럼의 리드: 소결론 콜아웃 + 리스크 레이더.
+// 레이더는 리드 행에만 둔다 — 축 행으로 내리면 축 라벨의 data-axis 3개가 그 행에 섞인다.
+function AntithesisLead({ criticism }: { criticism: Criticism }) {
+  // 리드의 레일 톤과 레이더 폴리곤 색은 같은 기준을 쓴다 — 리포트 전체의 최고 severity
+  const worst = maxSeverity(criticism);
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* criticism.verdict는 反 섹션의 소결론이지 최종 판정이 아니다 (ADR-010).
+          레일 + 배경 콜아웃도 카드 골격을 그대로 쓴다 (UI_GUIDE 테두리 블록 여백 규격).
+          bg-neutral-50!의 `!`는 필수다 — Card 골격의 bg-white와 같은 레이어·같은 명시도인데
+          생성 CSS에서 .bg-white가 뒤에 와, 그냥 얹으면 콜아웃 배경이 조용히 흰색으로 진다. */}
+      <Card
+        accent={criticismAccent(worst)}
+        className="flex flex-col gap-2 bg-neutral-50!"
+      >
+        <span className="text-sm font-medium text-neutral-500">
+          反의 소결론
+        </span>
+        {renderRichText(criticism.verdict)}
+      </Card>
+      <RiskRadar profile={buildRiskProfile(criticism)} maxSeverity={worst} />
+    </div>
   );
 }
 
@@ -167,7 +224,7 @@ export function DialecticSplit({ thesis, criticism }: DialecticSplitProps) {
       {/* 리드 행: 正의 핵심 논지 vs 反의 소결론 + 리스크 레이더 */}
       <div className={SPLIT_GRID}>
         {thesis !== undefined ? (
-          <Card className="flex flex-col gap-2 border-neutral-900">
+          <Card accent={THESIS_ACCENT} className="flex flex-col gap-2">
             <span className="text-sm font-medium text-neutral-500">
               핵심 논지
             </span>
@@ -181,19 +238,7 @@ export function DialecticSplit({ thesis, criticism }: DialecticSplitProps) {
         )}
 
         {criticism !== undefined ? (
-          <div className="flex flex-col gap-4">
-            {/* criticism.verdict는 反 섹션의 소결론이지 최종 판정이 아니다 (ADR-010) */}
-            <div className="border-l-2 border-neutral-300 bg-neutral-50 p-4">
-              <p className="text-sm font-medium text-neutral-500">
-                反의 소결론
-              </p>
-              <div className="mt-2">{renderRichText(criticism.verdict)}</div>
-            </div>
-            <RiskRadar
-              profile={buildRiskProfile(criticism)}
-              maxSeverity={maxSeverity(criticism)}
-            />
-          </div>
+          <AntithesisLead criticism={criticism} />
         ) : (
           <EmptyState
             title="비판 데이터가 없습니다"

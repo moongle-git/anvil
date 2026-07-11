@@ -254,4 +254,109 @@ describe("DialecticSplit", () => {
     expect(container.querySelectorAll("li > strong").length).toBeGreaterThan(0);
     expect(container.textContent).not.toContain("**");
   });
+
+  // ── 미러 액센트 레일 (UI_GUIDE 정반합 카드) ──
+  // 골격은 동일하고 대립은 레일의 방향으로만 표현한다. 정확한 Tailwind 클래스는
+  // Card 내부 구현이므로 여기서는 의미(side/tone) 훅만 단언한다.
+
+  it("正 카드는 왼쪽 무채색 레일, 反 카드는 오른쪽 레일을 갖는다 (미러 액센트)", () => {
+    const { container } = render(
+      <DialecticSplit thesis={thesis} criticism={criticism} />,
+    );
+
+    const thesisCards = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-thesis-id]"),
+    );
+    const criticismCards = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-criticism-id]"),
+    );
+
+    expect(thesisCards.length).toBe(3);
+    expect(criticismCards.length).toBe(3);
+
+    // 正: 왼쪽 레일 + 무채색(strong) — 낙관 주장에는 severity가 없다
+    for (const card of thesisCards) {
+      expect(card.getAttribute("data-accent-side")).toBe("left");
+      expect(card.getAttribute("data-accent-tone")).toBe("strong");
+    }
+    // 反: 오른쪽 레일 — 가운데 거터를 사이에 두고 正과 마주 본다
+    for (const card of criticismCards) {
+      expect(card.getAttribute("data-accent-side")).toBe("right");
+    }
+  });
+
+  it("反 카드의 레일 톤은 그 항목의 severity를 따른다 (fatal·major·minor가 서로 다름)", () => {
+    // 세 축의 severity를 전부 다르게 둬 카드별 톤이 개별 항목에서 나오는지 본다
+    const mixed: Criticism = {
+      ...criticism,
+      points: [
+        { ...criticism.points[0], severity: "fatal", riskScore: 80 },
+        { ...criticism.points[1], severity: "major", riskScore: 50 },
+        { ...criticism.points[2], severity: "minor", riskScore: 20 },
+      ],
+    };
+
+    const { container } = render(
+      <DialecticSplit thesis={thesis} criticism={mixed} />,
+    );
+
+    const toneOf = (id: string) =>
+      container
+        .querySelector<HTMLElement>(`[data-criticism-id="${id}"]`)
+        ?.getAttribute("data-accent-tone");
+
+    expect(toneOf("c1")).toBe("danger"); // fatal
+    expect(toneOf("c2")).toBe("warning"); // major
+    expect(toneOf("c3")).toBe("neutral"); // minor
+    // 세 톤이 실제로 서로 다르다 — 전부 같은 값으로 수렴하면 severity가 레일에 안 실린 것이다
+    expect(new Set([toneOf("c1"), toneOf("c2"), toneOf("c3")]).size).toBe(3);
+  });
+
+  it("反 리드(소결론) 카드의 레일 톤은 개별 항목이 아니라 전체 최고 severity를 따른다", () => {
+    // 최고가 major인데 minor 항목이 섞인 케이스 — 개별 severity를 쓰면 톤이 갈린다
+    const worstIsMajor: Criticism = {
+      ...criticism,
+      points: [
+        { ...criticism.points[0], severity: "minor", riskScore: 20 },
+        { ...criticism.points[1], severity: "major", riskScore: 50 },
+        { ...criticism.points[2], severity: "minor", riskScore: 10 },
+      ],
+    };
+
+    const leadOf = (input: Criticism) => {
+      cleanup();
+      render(<DialecticSplit thesis={thesis} criticism={input} />);
+      return screen
+        .getByText("反의 소결론")
+        .closest<HTMLElement>("[data-accent-side]");
+    };
+
+    // 기본 픽스처의 최고 severity는 fatal(c1/c3)
+    const fatalLead = leadOf(criticism);
+    expect(fatalLead?.getAttribute("data-accent-side")).toBe("right");
+    expect(fatalLead?.getAttribute("data-accent-tone")).toBe("danger");
+
+    const majorLead = leadOf(worstIsMajor);
+    expect(majorLead?.getAttribute("data-accent-tone")).toBe("warning");
+  });
+
+  it("비판 카드는 제목(<h4>) 다음에 RiskScoreBadge가 온다 (좌우 첫 줄 baseline 정렬)", () => {
+    const { container } = render(
+      <DialecticSplit thesis={thesis} criticism={criticism} />,
+    );
+
+    const c1 = container.querySelector<HTMLElement>(
+      '[data-criticism-id="c1"]',
+    );
+    const heading = c1?.querySelector("h4");
+    const badge = c1?.querySelector("[data-risk-score]");
+
+    expect(heading).not.toBeNull();
+    expect(badge).not.toBeNull();
+    // 뱃지가 제목보다 문서 순서상 뒤에 있어야 한다 — 위에 있으면 正 카드와 첫 줄이 어긋난다
+    expect(
+      heading!.compareDocumentPosition(badge!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
 });

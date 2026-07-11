@@ -37,7 +37,10 @@
     {
       "step": 4,
       "name": "dialectic-symmetry",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T23:47:22+0900",
+      "summary": "DialecticSplit의 正/反 골격을 통일하고 대립을 미러 액센트 레일로만 표현 — 反 리드(소결론)를 border-l-2 + p-4 div에서 Card(accent right + 전체 최고 severity 톤, bg-neutral-50 콜아웃 배경)로 승격하고 AntithesisLead로 분리(레이더는 리드 행 유지 — 축 행에 넣으면 축 라벨 data-axis 3개가 섞인다), ThesisCard는 accent {left, strong} 무채색, CriticismCard는 accent {right, 항목별 severity 톤}로 카드마다 다른 레일. 두 카드 모두 '제목 → 메타 → 근거' 순서로 통일 — RiskScoreBadge를 제목 위에서 아래로 내려 좌우 첫 줄 baseline을 맞췄고, rebuttedClaim 인용을 UI_GUIDE 레일 인용 규격(border-l-2 py-1 pl-4)으로 교체해 상하 여백 0을 해소했다. severity→AccentTone 매핑(fatal=danger/major=warning/minor=neutral)은 SeverityBadge와 같은 규율로 의미만 넘기고 Tailwind 클래스는 Card 내부에 격리. SideChip(lg:hidden)·행 정렬 기준(axis)·ThesisNarrative의 LIST 렌더링은 무변경. 콜아웃 배경은 bg-neutral-50! (important) — Card 골격의 bg-white와 같은 레이어·명시도인데 생성 CSS에서 .bg-white가 뒤에 와 그냥 얹으면 조용히 흰색으로 진다(빌드 CSS로 확인). dialectic.test.tsx에 미러 레일 side, 카드별 severity 톤 3종 구분, 리드 톤=전체 최고 severity(개별 항목 아님), h4→RiskScoreBadge DOM 순서 검증 4종 추가(클래스 단언 없음). 기존 14개 테스트 무수정 통과.",
+      "completed_at": "2026-07-11T23:53:40+0900"
     },
     {
       "step": 5,
