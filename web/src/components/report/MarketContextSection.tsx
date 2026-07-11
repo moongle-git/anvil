@@ -1,4 +1,4 @@
-import type { MarketContext, YoutubeVoice } from "@anvil/types";
+import type { CommunityVoice, MarketContext } from "@anvil/types";
 import { Collapsible, EmptyState, SectionHeading } from "@/components/ui";
 import { renderInline, renderRichText } from "@/lib/richText";
 import { CompetitorTable } from "./CompetitorTable";
@@ -6,27 +6,27 @@ import { CompetitorTable } from "./CompetitorTable";
 const LIST =
   "list-disc space-y-2 pl-5 text-[15px] leading-[1.8] text-neutral-700 marker:text-neutral-400";
 
-function YoutubeVoiceCard({ voice }: { voice: YoutubeVoice }) {
+function YoutubeVoiceCard({ voice }: { voice: CommunityVoice }) {
   return (
     <figure className="border-l-2 border-neutral-300 pl-4">
       <blockquote className="text-[15px] leading-[1.8] text-neutral-700">
-        {voice.comment}
+        {voice.text}
       </blockquote>
       <figcaption className="mt-2 text-xs text-neutral-500">
         {voice.authorName ? <span>{voice.authorName}</span> : null}
-        {voice.likeCount !== undefined ? (
+        {voice.score !== undefined ? (
           <span>
-            {voice.authorName ? " · " : ""}좋아요 {voice.likeCount}
+            {voice.authorName ? " · " : ""}좋아요 {voice.score}
           </span>
         ) : null}
-        {voice.authorName || voice.likeCount !== undefined ? " · " : ""}
+        {voice.authorName || voice.score !== undefined ? " · " : ""}
         <a
-          href={voice.videoUrl}
+          href={voice.url}
           target="_blank"
           rel="noopener noreferrer"
           className="text-blue-700 underline-offset-4 hover:underline"
         >
-          {voice.videoTitle}
+          {voice.title}
         </a>
       </figcaption>
     </figure>
@@ -44,8 +44,8 @@ function evidenceSummary(context: MarketContext): string {
   const parts: string[] = [];
   if (context.competitors.length > 0)
     parts.push(`경쟁 서비스 ${context.competitors.length}개`);
-  if (context.youtubeVoices.length > 0)
-    parts.push(`유저 목소리 ${context.youtubeVoices.length}건`);
+  if (context.communityVoices.length > 0)
+    parts.push(`유저 목소리 ${context.communityVoices.length}건`);
   if (context.trends.length > 0) parts.push(`트렌드 ${context.trends.length}건`);
   if (context.sources.length > 0)
     parts.push(`출처 ${context.sources.length}개`);
@@ -75,7 +75,7 @@ export function MarketContextSection({
   const hasRawEvidence =
     context.trends.length > 0 ||
     context.competitors.length > 0 ||
-    context.youtubeVoices.length > 0 ||
+    context.communityVoices.length > 0 ||
     context.painPointEvidence.length > 0 ||
     context.sources.length > 0;
 
@@ -131,18 +131,18 @@ export function MarketContextSection({
 
             <div className="flex flex-col gap-4">
               <Subheading>실제 유저 목소리</Subheading>
-              {context.youtubeVoices.length > 0 ? (
+              {context.communityVoices.length > 0 ? (
                 <div className="flex flex-col gap-4">
-                  {context.youtubeVoices.map((voice, index) => (
+                  {context.communityVoices.map((voice, index) => (
                     <YoutubeVoiceCard
-                      key={`${voice.videoUrl}-${index}`}
+                      key={`${voice.url}-${index}`}
                       voice={voice}
                     />
                   ))}
                 </div>
               ) : (
                 <p className="text-[15px] leading-[1.8] text-neutral-500">
-                  수집된 YouTube 목소리 없음
+                  수집된 유저 목소리 없음
                 </p>
               )}
             </div>

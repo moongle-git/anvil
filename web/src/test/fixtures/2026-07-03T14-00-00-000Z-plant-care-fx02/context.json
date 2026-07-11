@@ -22,13 +22,14 @@
       "pricingHint": "무료 + 커머스 수익"
     }
   ],
-  "youtubeVoices": [
+  "communityVoices": [
     {
-      "videoTitle": "식물 키우기 3년차가 말하는 실패 이유",
-      "videoUrl": "https://www.youtube.com/watch?v=fx02aaa0001",
-      "comment": "물주기 앱 깔아도 알림 무시하게 되더라고요. 결국 식물이 시들어야 정신차려요.",
+      "source": "youtube",
+      "title": "식물 키우기 3년차가 말하는 실패 이유",
+      "url": "https://www.youtube.com/watch?v=fx02aaa0001",
+      "text": "물주기 앱 깔아도 알림 무시하게 되더라고요. 결국 식물이 시들어야 정신차려요.",
       "authorName": "초록손가락",
-      "likeCount": 42
+      "score": 42
     }
   ],
   "painPointEvidence": [

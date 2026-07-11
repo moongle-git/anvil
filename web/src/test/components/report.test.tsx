@@ -118,17 +118,19 @@ const marketContext: MarketContext = {
   voicesInsight: "지불 의사는 요약이 아니라 그 다음 단계에 남는다.",
   trends: ["AI 요약 수요 증가", "원격근무 확산"],
   competitors: makeCompetitors(9),
-  youtubeVoices: [
+  communityVoices: [
     {
-      videoTitle: "회의록 자동화 후기",
-      videoUrl: "https://youtube.com/watch?v=abc",
-      comment: "회의 끝나고 정리에 한 시간씩 써요",
+      source: "youtube",
+      title: "회의록 자동화 후기",
+      url: "https://youtube.com/watch?v=abc",
+      text: "회의 끝나고 정리에 한 시간씩 써요",
       authorName: "user1",
-      likeCount: 42,
+      score: 42,
     },
   ],
   painPointEvidence: ["회의록 작성에 주당 3시간"],
   sources: ["https://vertexaisearch.google.com/redirect/very-long-url-aaaaaa"],
+  citations: [],
 };
 
 const verdict: Verdict = {
@@ -262,12 +264,14 @@ describe("MarketContextSection", () => {
     expect(details?.contains(indicator)).toBe(false);
   });
 
-  it("youtubeVoices가 비면 접힌 영역에 '수집된 YouTube 목소리 없음'을 표시하고 voicesInsight는 본문에 남긴다", () => {
+  it("communityVoices가 비면 접힌 영역에 '수집된 유저 목소리 없음'을 표시하고 voicesInsight는 본문에 남긴다", () => {
     const { container } = render(
-      <MarketContextSection context={{ ...marketContext, youtubeVoices: [] }} />,
+      <MarketContextSection
+        context={{ ...marketContext, communityVoices: [] }}
+      />,
     );
     const details = container.querySelector("details");
-    const emptyVoices = screen.getByText("수집된 YouTube 목소리 없음");
+    const emptyVoices = screen.getByText("수집된 유저 목소리 없음");
     expect(details?.contains(emptyVoices)).toBe(true);
 
     const voicesInsightNode = screen.getByText(marketContext.voicesInsight);
@@ -281,7 +285,7 @@ describe("MarketContextSection", () => {
           ...marketContext,
           trends: [],
           competitors: [],
-          youtubeVoices: [],
+          communityVoices: [],
           painPointEvidence: [],
           sources: [],
         }}

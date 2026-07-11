@@ -99,13 +99,14 @@ const CONTEXT_TEXT = `조사 결과를 정리했습니다.
   "competitors": [
     { "name": "Planta", "description": "식물 관리 앱", "url": null, "pricingHint": null }
   ],
-  "youtubeVoices": [
+  "communityVoices": [
     {
-      "videoTitle": "식물 키우기 실패담",
-      "videoUrl": "https://www.youtube.com/watch?v=vid1",
-      "comment": "${COMMENT_TEXT}",
+      "source": "youtube",
+      "title": "식물 키우기 실패담",
+      "url": "https://www.youtube.com/watch?v=vid1",
+      "text": "${COMMENT_TEXT}",
       "authorName": null,
-      "likeCount": null
+      "score": null
     }
   ],
   "painPointEvidence": ["물주기 실패로 식물을 죽인 경험"],
@@ -294,8 +295,8 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       name: "Planta",
       description: "식물 관리 앱",
     });
-    expect(context?.youtubeVoices[0].authorName).toBeUndefined();
-    expect(context?.youtubeVoices[0].likeCount).toBeUndefined();
+    expect(context?.communityVoices[0].authorName).toBeUndefined();
+    expect(context?.communityVoices[0].score).toBeUndefined();
   });
 
   it("YouTube가 quota로 실패해도 웹검색만으로 완주한다", async () => {

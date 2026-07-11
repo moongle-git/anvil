@@ -37,17 +37,19 @@ const MARKET_CONTEXT: MarketContext = {
       pricingHint: "회당 2만원대",
     },
   ],
-  youtubeVoices: [
+  communityVoices: [
     {
-      videoTitle: "강아지 산책 브이로그",
-      videoUrl: "https://www.youtube.com/watch?v=abc123",
-      comment: "산책 시킬 시간이 없어서 너무 미안해요...",
+      source: "youtube",
+      title: "강아지 산책 브이로그",
+      url: "https://www.youtube.com/watch?v=abc123",
+      text: "산책 시킬 시간이 없어서 너무 미안해요...",
       authorName: "user1",
-      likeCount: 3,
+      score: 3,
     },
   ],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
+  citations: [],
 };
 
 const THESIS: Thesis = {

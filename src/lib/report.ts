@@ -4,6 +4,7 @@ import {
   RECOMMENDATION_LABELS,
 } from "../types/index.js";
 import type {
+  CommunityVoice,
   CompetitorService,
   Criticism,
   CriticismPoint,
@@ -14,7 +15,6 @@ import type {
   Thesis,
   ThesisPoint,
   Verdict,
-  YoutubeVoice,
 } from "../types/index.js";
 
 /** 마크다운 표의 셀 구분자(|)와 줄바꿈이 표를 깨뜨리지 않게 한다 */
@@ -32,12 +32,11 @@ function competitorRow(competitor: CompetitorService): string {
   return `| ${tableCell(competitor.name)} | ${tableCell(competitor.description)} | ${pricing} | ${link} |`;
 }
 
-function voiceBlock(voice: YoutubeVoice): string {
+function voiceBlock(voice: CommunityVoice): string {
   // 댓글 원문에 줄바꿈이 있어도 인용 블록이 끊기지 않게 한다
-  const comment = voice.comment.replace(/\n/g, "\n> ");
-  const likes =
-    voice.likeCount === undefined ? "" : `, 좋아요 ${voice.likeCount}`;
-  return `> "${comment}"\n> — ${voice.videoTitle} (${voice.videoUrl}${likes})`;
+  const text = voice.text.replace(/\n/g, "\n> ");
+  const score = voice.score === undefined ? "" : `, 좋아요 ${voice.score}`;
+  return `> "${text}"\n> — ${voice.title} (${voice.url}${score})`;
 }
 
 function bullets(items: readonly string[]): string[] {
@@ -55,7 +54,7 @@ function byAxis<T extends { axis: DialecticAxis }>(
 function rawEvidenceDetails(context: MarketContext): string[] {
   const summary =
     `원시 근거 — 경쟁 서비스 ${context.competitors.length}개` +
-    ` · 유저 목소리 ${context.youtubeVoices.length}건` +
+    ` · 유저 목소리 ${context.communityVoices.length}건` +
     ` · 트렌드 ${context.trends.length}건` +
     ` · 출처 ${context.sources.length}개`;
 
@@ -70,10 +69,10 @@ function rawEvidenceDetails(context: MarketContext): string[] {
   }
 
   lines.push("#### 유저 목소리", "");
-  if (context.youtubeVoices.length === 0) {
-    lines.push("수집된 YouTube 목소리 없음", "");
+  if (context.communityVoices.length === 0) {
+    lines.push("수집된 유저 목소리 없음", "");
   } else {
-    for (const voice of context.youtubeVoices) {
+    for (const voice of context.communityVoices) {
       lines.push(voiceBlock(voice), "");
     }
   }

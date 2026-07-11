@@ -5,7 +5,13 @@ import type {
   YoutubeService,
   YoutubeVideo,
 } from "../services/youtube.js";
-import { MarketContextSchema, type MarketContext } from "../types/index.js";
+import {
+  CODE_INJECTED_CONTEXT_KEYS,
+  MarketContextDraftSchema,
+  MarketContextObjectSchema,
+  MarketContextSchema,
+  type MarketContext,
+} from "../types/index.js";
 import {
   CONTEXT_HUNTER_PROMPT_TEMPLATE,
   CONTEXT_HUNTER_SYSTEM_PROMPT,
@@ -26,15 +32,17 @@ const MARKET_CONTEXT: MarketContext = {
     "반려인은 산책 대행 자체보다 '내가 못 해준다'는 죄책감을 더 크게 말한다.",
   trends: ["펫 시장 성장"],
   competitors: [{ name: "도그메이트", description: "펫시터 매칭" }],
-  youtubeVoices: [
+  communityVoices: [
     {
-      videoTitle: "강아지 산책 브이로그",
-      videoUrl: "https://www.youtube.com/watch?v=abc123",
-      comment: "산책 시킬 시간이 없어서 너무 미안해요...",
+      source: "youtube",
+      title: "강아지 산책 브이로그",
+      url: "https://www.youtube.com/watch?v=abc123",
+      text: "산책 시킬 시간이 없어서 너무 미안해요...",
     },
   ],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
+  citations: [],
 };
 
 function video(id: string, title: string): YoutubeVideo {
@@ -171,9 +179,9 @@ describe("runContextHunter (YouTube 실패 내성)", () => {
     expect(result).toEqual(MARKET_CONTEXT);
     expect(generateStructured).toHaveBeenCalledTimes(1);
 
-    // 프롬프트는 YouTube 데이터 없음을 명시하고, youtubeVoices를 빈 배열로 지시한다
+    // 프롬프트는 YouTube 데이터 없음을 명시하고, communityVoices를 빈 배열로 지시한다
     const prompt = generateStructured.mock.calls[0][0].prompt as string;
-    expect(prompt).toContain("youtubeVoices");
+    expect(prompt).toContain("communityVoices");
     expect(prompt).toContain("빈 배열");
 
     // 실패 사실 로깅
@@ -194,10 +202,32 @@ describe("runContextHunter (YouTube 실패 내성)", () => {
 describe("CONTEXT_HUNTER_PROMPT_TEMPLATE (출력 형식 계약)", () => {
   // 이 에이전트만 useGrounding: true라 responseJsonSchema를 못 쓴다.
   // 프롬프트의 JSON 예시가 유일한 형식 지시이므로 키 하나만 빠져도 검증이 실패한다.
-  it("JSON 예시가 MarketContextSchema의 모든 최상위 키를 담는다", () => {
-    for (const key of Object.keys(MarketContextSchema.shape)) {
+  it("JSON 예시가 LLM이 채우는 모든 최상위 키를 담는다", () => {
+    for (const key of Object.keys(MarketContextDraftSchema.shape)) {
       expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain(`"${key}"`);
     }
+  });
+
+  // citations는 코드가 groundingMetadata에서 추출해 주입하는 사실이다.
+  // LLM에게 채우라고 하면 URL을 지어낸다 — 이 phase가 고치려는 바로 그 버그다 (ADR-012).
+  it("코드 주입 키는 JSON 예시에 없다", () => {
+    for (const key of CODE_INJECTED_CONTEXT_KEYS) {
+      expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).not.toContain(`"${key}"`);
+    }
+  });
+
+  // MarketContext에 필드를 추가하면서 프롬프트에도 안 넣고 코드 주입으로도 선언하지 않는 것을 막는다
+  it("LLM이 채우는 키 + 코드 주입 키 = MarketContext의 키 전체", () => {
+    const union = new Set([
+      ...Object.keys(MarketContextDraftSchema.shape),
+      ...CODE_INJECTED_CONTEXT_KEYS,
+    ]);
+    expect(union).toEqual(new Set(Object.keys(MarketContextObjectSchema.shape)));
+  });
+
+  it("communityVoices의 source가 취할 수 있는 값을 명시한다 (스키마가 enum이다)", () => {
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("hackernews");
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("naver");
   });
 
   it.each(["briefing", "marketSizeIndicators", "competitorInsight", "voicesInsight"])(
@@ -227,8 +257,8 @@ describe("CONTEXT_HUNTER_SYSTEM_PROMPT (인사이트 변환 지시)", () => {
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("추측");
   });
 
-  it("youtubeVoices가 비었을 때 voicesInsight에 그 한계를 진술하라고 지시한다", () => {
-    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("youtubeVoices");
+  it("communityVoices가 비었을 때 voicesInsight에 그 한계를 진술하라고 지시한다", () => {
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("communityVoices");
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("지어내지");
   });
 

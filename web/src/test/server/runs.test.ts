@@ -76,7 +76,7 @@ describe("getRunDetail", () => {
     expect(detail?.state.runId).toBe(COMPLETED_RUN_ID);
     expect(detail?.status).toBe("completed");
     expect(detail?.context?.competitors.length).toBeGreaterThanOrEqual(10);
-    expect(detail?.context?.youtubeVoices.length).toBeGreaterThanOrEqual(3);
+    expect(detail?.context?.communityVoices.length).toBeGreaterThanOrEqual(3);
     expect(detail?.context?.briefing).toBeTruthy();
     expect(detail?.thesis?.points.length).toBeGreaterThanOrEqual(3);
     expect(detail?.criticism?.points.length).toBeGreaterThanOrEqual(3);

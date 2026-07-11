@@ -85,17 +85,19 @@ export function completedDetail(
         url: `https://example.com/${index + 1}`,
         pricingHint: "무료 + 유료",
       })),
-      youtubeVoices: [
+      communityVoices: [
         {
-          videoTitle: "AI 회의록 툴 후기",
-          videoUrl: "https://www.youtube.com/watch?v=abc12345678",
-          comment: "요약보다 액션아이템 추적이 더 필요합니다.",
+          source: "youtube",
+          title: "AI 회의록 툴 후기",
+          url: "https://www.youtube.com/watch?v=abc12345678",
+          text: "요약보다 액션아이템 추적이 더 필요합니다.",
           authorName: "PM",
-          likeCount: 12,
+          score: 12,
         },
       ],
       painPointEvidence: ["요약 후 후속 추적은 여전히 수작업이다"],
       sources: ["https://example.com/report"],
+      citations: [],
     },
     thesis: {
       points: [

@@ -31,22 +31,25 @@ const context: MarketContext = {
     },
     { name: "PictureThis", description: "식물 식별 앱" },
   ],
-  youtubeVoices: [
+  communityVoices: [
     {
-      videoTitle: "식물 키우기 실패담",
-      videoUrl: "https://youtube.com/watch?v=abc",
-      comment: "물주기 타이밍을 늘 놓쳐요",
+      source: "youtube",
+      title: "식물 키우기 실패담",
+      url: "https://youtube.com/watch?v=abc",
+      text: "물주기 타이밍을 늘 놓쳐요",
       authorName: "user1",
-      likeCount: 12,
+      score: 12,
     },
     {
-      videoTitle: "반려식물 브이로그",
-      videoUrl: "https://youtube.com/watch?v=def",
-      comment: "앱 알림은 결국 다 꺼버리게 되더라고요",
+      source: "youtube",
+      title: "반려식물 브이로그",
+      url: "https://youtube.com/watch?v=def",
+      text: "앱 알림은 결국 다 꺼버리게 되더라고요",
     },
   ],
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험이 반복된다"],
   sources: ["https://example.com/trend"],
+  citations: [],
 };
 
 const thesis: Thesis = {
@@ -200,7 +203,7 @@ describe("renderReport", () => {
       const raw = [
         context.competitors[0].name,
         context.competitors[0].description,
-        context.youtubeVoices[0].comment,
+        context.communityVoices[0].text,
         context.trends[0],
         context.painPointEvidence[0],
         context.sources[0],
@@ -214,7 +217,7 @@ describe("renderReport", () => {
 
     it("<summary>에 원시 근거 건수를 표기한다", () => {
       expect(report).toContain(
-        `원시 근거 — 경쟁 서비스 ${context.competitors.length}개 · 유저 목소리 ${context.youtubeVoices.length}건 · 트렌드 ${context.trends.length}건 · 출처 ${context.sources.length}개`,
+        `원시 근거 — 경쟁 서비스 ${context.competitors.length}개 · 유저 목소리 ${context.communityVoices.length}건 · 트렌드 ${context.trends.length}건 · 출처 ${context.sources.length}개`,
       );
     });
 
@@ -235,17 +238,17 @@ describe("renderReport", () => {
       expect(rendered).not.toContain("시장 규모 지표");
     });
 
-    it("youtubeVoices가 비면 <details> 안에 수집 실패 안내를 넣는다", () => {
+    it("communityVoices가 비면 <details> 안에 수집 실패 안내를 넣는다", () => {
       const rendered = renderReport(
         IDEA,
-        { ...context, youtubeVoices: [] },
+        { ...context, communityVoices: [] },
         thesis,
         criticism,
         solution,
         verdict,
       );
       const { open, close } = firstDetailsRange(rendered);
-      const index = rendered.indexOf("수집된 YouTube 목소리 없음");
+      const index = rendered.indexOf("수집된 유저 목소리 없음");
       expect(index).toBeGreaterThan(open);
       expect(index).toBeLessThan(close);
     });
@@ -255,8 +258,8 @@ describe("renderReport", () => {
         IDEA,
         {
           ...context,
-          youtubeVoices: [
-            { ...context.youtubeVoices[0], comment: "첫 줄\n둘째 줄" },
+          communityVoices: [
+            { ...context.communityVoices[0], text: "첫 줄\n둘째 줄" },
           ],
         },
         thesis,

@@ -35,15 +35,17 @@ const marketContext: MarketContext = {
   voicesInsight: "유저는 늦은 감지를 가장 큰 고통으로 말한다.",
   trends: ["홈가드닝 시장 성장"],
   competitors: [{ name: "Planta", description: "식물 관리 앱" }],
-  youtubeVoices: [
+  communityVoices: [
     {
-      videoTitle: "식물 키우기 실패담",
-      videoUrl: "https://youtube.com/watch?v=abc",
-      comment: "물주기 타이밍을 늘 놓쳐요",
+      source: "youtube",
+      title: "식물 키우기 실패담",
+      url: "https://youtube.com/watch?v=abc",
+      text: "물주기 타이밍을 늘 놓쳐요",
     },
   ],
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험"],
   sources: ["https://example.com/trend"],
+  citations: [],
 };
 
 const thesis: Thesis = {

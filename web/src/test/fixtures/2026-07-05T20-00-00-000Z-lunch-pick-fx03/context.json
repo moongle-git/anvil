@@ -21,13 +21,14 @@
       "pricingHint": "무료 + 식당 수수료"
     }
   ],
-  "youtubeVoices": [
+  "communityVoices": [
     {
-      "videoTitle": "직장인 점심 브이로그",
-      "videoUrl": "https://www.youtube.com/watch?v=fx03aaa0001",
-      "comment": "메뉴 고르는 게 힘든 게 아니라 팀원들 취향 조율이 힘든 거예요. 앱이 그걸 해주진 않잖아요.",
+      "source": "youtube",
+      "title": "직장인 점심 브이로그",
+      "url": "https://www.youtube.com/watch?v=fx03aaa0001",
+      "text": "메뉴 고르는 게 힘든 게 아니라 팀원들 취향 조율이 힘든 거예요. 앱이 그걸 해주진 않잖아요.",
       "authorName": "회사원A",
-      "likeCount": 88
+      "score": 88
     }
   ],
   "painPointEvidence": [
