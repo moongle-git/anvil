@@ -142,6 +142,23 @@ describe("YoutubeService.searchVideos", () => {
 
     await expect(service(fetchFn).searchVideos("q")).rejects.toThrow(/quota/);
   });
+
+  it("응답이 timeoutMs 내에 오지 않으면 시간 초과로 실패한다 (hang 방지)", async () => {
+    // 영원히 완료되지 않는 fetch — 네트워크 hang을 재현한다
+    const fetchFn = vi.fn().mockReturnValue(new Promise(() => undefined));
+
+    await expect(
+      service(fetchFn, { timeoutMs: 20 }).searchVideos("q"),
+    ).rejects.toThrow(/시간 초과/);
+  });
+
+  it("fetch에 취소용 signal을 실어 요청한다", async () => {
+    const fetchFn = fakeFetch(jsonResponse(searchBody("v1")));
+
+    await service(fetchFn).searchVideos("q");
+
+    expect(fetchFn.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 describe("YoutubeService.fetchComments", () => {

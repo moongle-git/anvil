@@ -140,6 +140,52 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
     expect(result).toEqual({ title: "아이디어", score: 42 });
     expect(generateContent).toHaveBeenCalledTimes(2);
   });
+
+  it("선택 필드를 null로 채운 응답도 (키 생략처럼) 검증을 통과한다", async () => {
+    // 실제 grounding 모델은 값 없는 선택 필드를 키 생략이 아니라 null로 내보낸다.
+    // .optional()은 null을 거부하므로, 검증 경계에서 null을 '키 부재'로 정규화해야 한다.
+    const schema = z.object({
+      name: z.string(),
+      url: z.url().optional(),
+      items: z.array(z.object({ label: z.string(), note: z.string().optional() })),
+    });
+    const body = JSON.stringify({
+      name: "서비스",
+      url: null, // ← 실측된 실패 형태 (competitors[].url === null)
+      items: [{ label: "a", note: null }],
+    });
+    const { client } = fakeClient(body);
+
+    const result = await service(client).generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema,
+    });
+
+    // null 키는 제거되어 undefined(=선택 부재)로 남는다
+    expect(result).toEqual({ name: "서비스", items: [{ label: "a" }] });
+  });
+
+  it("응답이 timeoutMs 내에 오지 않으면 시간 초과 에러로 실패한다 (hang 방지)", async () => {
+    // 영원히 resolve/reject하지 않는 응답 — 실제 네트워크 hang을 재현한다
+    const generateContent = vi.fn().mockReturnValue(new Promise(() => undefined));
+    const client = {
+      models: { generateContent },
+    } as unknown as GoogleGenAI;
+
+    const timed = new GeminiService(
+      { apiKey: "test-key", timeoutMs: 20 },
+      client,
+    );
+
+    await expect(
+      timed.generateStructured({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+      }),
+    ).rejects.toThrow(/시간 초과/);
+  });
 });
 
 describe("GeminiService.generateStructured (grounding 모드)", () => {
@@ -173,6 +219,21 @@ describe("GeminiService.generateStructured (grounding 모드)", () => {
     });
 
     expect(result).toEqual({ title: "아이디어", score: 42 });
+  });
+
+  it("config에 abortSignal을 실어 요청을 취소 가능하게 한다", async () => {
+    const { client, generateContent } = fakeClient(VALID_JSON);
+
+    await service(client).generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      useGrounding: true,
+    });
+
+    expect(generateContent.mock.calls[0][0].config.abortSignal).toBeInstanceOf(
+      AbortSignal,
+    );
   });
 
   it("펜스 없이 텍스트에 섞인 JSON도 중괄호 매칭으로 추출한다", async () => {

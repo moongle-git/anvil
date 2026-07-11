@@ -1,6 +1,10 @@
+import { withTimeout } from "./withTimeout.js";
+
 const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 const DEFAULT_MAX_VIDEOS = 5;
 const DEFAULT_MAX_COMMENTS_PER_VIDEO = 10;
+// YouTube API는 보통 1초 내 응답한다 — hang을 끊기 위한 상한
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 export interface YoutubeVideo {
   videoId: string;
@@ -22,6 +26,7 @@ export interface YoutubeServiceOptions {
   maxVideos?: number;
   maxCommentsPerVideo?: number;
   fetchFn?: typeof fetch;
+  timeoutMs?: number;
 }
 
 export class YoutubeApiError extends Error {
@@ -82,6 +87,7 @@ export class YoutubeService {
   private readonly maxVideos: number;
   private readonly maxCommentsPerVideo: number;
   private readonly fetchFn: typeof fetch;
+  private readonly timeoutMs: number;
 
   constructor(options: YoutubeServiceOptions) {
     this.apiKey = options.apiKey;
@@ -89,6 +95,7 @@ export class YoutubeService {
     this.maxCommentsPerVideo =
       options.maxCommentsPerVideo ?? DEFAULT_MAX_COMMENTS_PER_VIDEO;
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   async searchVideos(query: string): Promise<YoutubeVideo[]> {
@@ -174,7 +181,14 @@ export class YoutubeService {
     }
     url.searchParams.set("key", this.apiKey);
 
-    const response = await this.fetchFn(url.toString());
+    // hang을 끊는다: abortSignal로 요청을 취소하고 withTimeout으로 상한을 강제한다
+    const response = await withTimeout(
+      this.fetchFn(url.toString(), {
+        signal: AbortSignal.timeout(this.timeoutMs),
+      }),
+      this.timeoutMs,
+      "YouTube API 요청",
+    );
     if (!response.ok) {
       const errorBody = (await response
         .json()
