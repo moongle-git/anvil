@@ -13,7 +13,10 @@
     {
       "step": 1,
       "name": "richtext-ordered-list",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T23:40:27+0900",
+      "summary": "richText.tsx의 번호 목록 렌더링에 볼드 라벨 분리 도입 — renderItems가 splitLead 인자를 받아 orderedList에서만 spans[0]이 strong일 때 <li> 직계 <strong class=block> + 본문 <div>로 분리(라벨 미중복, 본문 없으면 div 생략), 불릿·renderInline·파서는 무변경. ORDERED 항목 간격 space-y-3 → space-y-5. richText.test.tsx에 라벨/본문 블록 분리·중복 미출력·불릿 미적용 검증 3종을 DOM 구조 기반으로 추가(클래스 단언 없음).",
+      "completed_at": "2026-07-11T23:44:00+0900"
     },
     {
       "step": 2,

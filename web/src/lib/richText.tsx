@@ -8,7 +8,7 @@ import {
 
 // 본문 규격 (docs/UI_GUIDE.md). 한국어 장문이라 줄간격을 1.8로 둔다.
 const PROSE = "text-[15px] leading-[1.8] text-neutral-700";
-const ORDERED = `${PROSE} list-decimal space-y-3 pl-6 marker:font-medium marker:text-neutral-500`;
+const ORDERED = `${PROSE} list-decimal space-y-5 pl-6 marker:font-medium marker:text-neutral-500`;
 const UNORDERED = `${PROSE} list-disc space-y-2 pl-5 marker:text-neutral-400`;
 const NESTED = "mt-2 list-[circle] space-y-1.5 pl-5";
 
@@ -22,10 +22,29 @@ function renderTokens(spans: InlineToken[]): ReactNode[] {
   );
 }
 
-function renderItems(items: ListItem[]): ReactNode[] {
+// 번호 목록 항목은 `**라벨:** 본문…` 꼴이다. 라벨을 별도 줄로 띄우고 본문을 아래 블록으로
+// 내린다 — 한 줄에 이어붙으면 번호가 있어도 통짜 문단이 되어 스캔이 안 된다 (docs/UI_GUIDE.md).
+function renderItemContent(item: ListItem, splitLead: boolean): ReactNode {
+  const lead = item.spans[0];
+  if (!splitLead || lead === undefined || lead.type !== "strong") {
+    return renderTokens(item.spans);
+  }
+
+  const body = item.spans.slice(1);
+  return (
+    <>
+      <strong className="block">{lead.value}</strong>
+      {body.length > 0 ? (
+        <div className="mt-1">{renderTokens(body)}</div>
+      ) : null}
+    </>
+  );
+}
+
+function renderItems(items: ListItem[], splitLead = false): ReactNode[] {
   return items.map((item, index) => (
     <li key={index}>
-      {renderTokens(item.spans)}
+      {renderItemContent(item, splitLead)}
       {item.children.length > 0 ? (
         <ul className={NESTED}>{renderItems(item.children)}</ul>
       ) : null}
@@ -53,7 +72,7 @@ export function renderRichText(text: string): ReactNode {
         if (block.type === "orderedList") {
           return (
             <ol key={index} className={ORDERED}>
-              {renderItems(block.items)}
+              {renderItems(block.items, true)}
             </ol>
           );
         }
