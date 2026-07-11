@@ -29,7 +29,10 @@
     {
       "step": 3,
       "name": "voice-reference-injection",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-12T01:03:33+0900",
+      "completed_at": "2026-07-12T01:18:00+0900",
+      "summary": "communityVoices가 코드 주입 필드가 되었다 (ADR-013) — LLM은 목소리를 ID로만 고르고, 원문·URL·작성자는 코드가 research.json에서 복원한다. 따라서 context.json의 communityVoices[].url은 수집 API가 만든 검증된 URL이며 step 4의 링크 박탈 대상이 아니다(링크를 유지한다). 변경 — MarketContextDraftSchema의 communityVoices가 communityVoiceRefs: z.array(z.string().min(1))로 교체되고, MarketContextObjectSchema는 .omit({communityVoiceRefs:true}).extend({communityVoices: z.array(CommunityVoiceSchema).default([]), ...})로 ref를 산출물에서 덜어낸다(내부 좌표를 남기면 두 개의 진실이 된다). CODE_INJECTED_CONTEXT_KEYS = ['citations','researchCoverage','communityVoices']. promoteLegacyVoices(youtubeVoices 승격)는 무변경으로 계속 동작한다. format.ts에 voiceRefId(index)→'V1' / parseVoiceRef('V1')→0 (형식 오류·V0·선행 0은 null)을 export하고 ID 포맷을 단일 소유하며, voiceBlock에서 URL 출력을 제거했다 — ID는 evidence.voices 인덱스 기준 1-origin 전역 연번(소스별 리셋 없음)이고 0건 소스 '0건' 표기와 실패 섹션은 유지. EVIDENCE_EMPTY_SECTION 문구도 communityVoiceRefs로 갱신. contextHunter의 resolveVoiceRefs가 ID를 evidence.voices로 치환한다 — 범위 밖·형식 오류는 드롭 후 deps.log로 경고(환각 관측 지점), 중복은 하나로 접고, 순서는 LLM 선별 순서를 따르며, 전부 드롭돼 빈 배열이어도 throw하지 않는다. 퍼지 매칭은 하지 않는다. 프롬프트의 출력 JSON 예시에서 목소리 객체가 사라져 LLM이 URL을 타이핑할 자리는 competitors[].url과 sources[]뿐이다(step 4 대상)."
     },
     {
       "step": 4,

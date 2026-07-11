@@ -28,7 +28,10 @@ import {
 
 const IDEA = "반려견 산책 대행 매칭 서비스";
 
-/** LLM이 채우는 부분 — citations는 여기에 없다 (코드가 주입한다) */
+/**
+ * LLM이 채우는 부분 — citations도 목소리 원문도 여기에 없다 (코드가 주입한다).
+ * 목소리 선별은 수집 증거의 ID 참조로만 표현된다 (ADR-013).
+ */
 const DRAFT: MarketContextDraft = {
   ideaTitle: "반려견 산책 대행 매칭 서비스",
   briefing:
@@ -40,14 +43,7 @@ const DRAFT: MarketContextDraft = {
     "반려인은 산책 대행 자체보다 '내가 못 해준다'는 죄책감을 더 크게 말한다.",
   trends: ["펫 시장 성장"],
   competitors: [{ name: "도그메이트", description: "펫시터 매칭" }],
-  communityVoices: [
-    {
-      source: "youtube",
-      title: "강아지 산책 브이로그",
-      url: "https://www.youtube.com/watch?v=abc123",
-      text: "산책 시킬 시간이 없어서 너무 미안해요...",
-    },
-  ],
+  communityVoiceRefs: ["V1"],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
 };
@@ -156,9 +152,34 @@ function expectedCoverage(
   );
 }
 
-/** LLM 초안(DRAFT) + 코드가 주입한 사실(citations·researchCoverage) = context.json */
-function expectedContext(coverage: SourceCoverage[]): MarketContext {
-  return { ...DRAFT, citations: CITATIONS, researchCoverage: coverage };
+/**
+ * LLM 초안(DRAFT에서 ref를 덜어낸 것) + 코드가 주입한 사실(목소리·citations·researchCoverage)
+ * = context.json. ref는 research.json의 내부 좌표라 산출물에 남지 않는다 (ADR-013).
+ */
+function expectedContext(
+  coverage: SourceCoverage[],
+  voices: CommunityVoice[] = [],
+): MarketContext {
+  const { communityVoiceRefs, ...draft } = DRAFT;
+  void communityVoiceRefs;
+  return {
+    ...draft,
+    communityVoices: voices,
+    citations: CITATIONS,
+    researchCoverage: coverage,
+  };
+}
+
+/** LLM이 다른 ID를 고른 경우를 흉내 낸다 */
+function respondWithRefs(
+  generateGrounded: ReturnType<typeof vi.fn>,
+  refs: string[],
+): void {
+  generateGrounded.mockResolvedValue({
+    data: { ...DRAFT, communityVoiceRefs: refs },
+    citations: CITATIONS,
+    webSearchQueries: SEARCH_QUERIES,
+  });
 }
 
 afterEach(() => {
@@ -173,12 +194,14 @@ describe("runContextHunter (정상 흐름)", () => {
 
     const { context } = await runContextHunter(deps, IDEA);
 
+    // DRAFT는 V1만 골랐다 — 코드가 그 ID를 수집된 YOUTUBE_VOICE로 치환한다
     expect(context).toEqual(
       expectedContext(
         expectedCoverage({
           youtube: { source: "youtube", status: "collected", count: 1 },
           naver: { source: "naver", status: "collected", count: 1 },
         }),
+        [YOUTUBE_VOICE],
       ),
     );
 
@@ -193,12 +216,13 @@ describe("runContextHunter (정상 흐름)", () => {
     const params = generateGrounded.mock.calls[0][0];
     expect(params.schema).toBe(MarketContextDraftSchema);
 
-    // 프롬프트에 아이디어 원문과 수집된 목소리(원문·출처·소스 라벨)가 포함된다
+    // 프롬프트에 아이디어 원문과 수집된 목소리(원문·출처 제목·소스 라벨)가 포함된다.
+    // URL은 빠진다 — 모델이 볼 수 없는 URL은 받아적을 수도 없다 (ADR-013)
     const prompt = params.prompt as string;
     expect(prompt).toContain(IDEA);
     expect(prompt).toContain(SOURCE_LABELS.youtube);
     expect(prompt).toContain(YOUTUBE_VOICE.text);
-    expect(prompt).toContain(YOUTUBE_VOICE.url);
+    expect(prompt).not.toContain(YOUTUBE_VOICE.url);
     expect(prompt).toContain(NAVER_VOICE.text);
   });
 
@@ -234,17 +258,19 @@ describe("runContextHunter (정상 흐름)", () => {
     expect(String(error.mock.calls[0][0])).toContain(SEARCH_QUERIES[0]);
   });
 
-  it("프롬프트에 댓글 원문 보존(요약 금지) 지시가 포함된다", async () => {
+  it("★ 프롬프트가 인용을 다시 적지 말고 ID만 고르라고 지시한다", async () => {
     const { deps, generateGrounded } = fakeDeps([
       fakeSource("youtube", [YOUTUBE_VOICE]),
     ]);
 
     await runContextHunter(deps, IDEA);
 
+    // 원문 보존은 이제 프롬프트 문장이 아니라 코드가 지킨다 — LLM에게는 적을 자리 자체가 없다
     const params = generateGrounded.mock.calls[0][0];
     const combined = `${params.systemInstruction as string}\n${params.prompt as string}`;
-    expect(combined).toContain("요약하지 말");
-    expect(combined).toContain("원문");
+    expect(combined).toContain("communityVoiceRefs");
+    expect(combined).toContain("다시 적지 마라");
+    expect(combined).toContain("만들어내지 마라");
   });
 });
 
@@ -319,6 +345,7 @@ describe("runContextHunter (researchPlanner 연동)", () => {
         expectedCoverage({
           youtube: { source: "youtube", status: "collected", count: 1 },
         }),
+        [YOUTUBE_VOICE],
       ),
     );
     expect(youtube.collect).toHaveBeenCalledWith(IDEA);
@@ -377,6 +404,7 @@ describe("runContextHunter (소스 실패 내성)", () => {
             error: "네이버 API 일일 호출 한도(25,000)를 초과했다",
           },
         }),
+        [YOUTUBE_VOICE],
       ),
     );
     const prompt = promptOf(generateGrounded);
@@ -414,7 +442,7 @@ describe("runContextHunter (소스 실패 내성)", () => {
     // 소스가 하나도 등록되지 않았어도 3종 전체가 unconfigured로 기록된다
     expect(context).toEqual(expectedContext(expectedCoverage({})));
     const prompt = promptOf(generateGrounded);
-    expect(prompt).toContain("communityVoices는 빈 배열로");
+    expect(prompt).toContain("communityVoiceRefs는 빈 배열로");
   });
 
   it("모든 소스가 0건이면 빈 수집 안내로 진행한다", async () => {
@@ -433,7 +461,9 @@ describe("runContextHunter (소스 실패 내성)", () => {
         }),
       ),
     );
-    expect(promptOf(generateGrounded)).toContain("communityVoices는 빈 배열로");
+    expect(promptOf(generateGrounded)).toContain(
+      "communityVoiceRefs는 빈 배열로",
+    );
   });
 
   it("일부 소스만 0건이면 그 0건이 프롬프트에 숫자로 드러난다", async () => {
@@ -515,6 +545,115 @@ describe("runContextHunter (수집 증거 반환)", () => {
   });
 });
 
+// ADR-013: LLM은 어느 목소리가 유의미한지만 ID로 고른다. 그 목소리가 무엇인지(원문·URL·작성자)는
+// 사실이고, 사실은 코드가 소유한다 — 모델은 코드가 준 URL조차 다시 타이핑하면 망가뜨린다.
+describe("runContextHunter (목소리 ID 해소)", () => {
+  const VOICES: CommunityVoice[] = [YOUTUBE_VOICE, NAVER_VOICE];
+
+  /** 두 목소리를 수집하는 소스 구성 — V1 = YOUTUBE_VOICE, V2 = NAVER_VOICE */
+  function twoVoiceDeps(): FakeDeps {
+    return fakeDeps([
+      fakeSource("youtube", [YOUTUBE_VOICE]),
+      fakeSource("naver", [NAVER_VOICE]),
+    ]);
+  }
+
+  it("★ LLM이 고른 ID를 수집 증거의 목소리 객체로 그대로 치환한다", async () => {
+    const { deps, generateGrounded } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["V2"]);
+
+    const { context, evidence } = await runContextHunter(deps, IDEA);
+
+    // 인덱스 1(V2)의 목소리가 url·text·authorName·extra까지 통째로 살아온다
+    expect(context.communityVoices).toEqual([NAVER_VOICE]);
+    expect(context.communityVoices[0]).toEqual(evidence.voices[1]);
+  });
+
+  it("★ 선별 순서는 LLM이 고른 순서를 따른다", async () => {
+    const { deps, generateGrounded } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["V2", "V1"]);
+
+    const { context } = await runContextHunter(deps, IDEA);
+
+    // 우선순위 판단이 순서에 들어 있다 — 수집 순서로 되돌리지 않는다
+    expect(context.communityVoices).toEqual([NAVER_VOICE, YOUTUBE_VOICE]);
+  });
+
+  it("★ 범위 밖 ID(V99)는 드롭하고 경고를 남긴다", async () => {
+    const { deps, generateGrounded, log } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["V1", "V99"]);
+
+    const { context } = await runContextHunter(deps, IDEA);
+
+    expect(context.communityVoices).toEqual([YOUTUBE_VOICE]);
+    // 드롭 로그가 환각을 관측하는 유일한 계기다
+    const logged = log.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(logged).toContain("V99");
+    expect(logged).toContain("드롭");
+  });
+
+  it("★ 형식이 어긋난 ID(Vfoo)는 드롭하고 경고를 남긴다", async () => {
+    const { deps, generateGrounded, log } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["Vfoo", "V1"]);
+
+    const { context } = await runContextHunter(deps, IDEA);
+
+    expect(context.communityVoices).toEqual([YOUTUBE_VOICE]);
+    expect(log.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
+      "Vfoo",
+    );
+  });
+
+  it("★ 모르는 ID를 '가장 비슷한 목소리'로 매칭하지 않는다", async () => {
+    const { deps, generateGrounded } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["V99"]);
+
+    const { context, evidence } = await runContextHunter(deps, IDEA);
+
+    // 퍼지 매칭은 환각을 그럴듯한 인용으로 세탁한다. 드롭이 유일하게 정직한 처리다
+    expect(context.communityVoices).toEqual([]);
+    expect(evidence.voices).toEqual(VOICES);
+  });
+
+  it("★ 중복 ID는 하나로 접는다", async () => {
+    const { deps, generateGrounded } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["V1", "V1"]);
+
+    const { context } = await runContextHunter(deps, IDEA);
+
+    expect(context.communityVoices).toEqual([YOUTUBE_VOICE]);
+  });
+
+  it("★ 전부 드롭되어도 throw하지 않는다 (빈 communityVoices는 합법이다)", async () => {
+    const { deps, generateGrounded } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["V7", "V8", "V0"]);
+
+    const { context } = await runContextHunter(deps, IDEA);
+
+    expect(context.communityVoices).toEqual([]);
+    // 나머지 산출물은 멀쩡하다 — 근거 부재를 그대로 드러낼 뿐이다
+    expect(context.briefing).toBe(DRAFT.briefing);
+  });
+
+  it("★ LLM은 evidence에 없는 URL을 지어낼 방법이 없다 (draft에 url 필드가 없다)", () => {
+    // 계약: LLM이 채우는 스키마에 목소리의 url·text를 적을 자리가 아예 없다
+    const draftKeys = Object.keys(MarketContextDraftSchema.shape);
+
+    expect(draftKeys).not.toContain("communityVoices");
+    expect(draftKeys).toContain("communityVoiceRefs");
+    expect(CODE_INJECTED_CONTEXT_KEYS).toContain("communityVoices");
+  });
+
+  it("ref는 최종 context에 남지 않는다 (두 개의 진실 금지)", async () => {
+    const { deps, generateGrounded } = twoVoiceDeps();
+    respondWithRefs(generateGrounded, ["V1"]);
+
+    const { context } = await runContextHunter(deps, IDEA);
+
+    expect(Object.keys(context)).not.toContain("communityVoiceRefs");
+  });
+});
+
 describe("CONTEXT_HUNTER_PROMPT_TEMPLATE (출력 형식 계약)", () => {
   // 이 에이전트만 grounding 모드라 responseJsonSchema를 못 쓴다.
   // 프롬프트의 JSON 예시가 유일한 형식 지시이므로 키 하나만 빠져도 검증이 실패한다.
@@ -533,17 +672,30 @@ describe("CONTEXT_HUNTER_PROMPT_TEMPLATE (출력 형식 계약)", () => {
   });
 
   // MarketContext에 필드를 추가하면서 프롬프트에도 안 넣고 코드 주입으로도 선언하지 않는 것을 막는다
-  it("LLM이 채우는 키 + 코드 주입 키 = MarketContext의 키 전체", () => {
+  it("LLM이 채우는 키(ref 제외) + 코드 주입 키 = MarketContext의 키 전체", () => {
+    // communityVoiceRefs는 draft에만 있는 내부 좌표다 — 코드가 communityVoices로 해소한다 (ADR-013)
     const union = new Set([
-      ...Object.keys(MarketContextDraftSchema.shape),
+      ...Object.keys(MarketContextDraftSchema.shape).filter(
+        (key) => key !== "communityVoiceRefs",
+      ),
       ...CODE_INJECTED_CONTEXT_KEYS,
     ]);
     expect(union).toEqual(new Set(Object.keys(MarketContextObjectSchema.shape)));
   });
 
-  it("communityVoices의 source가 취할 수 있는 값을 명시한다 (스키마가 enum이다)", () => {
-    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("hackernews");
-    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("naver");
+  // 이 phase의 핵심 방어선 — 프롬프트에서 URL을 적을 자리를 없앤다 (ADR-013).
+  // 모델이 코드가 준 URL을 옮겨적다가 도메인 오타(cloud.google.google.com)를 낸 증거가 있다.
+  it("★ JSON 예시에 목소리의 URL·원문을 적을 필드가 없다", () => {
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain('"communityVoiceRefs"');
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).not.toContain('"text"');
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).not.toContain('"authorName"');
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).not.toContain('"score"');
+  });
+
+  it("★ 수집 결과의 ID 중에서만 고르라고 지시한다 (새 ID 생성 금지)", () => {
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("[V*] ID");
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("만들어내지 마라");
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("다시 적지 마라");
   });
 
   it("수집 결과 placeholder는 소스별로 쪼개지 않고 하나다", () => {
@@ -587,8 +739,8 @@ describe("CONTEXT_HUNTER_SYSTEM_PROMPT (인사이트 변환 지시)", () => {
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("추측");
   });
 
-  it("communityVoices가 비었을 때 voicesInsight에 그 한계를 진술하라고 지시한다", () => {
-    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("communityVoices");
+  it("수집된 목소리가 없을 때 voicesInsight에 그 한계를 진술하라고 지시한다", () => {
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("목소리가 하나도 없으면");
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("지어내지");
   });
 
@@ -597,8 +749,10 @@ describe("CONTEXT_HUNTER_SYSTEM_PROMPT (인사이트 변환 지시)", () => {
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("편향");
   });
 
-  it("댓글 원문 보존 규칙을 유지한다", () => {
-    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("요약하지 말");
-    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("원문");
+  it("★ 목소리는 ID로만 선별하고 원문은 코드가 복원한다고 지시한다", () => {
+    // 원문 보존은 이제 규칙이 아니라 구조다 — LLM에게 원문을 받아적을 자리가 없다 (ADR-013)
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("communityVoiceRefs");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("다시 받아적지 않는다");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("코드가 그 ID로 복원한다");
   });
 });

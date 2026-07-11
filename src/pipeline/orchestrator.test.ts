@@ -16,6 +16,7 @@ import {
   SOURCE_LABELS,
   ThesisSchema,
   VerdictSchema,
+  type CommunityVoice,
   type Criticism,
   type InterviewQuestions,
   type MarketContext,
@@ -32,6 +33,17 @@ import {
 
 const IDEA = "AI 반려식물 관리 서비스";
 
+/**
+ * 수집된 목소리. context.json의 communityVoices는 LLM이 받아적은 것이 아니라
+ * 코드가 이 배열에서 ID로 복원한 것이다 (ADR-013).
+ */
+const collectedVoice: CommunityVoice = {
+  source: "youtube",
+  title: "식물 키우기 실패담",
+  url: "https://youtube.com/watch?v=abc",
+  text: "물주기 타이밍을 늘 놓쳐요",
+};
+
 const marketContext: MarketContext = {
   ideaTitle: "AI 반려식물 관리 서비스",
   briefing: "홈가드닝 시장은 성장 중이나 무료 리마인더 앱이 이미 시장을 선점했다.",
@@ -40,20 +52,13 @@ const marketContext: MarketContext = {
   voicesInsight: "유저는 늦은 감지를 가장 큰 고통으로 말한다.",
   trends: ["홈가드닝 시장 성장"],
   competitors: [{ name: "Planta", description: "식물 관리 앱" }],
-  communityVoices: [
-    {
-      source: "youtube",
-      title: "식물 키우기 실패담",
-      url: "https://youtube.com/watch?v=abc",
-      text: "물주기 타이밍을 늘 놓쳐요",
-    },
-  ],
+  communityVoices: [collectedVoice],
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험"],
   sources: ["https://example.com/trend"],
   citations: [],
-  // fakeSources()가 3종 모두 등록하고 전부 0건을 돌려주므로, 코드가 주입하는 커버리지는 이 모양이다
+  // fakeSources()가 3종 모두 등록하고 YouTube만 1건을 돌려주므로, 코드가 주입하는 커버리지는 이 모양이다
   researchCoverage: [
-    { source: "youtube", status: "collected", count: 0 },
+    { source: "youtube", status: "collected", count: 1 },
     { source: "hackernews", status: "collected", count: 0 },
     { source: "naver", status: "collected", count: 0 },
   ],
@@ -193,11 +198,14 @@ function fakeGemini(options?: {
         return Promise.reject(new Error("Gemini 호출 실패"));
       }
       if (schema === MarketContextDraftSchema) {
-        // LLM은 draft만 채운다 — citations·researchCoverage는 코드가 주입하는 사실이다 (ADR-013)
-        const { citations, researchCoverage, ...draft } = marketContext;
+        // LLM은 draft만 채운다 — citations·researchCoverage·communityVoices는 코드가 주입하는
+        // 사실이고, 목소리 선별은 수집 증거의 ID 참조로만 표현된다 (ADR-013)
+        const { citations, researchCoverage, communityVoices, ...draft } =
+          marketContext;
         void researchCoverage;
+        void communityVoices;
         return Promise.resolve({
-          data: draft,
+          data: { ...draft, communityVoiceRefs: ["V1"] },
           citations,
           webSearchQueries: [],
         });
@@ -213,12 +221,14 @@ function fakeGemini(options?: {
   };
 }
 
-/** 자료조사 소스 3종. 수집 결과는 비어 있어도 파이프라인은 웹검색만으로 완주한다 */
+/** 자료조사 소스 3종. YouTube만 1건을 돌려주고 나머지는 0건이어도 파이프라인은 완주한다 */
 function fakeSources(): ResearchSource[] {
   return RESEARCH_SOURCE_IDS.map((id) => ({
     id,
     label: SOURCE_LABELS[id],
-    collect: vi.fn().mockResolvedValue([]),
+    collect: vi
+      .fn()
+      .mockResolvedValue(id === "youtube" ? [collectedVoice] : []),
   }));
 }
 

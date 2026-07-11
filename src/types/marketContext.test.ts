@@ -276,12 +276,55 @@ describe("MarketContextSchema", () => {
       expect(CODE_INJECTED_CONTEXT_KEYS).toContain("citations");
     });
 
-    it("draft 키 + 코드 주입 키 = 최종 스키마 키 전체", () => {
+    it("draft 키(ref 제외) + 코드 주입 키 = 최종 스키마 키 전체", () => {
+      // communityVoiceRefs는 draft에만 있고 산출물에는 없다 — 코드가 communityVoices로 해소한다
       const union = new Set([
-        ...Object.keys(MarketContextDraftSchema.shape),
+        ...Object.keys(MarketContextDraftSchema.shape).filter(
+          (key) => key !== "communityVoiceRefs",
+        ),
         ...CODE_INJECTED_CONTEXT_KEYS,
       ]);
       expect(union).toEqual(new Set(Object.keys(MarketContextObjectSchema.shape)));
+    });
+  });
+
+  // ADR-013: LLM은 어느 목소리가 유의미한지만 ID로 고른다. 원문·URL·작성자는 코드가
+  // research.json에서 복원한다 — LLM은 코드가 준 URL조차 다시 타이핑하면 망가뜨린다.
+  describe("communityVoices (코드 주입 필드)", () => {
+    it("★ draft에는 communityVoices가 없고 communityVoiceRefs가 있다", () => {
+      const draftKeys = Object.keys(MarketContextDraftSchema.shape);
+
+      expect(draftKeys).not.toContain("communityVoices");
+      expect(draftKeys).toContain("communityVoiceRefs");
+      expect(CODE_INJECTED_CONTEXT_KEYS).toContain("communityVoices");
+    });
+
+    it("★ 최종 스키마에는 communityVoices만 있고 ref는 남지 않는다", () => {
+      // ref는 research.json의 인덱스에 의존하는 내부 좌표다 — 산출물에 남으면 두 개의 진실이 된다
+      const objectKeys = Object.keys(MarketContextObjectSchema.shape);
+
+      expect(objectKeys).toContain("communityVoices");
+      expect(objectKeys).not.toContain("communityVoiceRefs");
+    });
+
+    it("draft는 ID 문자열 배열을 받는다", () => {
+      const draft = {
+        ...validContext,
+        communityVoiceRefs: ["V1", "V3"],
+      };
+      delete (draft as Record<string, unknown>).communityVoices;
+
+      const result = MarketContextDraftSchema.safeParse(draft);
+
+      expect(result.success).toBe(true);
+    });
+
+    it("CODE_INJECTED_CONTEXT_KEYS는 citations·researchCoverage·communityVoices다", () => {
+      expect([...CODE_INJECTED_CONTEXT_KEYS]).toEqual([
+        "citations",
+        "researchCoverage",
+        "communityVoices",
+      ]);
     });
   });
 

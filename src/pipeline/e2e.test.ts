@@ -192,6 +192,9 @@ const PLANNER_TEXT = JSON.stringify({
 
 // context-hunter는 grounding 모드라 자유 텍스트(펜스 두른 JSON)로 돌아온다.
 // 값 없는 선택 필드를 키 생략이 아니라 명시적 null로 내보내는, 실측된 실패 형태 그대로다.
+//
+// 목소리는 ID로만 고른다 (ADR-013). 수집 순서(전역 연번)는
+// V1 = YouTube 댓글 / V2 = HN 댓글 / V3 = HN 스토리 / V4~V6 = 네이버(cafearticle·kin·blog)다.
 const CONTEXT_TEXT = `조사 결과를 정리했습니다.
 
 \`\`\`json
@@ -205,31 +208,7 @@ const CONTEXT_TEXT = `조사 결과를 정리했습니다.
   "competitors": [
     { "name": "Planta", "description": "식물 관리 앱", "url": null, "pricingHint": null }
   ],
-  "communityVoices": [
-    {
-      "source": "youtube",
-      "title": "식물 키우기 실패담",
-      "url": "https://www.youtube.com/watch?v=vid1",
-      "text": "${COMMENT_TEXT}",
-      "authorName": null,
-      "score": null
-    },
-    {
-      "source": "hackernews",
-      "title": "Show HN: Plant care assistant",
-      "url": "https://news.ycombinator.com/item?id=42",
-      "text": "${HN_COMMENT_TEXT}",
-      "authorName": "pg"
-    },
-    {
-      "source": "naver",
-      "title": "식물 키우기 실패 후기",
-      "url": "https://cafe.naver.com/cafearticle/1",
-      "text": "${NAVER_SNIPPET}",
-      "authorName": "식물카페",
-      "extra": "검색 스니펫"
-    }
-  ],
+  "communityVoiceRefs": ["V1", "V2", "V4"],
   "painPointEvidence": ["물주기 실패로 식물을 죽인 경험"],
   "sources": ["https://example.com/trend"]
 }
@@ -454,7 +433,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     expect(contextPrompt).toContain(HN_COMMENT_TEXT);
     expect(contextPrompt).toContain(NAVER_SNIPPET);
 
-    // 프롬프트 → 산출물: LLM이 돌려준 세 소스의 목소리가 디스크까지 살아남는다
+    // 프롬프트 → 산출물: LLM이 고른 ID(V1·V2·V4)가 세 소스의 목소리로 복원돼 디스크까지 간다
     const context = store.loadStepOutput(
       result.runId,
       "context-hunter",
@@ -467,6 +446,50 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     ]);
     // 네이버 항목은 잘린 검색 스니펫이라는 표시를 달고 온다 (완결된 원문 인용이 아니다)
     expect(context?.communityVoices[2].extra).toBe("검색 스니펫");
+  });
+
+  // ADR-013 — 이 phase의 핵심. 모델은 코드가 준 URL조차 다시 타이핑하면 망가뜨린다
+  // (실제 산출물에 cloud.google.google.com 오타가 남아 있다). 그래서 URL을 보여주지 않는다.
+  it("★ 목소리의 URL은 프롬프트에 없고, 산출물에는 수집기가 만든 원본이 들어간다", async () => {
+    const { client, generateContent } = fakeGenAI(
+      PLANNER_TEXT,
+      CONTEXT_RESPONSE,
+      THESIS_TEXT,
+      CRITICISM_TEXT,
+      SOLUTION_TEXT,
+      VERDICT_TEXT,
+    );
+
+    const result = await runPipeline(deps(client, researchFetch()), { idea: IDEA });
+
+    // 프롬프트에는 원문·ID만 있고 URL이 없다 — 모델이 볼 수 없는 URL은 받아적을 수도 없다
+    const contextPrompt = (
+      generateContent.mock.calls[1][0] as { contents: string }
+    ).contents;
+    expect(contextPrompt).toContain("[V1]");
+    expect(contextPrompt).not.toContain("https://www.youtube.com/watch?v=vid1");
+    expect(contextPrompt).not.toContain("https://news.ycombinator.com");
+
+    // LLM은 ID만 골랐는데, 디스크에는 수집기가 만든 URL·작성자·인기도가 통째로 들어 있다
+    const context = store.loadStepOutput(
+      result.runId,
+      "context-hunter",
+      MarketContextSchema,
+    );
+    expect(context?.communityVoices[0]).toEqual({
+      source: "youtube",
+      title: "식물 키우기 실패담",
+      url: "https://www.youtube.com/watch?v=vid1",
+      text: COMMENT_TEXT,
+      authorName: "초보집사",
+      score: 42,
+    });
+
+    // context.json의 목소리는 research.json 수집물의 부분집합이다
+    const evidence = store.loadResearchEvidence(result.runId);
+    expect(evidence?.voices).toEqual(
+      expect.arrayContaining(context?.communityVoices ?? []),
+    );
   });
 
   it("grounding 응답의 인용이 코드 추출을 거쳐 디스크의 context.json에 남는다", async () => {
@@ -522,8 +545,6 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       name: "Planta",
       description: "식물 관리 앱",
     });
-    expect(context?.communityVoices[0].authorName).toBeUndefined();
-    expect(context?.communityVoices[0].score).toBeUndefined();
   });
 
   it("YouTube가 quota로 실패해도 나머지 두 소스로 완주한다", async () => {
