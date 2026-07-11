@@ -21,7 +21,8 @@ import {
   makeTempRunsDir,
 } from "@/test/fixtures";
 
-const ELEVEN_MINUTES_MS = 11 * 60 * 1000;
+// STALLED_THRESHOLD_MS(15분)를 넘겨야 stalled로 파생된다 (ADR-012)
+const SIXTEEN_MINUTES_MS = 16 * 60 * 1000;
 
 describe("경로 해석 (env 주입)", () => {
   afterEach(() => {
@@ -157,7 +158,7 @@ describe("getRunDetail", () => {
 
   it("mtime이 오래돼도 waiting run은 stalled로 바뀌지 않는다", () => {
     copyFixtureRun(runsDir, WAITING_RUN_ID);
-    ageStateFile(runsDir, WAITING_RUN_ID, ELEVEN_MINUTES_MS);
+    ageStateFile(runsDir, WAITING_RUN_ID, SIXTEEN_MINUTES_MS);
 
     expect(getRunDetail(WAITING_RUN_ID)?.status).toBe("waiting");
   });
@@ -185,9 +186,9 @@ describe("getRunDetail", () => {
     );
   });
 
-  it("mtime이 10분을 넘긴 미완료 run은 stalled다", () => {
+  it("mtime이 15분을 넘긴 미완료 run은 stalled다", () => {
     copyFixtureRun(runsDir, RUNNING_RUN_ID);
-    ageStateFile(runsDir, RUNNING_RUN_ID, ELEVEN_MINUTES_MS);
+    ageStateFile(runsDir, RUNNING_RUN_ID, SIXTEEN_MINUTES_MS);
 
     expect(getRunDetail(RUNNING_RUN_ID)?.status).toBe("stalled");
   });

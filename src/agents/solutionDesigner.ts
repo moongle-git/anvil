@@ -2,6 +2,7 @@ import type { GeminiService } from "../services/gemini.js";
 import {
   SolutionSchema,
   type Criticism,
+  toPromptContext,
   type MarketContext,
   type Solution,
   type Thesis,
@@ -68,7 +69,7 @@ export async function runSolutionDesigner(
   thesis: Thesis,
 ): Promise<Solution> {
   const prompt = SOLUTION_DESIGNER_PROMPT_TEMPLATE.replace("{idea}", idea)
-    .replace("{marketContext}", JSON.stringify(context, null, 2))
+    .replace("{marketContext}", JSON.stringify(toPromptContext(context), null, 2))
     .replace("{thesis}", JSON.stringify(thesis, null, 2))
     .replace("{criticism}", JSON.stringify(criticism, null, 2));
 
@@ -76,6 +77,5 @@ export async function runSolutionDesigner(
     systemInstruction: SOLUTION_DESIGNER_SYSTEM_PROMPT,
     prompt,
     schema: SolutionSchema,
-    useGrounding: false,
   });
 }

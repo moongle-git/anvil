@@ -5,6 +5,7 @@ import {
   RECOMMENDATION_SCORE_BANDS,
   VerdictSchema,
   type Criticism,
+  toPromptContext,
   type MarketContext,
   type Solution,
   type Thesis,
@@ -49,7 +50,13 @@ const MARKET_CONTEXT: MarketContext = {
   ],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
-  citations: [],
+  citations: [
+    {
+      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+      title: "펫 시장 리포트",
+      domain: "example.com",
+    },
+  ],
 };
 
 const THESIS: Thesis = {
@@ -183,7 +190,6 @@ describe("runVerdict", () => {
     const params = generateStructured.mock.calls[0][0];
     expect(params.schema).toBe(VerdictSchema);
     // 이 단계는 새 사실을 검색하지 않고 앞 4단계를 종합한다 (ADR-010)
-    expect(params.useGrounding).toBe(false);
   });
 
   it("유저 프롬프트에 아이디어와 앞 4단계 산출물이 유실 없이 직렬화된다", async () => {
@@ -191,7 +197,15 @@ describe("runVerdict", () => {
     const prompt = generateStructured.mock.calls[0][0].prompt as string;
 
     expect(prompt).toContain(IDEA);
-    expect(prompt).toContain(JSON.stringify(MARKET_CONTEXT, null, 2));
+    expect(prompt).toContain(
+      JSON.stringify(toPromptContext(MARKET_CONTEXT), null, 2),
+    );
+    // citations는 코드가 만든 출처 메타데이터라 하류 논증에 쓰이지 않는다 —
+    // 4개 프롬프트에 같은 리다이렉트 URL 뭉치가 중복해 실리는 것을 막는다
+    expect(prompt).not.toContain("citations");
+    expect(prompt).not.toContain("grounding-api-redirect");
+    // sources(LLM 자기보고)는 남는다 — 하류에 맥락을 준다
+    expect(prompt).toContain(MARKET_CONTEXT.sources[0]);
     expect(prompt).toContain(JSON.stringify(THESIS, null, 2));
     expect(prompt).toContain(JSON.stringify(CRITICISM, null, 2));
     expect(prompt).toContain(JSON.stringify(SOLUTION, null, 2));

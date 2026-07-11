@@ -4,7 +4,10 @@ import type {
   YoutubeService,
   YoutubeVideo,
 } from "../services/youtube.js";
-import { MarketContextSchema, type MarketContext } from "../types/index.js";
+import {
+  MarketContextDraftSchema,
+  type MarketContext,
+} from "../types/index.js";
 
 export const CONTEXT_HUNTER_SYSTEM_PROMPT = `당신은 신규 서비스 아이디어의 시장 맥락을 수집·정제하는 리서치 애널리스트다.
 웹검색으로 최신 트렌드와 유사/경쟁 서비스를 조사하고, 제공된 YouTube 댓글에서 타겟 유저의 실제 목소리를 선별한다.
@@ -113,10 +116,20 @@ export async function runContextHunter(
     prompt += `\n\n## 사용자 추가 설명 (인터뷰 답변)\n${clarifications}\n\n위 사용자 추가 설명을 아이디어의 핵심 맥락으로 반영해 조사하라.`;
   }
 
-  return deps.gemini.generateStructured({
+  // LLM은 draft(자기보고 sources 포함)만 채운다. citations는 코드가 grounding 응답에서
+  // 추출해 주입한다 — LLM에게 인용을 적어내라고 하면 URL을 지어낸다 (ADR-012).
+  const { data, citations, webSearchQueries } = await deps.gemini.generateGrounded({
     systemInstruction: CONTEXT_HUNTER_SYSTEM_PROMPT,
     prompt,
-    schema: MarketContextSchema,
-    useGrounding: true,
+    schema: MarketContextDraftSchema,
   });
+
+  if (webSearchQueries.length > 0) {
+    // 관측용 — 모델이 실제로 무엇을 검색했는지. 산출물 스키마에는 넣지 않는다
+    console.error(
+      `[context-hunter] grounding 검색어: ${webSearchQueries.join(", ")}`,
+    );
+  }
+
+  return { ...data, citations };
 }

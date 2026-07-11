@@ -49,7 +49,6 @@ describe("runInterviewer", () => {
 
     expect(generateStructured).toHaveBeenCalledTimes(1);
     const params = generateStructured.mock.calls[0][0];
-    expect(params.useGrounding).toBe(false);
     expect(params.schema).toBe(InterviewQuestionsSchema);
   });
 

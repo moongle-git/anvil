@@ -27,8 +27,10 @@ const REPORT_FILE = "report.md";
 // 인터뷰 답변은 스텝 산출물이 아니라 사람이 제출하는 아티팩트다
 const ANSWERS_FILE = "answers.json";
 
-// state.json이 이 시간보다 오래 갱신되지 않으면 실행 프로세스가 죽은 것으로 간주한다 (PRD "run 상태 파생 규칙")
-const STALLED_THRESHOLD_MS = 10 * 60 * 1000;
+// state.json이 이 시간보다 오래 갱신되지 않으면 실행 프로세스가 죽은 것으로 간주한다 (PRD "run 상태 파생 규칙").
+// executeStep은 step 실행 중에 state.json을 건드리지 않으므로, 이 값은 가장 긴 step보다 커야 한다 —
+// context-hunter는 다중 소스 수집 + grounding·urlContext 왕복으로 최악 6분이 걸린다 (ADR-012).
+const STALLED_THRESHOLD_MS = 15 * 60 * 1000;
 
 export type RunDisplayStatus =
   | "completed"

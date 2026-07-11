@@ -3,6 +3,7 @@ import type { GeminiService } from "../services/gemini.js";
 import {
   DIALECTIC_AXES,
   ThesisSchema,
+  toPromptContext,
   type MarketContext,
   type Thesis,
 } from "../types/index.js";
@@ -45,7 +46,13 @@ const MARKET_CONTEXT: MarketContext = {
   ],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
-  citations: [],
+  citations: [
+    {
+      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+      title: "펫 시장 리포트",
+      domain: "example.com",
+    },
+  ],
 };
 
 const THESIS: Thesis = {
@@ -100,7 +107,6 @@ describe("runThesis", () => {
 
     expect(generateStructured).toHaveBeenCalledTimes(1);
     const params = generateStructured.mock.calls[0][0];
-    expect(params.useGrounding).toBe(false);
     expect(params.schema).toBe(ThesisSchema);
   });
 
@@ -135,7 +141,15 @@ describe("runThesis", () => {
     const prompt = generateStructured.mock.calls[0][0].prompt as string;
 
     expect(prompt).toContain(IDEA);
-    expect(prompt).toContain(JSON.stringify(MARKET_CONTEXT, null, 2));
+    expect(prompt).toContain(
+      JSON.stringify(toPromptContext(MARKET_CONTEXT), null, 2),
+    );
+    // citations는 코드가 만든 출처 메타데이터라 하류 논증에 쓰이지 않는다 —
+    // 4개 프롬프트에 같은 리다이렉트 URL 뭉치가 중복해 실리는 것을 막는다
+    expect(prompt).not.toContain("citations");
+    expect(prompt).not.toContain("grounding-api-redirect");
+    // sources(LLM 자기보고)는 남는다 — 하류에 맥락을 준다
+    expect(prompt).toContain(MARKET_CONTEXT.sources[0]);
     expect(prompt).toContain("도그메이트");
     expect(prompt).toContain("산책 시킬 시간이 없어서 너무 미안해요...");
   });

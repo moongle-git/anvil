@@ -3,6 +3,7 @@ import {
   RECOMMENDATION_SCORE_BANDS,
   VerdictSchema,
   type Criticism,
+  toPromptContext,
   type MarketContext,
   type Recommendation,
   type Solution,
@@ -85,7 +86,7 @@ export async function runVerdict(
   solution: Solution,
 ): Promise<Verdict> {
   const prompt = VERDICT_PROMPT_TEMPLATE.replace("{idea}", idea)
-    .replace("{marketContext}", JSON.stringify(context, null, 2))
+    .replace("{marketContext}", JSON.stringify(toPromptContext(context), null, 2))
     .replace("{thesis}", JSON.stringify(thesis, null, 2))
     .replace("{criticism}", JSON.stringify(criticism, null, 2))
     .replace("{solution}", JSON.stringify(solution, null, 2));
@@ -94,6 +95,5 @@ export async function runVerdict(
     systemInstruction: VERDICT_SYSTEM_PROMPT,
     prompt,
     schema: VerdictSchema,
-    useGrounding: false,
   });
 }

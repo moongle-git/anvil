@@ -27,7 +27,8 @@ vi.mock("@/lib/server/spawnConsult", () => ({
   spawnConsult: vi.fn(),
 }));
 
-const ELEVEN_MINUTES_MS = 11 * 60 * 1000;
+// STALLED_THRESHOLD_MS(15분)를 넘겨야 stalled로 파생된다 (ADR-012)
+const SIXTEEN_MINUTES_MS = 16 * 60 * 1000;
 
 function params(id: string): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id }) };
@@ -237,7 +238,7 @@ describe("POST /api/runs/[id]/resume", () => {
 
   it("stalled run은 spawn 후 202", async () => {
     copyFixtureRun(runsDir, RUNNING_RUN_ID);
-    ageStateFile(runsDir, RUNNING_RUN_ID, ELEVEN_MINUTES_MS);
+    ageStateFile(runsDir, RUNNING_RUN_ID, SIXTEEN_MINUTES_MS);
 
     const res = await resume(RUNNING_RUN_ID);
 

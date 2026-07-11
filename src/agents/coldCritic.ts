@@ -2,6 +2,7 @@ import type { GeminiService } from "../services/gemini.js";
 import {
   CriticismSchema,
   type Criticism,
+  toPromptContext,
   type MarketContext,
   type Thesis,
 } from "../types/index.js";
@@ -82,13 +83,12 @@ export async function runColdCritic(
   thesis: Thesis,
 ): Promise<Criticism> {
   const prompt = COLD_CRITIC_PROMPT_TEMPLATE.replace("{idea}", idea)
-    .replace("{marketContext}", JSON.stringify(context, null, 2))
+    .replace("{marketContext}", JSON.stringify(toPromptContext(context), null, 2))
     .replace("{thesis}", JSON.stringify(thesis, null, 2));
 
   return deps.gemini.generateStructured({
     systemInstruction: COLD_CRITIC_SYSTEM_PROMPT,
     prompt,
     schema: CriticismSchema,
-    useGrounding: false,
   });
 }

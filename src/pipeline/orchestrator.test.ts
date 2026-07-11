@@ -8,6 +8,7 @@ import type { YoutubeService } from "../services/youtube.js";
 import {
   CriticismSchema,
   InterviewQuestionsSchema,
+  MarketContextDraftSchema,
   MarketContextSchema,
   SolutionSchema,
   ThesisSchema,
@@ -139,9 +140,14 @@ const verdict: Verdict = {
 interface FakeGemini {
   gemini: GeminiService;
   generateStructured: ReturnType<typeof vi.fn>;
+  generateGrounded: ReturnType<typeof vi.fn>;
 }
 
-/** schema 파라미터로 어떤 step의 호출인지 판별해 해당 산출물을 돌려주는 fake */
+/**
+ * schema 파라미터로 어떤 step의 호출인지 판별해 해당 산출물을 돌려주는 fake.
+ * context-hunter만 generateGrounded를 쓰고, LLM이 채우는 draft(citations 제외)를 돌려받는다 (ADR-012).
+ * failOn은 두 메서드 모두에 적용된다 — 어느 경로로 호출되든 그 step이 실패해야 한다.
+ */
 function fakeGemini(options?: {
   failOn?: unknown;
   questions?: InterviewQuestions;
@@ -154,7 +160,6 @@ function fakeGemini(options?: {
       if (schema === InterviewQuestionsSchema) {
         return Promise.resolve(options?.questions ?? { questions: [] });
       }
-      if (schema === MarketContextSchema) return Promise.resolve(marketContext);
       if (schema === ThesisSchema) return Promise.resolve(thesis);
       if (schema === CriticismSchema) return Promise.resolve(criticism);
       if (schema === SolutionSchema) return Promise.resolve(solution);
@@ -162,9 +167,28 @@ function fakeGemini(options?: {
       return Promise.reject(new Error("예상하지 못한 스키마"));
     },
   );
+
+  const generateGrounded = vi.fn(
+    ({ schema }: { schema: unknown }): Promise<unknown> => {
+      if (schema === options?.failOn) {
+        return Promise.reject(new Error("Gemini 호출 실패"));
+      }
+      if (schema === MarketContextDraftSchema) {
+        const { citations, ...draft } = marketContext;
+        return Promise.resolve({
+          data: draft,
+          citations,
+          webSearchQueries: [],
+        });
+      }
+      return Promise.reject(new Error("예상하지 못한 스키마"));
+    },
+  );
+
   return {
-    gemini: { generateStructured } as unknown as GeminiService,
+    gemini: { generateStructured, generateGrounded } as unknown as GeminiService,
     generateStructured,
+    generateGrounded,
   };
 }
 
@@ -199,7 +223,7 @@ describe("runPipeline", () => {
   }
 
   it("신규 run(CLI): 인터뷰 없이 정반합·판정 5개 step을 순서대로 실행하고 리포트를 생성한다", async () => {
-    const { gemini, generateStructured } = fakeGemini();
+    const { gemini, generateStructured, generateGrounded } = fakeGemini();
 
     const result = await runPipeline(makeDeps(gemini), { idea: IDEA });
 
@@ -208,12 +232,13 @@ describe("runPipeline", () => {
     // step 순서: context-hunter → thesis → cold-critic → solution-designer → verdict
     // (interviewer는 CLI에서 미실행). verdict는 合을 채점하므로 반드시 solution-designer 다음이다 (ADR-010).
     expect(calledSchemas(generateStructured)).toEqual([
-      MarketContextSchema,
       ThesisSchema,
       CriticismSchema,
       SolutionSchema,
       VerdictSchema,
     ]);
+    // context-hunter만 grounding 경로다 (인용을 코드가 추출해야 하므로)
+    expect(calledSchemas(generateGrounded)).toEqual([MarketContextDraftSchema]);
 
     // state 전이: 실행된 step은 completed + 타임스탬프, run 완료 시각 기록
     const saved = store.loadRun(result.runId);
@@ -294,6 +319,7 @@ describe("runPipeline", () => {
     });
 
     expect(calledSchemas(second.generateStructured)).toEqual([]);
+    expect(second.generateGrounded).not.toHaveBeenCalled();
     expect(store.loadStepOutput(runId, "verdict", VerdictSchema)).toEqual(
       verdict,
     );
@@ -401,8 +427,9 @@ describe("runPipeline", () => {
     });
 
     // context-hunter는 재실행, 산출물이 멀쩡한 나머지 step은 skip
-    expect(calledSchemas(second.generateStructured)).toEqual([
-      MarketContextSchema,
+    expect(calledSchemas(second.generateStructured)).toEqual([]);
+    expect(calledSchemas(second.generateGrounded)).toEqual([
+      MarketContextDraftSchema,
     ]);
 
     // 재실행으로 산출물이 복구된다
@@ -475,7 +502,6 @@ describe("runPipeline", () => {
 
       expect(result.status).toBe("completed");
       expect(calledSchemas(second.generateStructured)).toEqual([
-        MarketContextSchema,
         ThesisSchema,
         CriticismSchema,
         SolutionSchema,
@@ -483,10 +509,8 @@ describe("runPipeline", () => {
       ]);
 
       // context-hunter 프롬프트에 답변이 반영된다
-      const contextCall = second.generateStructured.mock.calls.find(
-        (call) => (call[0] as { schema: unknown }).schema === MarketContextSchema,
-      );
-      const prompt = (contextCall?.[0] as { prompt: string }).prompt;
+      const contextCall = second.generateGrounded.mock.calls[0];
+      const prompt = (contextCall[0] as { prompt: string }).prompt;
       expect(prompt).toContain("바쁜 1인 가구 직장인");
 
       const saved = store.loadRun(runId);
@@ -498,7 +522,7 @@ describe("runPipeline", () => {
 
     it("명확한 아이디어: 질문이 없으면 pause 없이 바로 완료한다", async () => {
       // 기본 fakeGemini는 questions 미지정 → 빈 배열 반환
-      const { gemini, generateStructured } = fakeGemini();
+      const { gemini, generateStructured, generateGrounded } = fakeGemini();
       const { runId } = store.createRun(IDEA, { interview: true });
 
       const result = await runPipeline(makeDeps(gemini), {
@@ -509,12 +533,12 @@ describe("runPipeline", () => {
       expect(result.status).toBe("completed");
       expect(calledSchemas(generateStructured)).toEqual([
         InterviewQuestionsSchema,
-        MarketContextSchema,
         ThesisSchema,
         CriticismSchema,
         SolutionSchema,
         VerdictSchema,
       ]);
+      expect(calledSchemas(generateGrounded)).toEqual([MarketContextDraftSchema]);
       expect(store.loadRun(runId).completedAt).toBeDefined();
     });
   });

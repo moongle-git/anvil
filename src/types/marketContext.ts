@@ -129,3 +129,19 @@ export const MarketContextSchema = z.preprocess(
   MarketContextObjectSchema,
 );
 export type MarketContext = z.infer<typeof MarketContextSchema>;
+
+/**
+ * 하류 에이전트(正·反·合·판정) 프롬프트용. citations는 코드가 만든 출처 메타데이터라 논증에 쓰이지 않는다.
+ * run당 10~30개이고 리다이렉트 URL이 길어서, 그대로 두면 같은 URL 뭉치가 하류 4개 프롬프트에 중복해 실린다.
+ * sources는 남긴다 — LLM 자기보고 설명은 하류에 맥락을 준다.
+ */
+export function toPromptContext(
+  context: MarketContext,
+): Omit<MarketContext, "citations"> {
+  // citations만 덜어내고 나머지는 그대로 넘긴다 — MarketContext에 필드가 늘어도 자동으로 따라간다
+  const promptContext: Omit<MarketContext, "citations"> & {
+    citations?: Citation[];
+  } = { ...context };
+  delete promptContext.citations;
+  return promptContext;
+}

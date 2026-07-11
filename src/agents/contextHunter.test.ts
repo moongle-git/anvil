@@ -5,12 +5,12 @@ import type {
   YoutubeService,
   YoutubeVideo,
 } from "../services/youtube.js";
+import type { Citation } from "../types/index.js";
 import {
   CODE_INJECTED_CONTEXT_KEYS,
   MarketContextDraftSchema,
   MarketContextObjectSchema,
-  MarketContextSchema,
-  type MarketContext,
+  type MarketContextDraft,
 } from "../types/index.js";
 import {
   CONTEXT_HUNTER_PROMPT_TEMPLATE,
@@ -21,7 +21,8 @@ import {
 
 const IDEA = "반려견 산책 대행 매칭 서비스";
 
-const MARKET_CONTEXT: MarketContext = {
+/** LLM이 채우는 부분 — citations는 여기에 없다 (코드가 주입한다) */
+const DRAFT: MarketContextDraft = {
   ideaTitle: "반려견 산책 대행 매칭 서비스",
   briefing:
     "1인 가구 반려동물 양육이 늘며 펫 시장이 성장 중이다. 도그메이트 등 매칭 플랫폼이 이미 자리잡았다.",
@@ -42,8 +43,18 @@ const MARKET_CONTEXT: MarketContext = {
   ],
   painPointEvidence: ["바쁜 직장인은 산책 시간 확보가 어렵다"],
   sources: ["https://example.com/pet-market"],
-  citations: [],
 };
+
+/** 코드가 grounding 응답에서 추출한 인용 */
+const CITATIONS: Citation[] = [
+  {
+    uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
+    title: "펫 시장 리포트",
+    domain: "example.com",
+  },
+];
+
+const SEARCH_QUERIES = ["반려견 산책 대행 서비스"];
 
 function video(id: string, title: string): YoutubeVideo {
   return {
@@ -61,14 +72,18 @@ function comment(videoId: string, text: string): YoutubeComment {
 
 interface FakeDeps {
   deps: ContextHunterDeps;
-  generateStructured: ReturnType<typeof vi.fn>;
+  generateGrounded: ReturnType<typeof vi.fn>;
   collectVoices: ReturnType<typeof vi.fn>;
 }
 
 function fakeDeps(
   voices: { video: YoutubeVideo; comments: YoutubeComment[] }[] | Error,
 ): FakeDeps {
-  const generateStructured = vi.fn().mockResolvedValue(MARKET_CONTEXT);
+  const generateGrounded = vi.fn().mockResolvedValue({
+    data: DRAFT,
+    citations: CITATIONS,
+    webSearchQueries: SEARCH_QUERIES,
+  });
   const collectVoices =
     voices instanceof Error
       ? vi.fn().mockRejectedValue(voices)
@@ -76,10 +91,10 @@ function fakeDeps(
 
   return {
     deps: {
-      gemini: { generateStructured } as unknown as GeminiService,
+      gemini: { generateGrounded } as unknown as GeminiService,
       youtube: { collectVoices } as unknown as YoutubeService,
     },
-    generateStructured,
+    generateGrounded,
     collectVoices,
   };
 }
@@ -90,7 +105,7 @@ afterEach(() => {
 
 describe("runContextHunter (정상 흐름)", () => {
   it("YouTube 수집 결과와 아이디어를 담아 grounding 모드로 Gemini를 호출하고 결과를 반환한다", async () => {
-    const { deps, generateStructured, collectVoices } = fakeDeps([
+    const { deps, generateGrounded, collectVoices } = fakeDeps([
       {
         video: video("abc123", "강아지 산책 브이로그"),
         comments: [comment("abc123", "산책 시킬 시간이 없어서 너무 미안해요...")],
@@ -99,17 +114,16 @@ describe("runContextHunter (정상 흐름)", () => {
 
     const result = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual(MARKET_CONTEXT);
+    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
 
     // YouTube는 아이디어 기반 검색어로 호출된다
     expect(collectVoices).toHaveBeenCalledTimes(1);
     expect(collectVoices).toHaveBeenCalledWith(IDEA);
 
-    // Gemini는 grounding + MarketContext 스키마로 호출된다
-    expect(generateStructured).toHaveBeenCalledTimes(1);
-    const params = generateStructured.mock.calls[0][0];
-    expect(params.useGrounding).toBe(true);
-    expect(params.schema).toBe(MarketContextSchema);
+    // grounding 호출은 LLM이 채우는 draft 스키마로 한다 — citations는 LLM이 채우지 않는다
+    expect(generateGrounded).toHaveBeenCalledTimes(1);
+    const params = generateGrounded.mock.calls[0][0];
+    expect(params.schema).toBe(MarketContextDraftSchema);
 
     // 프롬프트에 아이디어 원문과 YouTube 수집 결과(제목/URL/댓글 원문)가 포함된다
     const prompt = params.prompt as string;
@@ -119,8 +133,30 @@ describe("runContextHunter (정상 흐름)", () => {
     expect(prompt).toContain("산책 시킬 시간이 없어서 너무 미안해요...");
   });
 
+  it("citations는 LLM 산출물이 아니라 코드가 grounding 응답에서 주입한다", async () => {
+    const { deps } = fakeDeps([]);
+
+    const result = await runContextHunter(deps, IDEA);
+
+    // LLM이 돌려준 draft에는 citations 키가 없다 — 코드가 붙인 것이다
+    expect("citations" in DRAFT).toBe(false);
+    expect(result.citations).toEqual(CITATIONS);
+    // 검증된 인용과 LLM 자기보고 출처는 공존한다 (실패 모드가 상보적이다 — ADR-012)
+    expect(result.sources).toEqual(DRAFT.sources);
+  });
+
+  it("webSearchQueries는 로그로만 노출하고 산출물에 넣지 않는다", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { deps } = fakeDeps([]);
+
+    const result = await runContextHunter(deps, IDEA);
+
+    expect(Object.keys(result)).not.toContain("webSearchQueries");
+    expect(String(error.mock.calls[0][0])).toContain(SEARCH_QUERIES[0]);
+  });
+
   it("프롬프트에 댓글 원문 보존(요약 금지) 지시가 포함된다", async () => {
-    const { deps, generateStructured } = fakeDeps([
+    const { deps, generateGrounded } = fakeDeps([
       {
         video: video("abc123", "강아지 산책 브이로그"),
         comments: [comment("abc123", "댓글 원문")],
@@ -129,7 +165,7 @@ describe("runContextHunter (정상 흐름)", () => {
 
     await runContextHunter(deps, IDEA);
 
-    const params = generateStructured.mock.calls[0][0];
+    const params = generateGrounded.mock.calls[0][0];
     const combined = `${params.systemInstruction as string}\n${params.prompt as string}`;
     expect(combined).toContain("요약하지 말");
     expect(combined).toContain("원문");
@@ -138,31 +174,31 @@ describe("runContextHunter (정상 흐름)", () => {
 
 describe("runContextHunter (인터뷰 답변 반영)", () => {
   it("clarifications가 있으면 프롬프트에 인터뷰 답변 섹션을 추가한다", async () => {
-    const { deps, generateStructured } = fakeDeps([]);
+    const { deps, generateGrounded } = fakeDeps([]);
     const clarifications = "Q: 핵심 타깃은?\nA: 바쁜 1인 가구 직장인";
 
     await runContextHunter(deps, IDEA, clarifications);
 
-    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
     expect(prompt).toContain("사용자 추가 설명");
     expect(prompt).toContain("바쁜 1인 가구 직장인");
   });
 
   it("clarifications가 없으면 인터뷰 답변 섹션을 넣지 않는다 (기존 동작 유지)", async () => {
-    const { deps, generateStructured } = fakeDeps([]);
+    const { deps, generateGrounded } = fakeDeps([]);
 
     await runContextHunter(deps, IDEA);
 
-    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
     expect(prompt).not.toContain("사용자 추가 설명");
   });
 
   it("clarifications가 공백뿐이면 섹션을 넣지 않는다", async () => {
-    const { deps, generateStructured } = fakeDeps([]);
+    const { deps, generateGrounded } = fakeDeps([]);
 
     await runContextHunter(deps, IDEA, "   ");
 
-    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
     expect(prompt).not.toContain("사용자 추가 설명");
   });
 });
@@ -170,17 +206,17 @@ describe("runContextHunter (인터뷰 답변 반영)", () => {
 describe("runContextHunter (YouTube 실패 내성)", () => {
   it("YouTube 수집이 실패해도 웹검색만으로 진행하고 실패를 로깅한다", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { deps, generateStructured } = fakeDeps(
+    const { deps, generateGrounded } = fakeDeps(
       new Error("YouTube API quota가 초과되었다"),
     );
 
     const result = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual(MARKET_CONTEXT);
-    expect(generateStructured).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(generateGrounded).toHaveBeenCalledTimes(1);
 
     // 프롬프트는 YouTube 데이터 없음을 명시하고, communityVoices를 빈 배열로 지시한다
-    const prompt = generateStructured.mock.calls[0][0].prompt as string;
+    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
     expect(prompt).toContain("communityVoices");
     expect(prompt).toContain("빈 배열");
 
@@ -190,17 +226,17 @@ describe("runContextHunter (YouTube 실패 내성)", () => {
   });
 
   it("YouTube 결과가 빈 배열이어도 정상 진행한다", async () => {
-    const { deps, generateStructured } = fakeDeps([]);
+    const { deps, generateGrounded } = fakeDeps([]);
 
     const result = await runContextHunter(deps, IDEA);
 
-    expect(result).toEqual(MARKET_CONTEXT);
-    expect(generateStructured).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(generateGrounded).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("CONTEXT_HUNTER_PROMPT_TEMPLATE (출력 형식 계약)", () => {
-  // 이 에이전트만 useGrounding: true라 responseJsonSchema를 못 쓴다.
+  // 이 에이전트만 grounding 모드라 responseJsonSchema를 못 쓴다.
   // 프롬프트의 JSON 예시가 유일한 형식 지시이므로 키 하나만 빠져도 검증이 실패한다.
   it("JSON 예시가 LLM이 채우는 모든 최상위 키를 담는다", () => {
     for (const key of Object.keys(MarketContextDraftSchema.shape)) {

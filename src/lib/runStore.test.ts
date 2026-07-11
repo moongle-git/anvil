@@ -387,10 +387,10 @@ describe("RunStore", () => {
       expect(store.listRuns()[0]?.status).toBe("error");
     });
 
-    it("derives stalled status when state.json mtime is older than 10 minutes", () => {
+    it("derives stalled status when state.json mtime is older than 15 minutes", () => {
       const state = store.createRun("아이디어");
       const statePath = path.join(baseDir, state.runId, "state.json");
-      const old = new Date(Date.now() - 11 * MINUTE_MS);
+      const old = new Date(Date.now() - 16 * MINUTE_MS);
       fs.utimesSync(statePath, old, old);
 
       expect(store.listRuns()[0]?.status).toBe("stalled");
@@ -399,7 +399,7 @@ describe("RunStore", () => {
     it("derives stalled via injected nowMs without touching the file", () => {
       store.createRun("아이디어");
 
-      expect(store.listRuns(Date.now() + 11 * MINUTE_MS)[0]?.status).toBe(
+      expect(store.listRuns(Date.now() + 16 * MINUTE_MS)[0]?.status).toBe(
         "stalled",
       );
     });
@@ -561,27 +561,38 @@ describe("deriveRunStatus", () => {
     expect(deriveRunStatus(state, NOW_MS, NOW_MS)).toBe("error");
   });
 
-  it("returns running when mtime is within 10 minutes of now", () => {
+  it("returns running when mtime is within 15 minutes of now", () => {
     expect(deriveRunStatus(makeState(), NOW_MS - 9 * MINUTE_MS, NOW_MS)).toBe(
       "running",
     );
   });
 
-  it("treats exactly 10 minutes as still running (10분 이내)", () => {
-    expect(deriveRunStatus(makeState(), NOW_MS - 10 * MINUTE_MS, NOW_MS)).toBe(
+  // context-hunter는 grounding·urlContext 왕복으로 최악 6분이 걸리고, executeStep은 실행 중
+  // state.json을 건드리지 않는다. 임계값이 10분이면 정상 실행 중인 run이 stalled로 오탐된다 (ADR-012).
+  it("treats a 12-minute-old run as still running (10분 임계값이면 오탐한다)", () => {
+    expect(deriveRunStatus(makeState(), NOW_MS - 12 * MINUTE_MS, NOW_MS)).toBe(
       "running",
     );
   });
 
-  it("returns stalled when mtime is older than 10 minutes", () => {
+  it("treats exactly 15 minutes as still running (15분 이내)", () => {
+    expect(deriveRunStatus(makeState(), NOW_MS - 15 * MINUTE_MS, NOW_MS)).toBe(
+      "running",
+    );
+  });
+
+  it("returns stalled when mtime is older than 15 minutes", () => {
     expect(
-      deriveRunStatus(makeState(), NOW_MS - 10 * MINUTE_MS - 1, NOW_MS),
+      deriveRunStatus(makeState(), NOW_MS - 15 * MINUTE_MS - 1, NOW_MS),
     ).toBe("stalled");
+    expect(deriveRunStatus(makeState(), NOW_MS - 16 * MINUTE_MS, NOW_MS)).toBe(
+      "stalled",
+    );
   });
 
   it("defaults nowMs to Date.now()", () => {
     expect(deriveRunStatus(makeState(), Date.now())).toBe("running");
-    expect(deriveRunStatus(makeState(), Date.now() - 11 * MINUTE_MS)).toBe(
+    expect(deriveRunStatus(makeState(), Date.now() - 16 * MINUTE_MS)).toBe(
       "stalled",
     );
   });

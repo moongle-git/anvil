@@ -1,6 +1,7 @@
 import type { GeminiService } from "../services/gemini.js";
 import {
   ThesisSchema,
+  toPromptContext,
   type MarketContext,
   type Thesis,
 } from "../types/index.js";
@@ -57,13 +58,12 @@ export async function runThesis(
 ): Promise<Thesis> {
   const prompt = THESIS_PROMPT_TEMPLATE.replace("{idea}", idea).replace(
     "{marketContext}",
-    JSON.stringify(context, null, 2),
+    JSON.stringify(toPromptContext(context), null, 2),
   );
 
   return deps.gemini.generateStructured({
     systemInstruction: THESIS_SYSTEM_PROMPT,
     prompt,
     schema: ThesisSchema,
-    useGrounding: false,
   });
 }

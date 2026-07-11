@@ -26,13 +26,18 @@ import { PipelineStepError, runPipeline, type PipelineDeps } from "./orchestrato
 const IDEA = "AI 반려식물 관리 서비스";
 
 // ── 최외곽 경계 1: Gemini SDK 클라이언트 ─────────────────────────────
-function fakeGenAI(...texts: string[]): {
+/** 본문(text)만 주거나, grounding metadata까지 실은 raw 응답을 준다 */
+type FakeResponse = string | { text: string; candidates: unknown[] };
+
+function fakeGenAI(...responses: FakeResponse[]): {
   client: GoogleGenAI;
   generateContent: ReturnType<typeof vi.fn>;
 } {
   const generateContent = vi.fn();
-  for (const text of texts) {
-    generateContent.mockResolvedValueOnce({ text });
+  for (const response of responses) {
+    generateContent.mockResolvedValueOnce(
+      typeof response === "string" ? { text: response } : response,
+    );
   }
   return {
     client: { models: { generateContent } } as unknown as GoogleGenAI,
@@ -113,6 +118,28 @@ const CONTEXT_TEXT = `조사 결과를 정리했습니다.
   "sources": ["https://example.com/trend"]
 }
 \`\`\``;
+
+// SDK가 응답에 실어 보내는 grounding 인용. 코드(gemini.ts)가 이걸 읽어 citations로 주입한다 (ADR-012).
+// uri 없는 chunk가 섞여 오는 것이 실측된 형태다 — 그건 인용으로 쓸 수 없어 드롭돼야 한다.
+const CONTEXT_RESPONSE = {
+  text: CONTEXT_TEXT,
+  candidates: [
+    {
+      groundingMetadata: {
+        groundingChunks: [
+          {
+            web: {
+              uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x",
+              title: "홈가드닝 시장 리포트",
+            },
+          },
+          { web: {} },
+        ],
+        webSearchQueries: ["홈가드닝 시장 규모"],
+      },
+    },
+  ],
+};
 
 const THESIS_TEXT = JSON.stringify({
   points: [
@@ -233,7 +260,7 @@ afterEach(() => {
 describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
   it("전 구간을 재시도 없이 완주하고 리포트를 남긴다", async () => {
     const { client, generateContent } = fakeGenAI(
-      CONTEXT_TEXT,
+      CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
       SOLUTION_TEXT,
@@ -274,9 +301,37 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     ).not.toBeNull();
   });
 
+  it("grounding 응답의 인용이 코드 추출을 거쳐 디스크의 context.json에 남는다", async () => {
+    const { client } = fakeGenAI(
+      CONTEXT_RESPONSE,
+      THESIS_TEXT,
+      CRITICISM_TEXT,
+      SOLUTION_TEXT,
+      VERDICT_TEXT,
+    );
+
+    const result = await runPipeline(deps(client, youtubeFetch()), { idea: IDEA });
+
+    // 파일에 실제로 쓰인 원문을 본다 — 스키마 default([])가 빈 배열을 채워 통과하는 것과 구별하기 위해
+    const raw: unknown = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, result.runId, "context.json"), "utf8"),
+    );
+    const context = MarketContextSchema.parse(raw);
+
+    // uri 없는 chunk는 드롭되므로 2개 chunk 중 1건만 남는다
+    expect(context.citations).toEqual([
+      {
+        uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x",
+        title: "홈가드닝 시장 리포트",
+      },
+    ]);
+    // LLM 자기보고 sources는 대체되지 않고 공존한다 (실패 모드가 상보적이다 — ADR-012)
+    expect(context.sources).toEqual(["https://example.com/trend"]);
+  });
+
   it("LLM이 선택 필드에 null을 넣어도 시장조사가 통과한다 (키 부재로 정규화)", async () => {
     const { client } = fakeGenAI(
-      CONTEXT_TEXT,
+      CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
       SOLUTION_TEXT,
@@ -312,7 +367,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       ),
     ) as unknown as typeof fetch;
     const { client } = fakeGenAI(
-      CONTEXT_TEXT,
+      CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
       SOLUTION_TEXT,
@@ -332,7 +387,7 @@ describe("E2E: 웹 인터뷰 흐름 (waiting → 답변 → resume)", () => {
     });
     const { client } = fakeGenAI(
       questionsText,
-      CONTEXT_TEXT,
+      CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
       SOLUTION_TEXT,
@@ -371,7 +426,13 @@ describe("E2E: 장애 내성", () => {
     const hangingDeps: PipelineDeps = {
       store,
       gemini: new GeminiService(
-        { apiKey: "test-key", maxRetries: 1, timeoutMs: 20 },
+        {
+          apiKey: "test-key",
+          maxRetries: 1,
+          timeoutMs: 20,
+          groundedMaxRetries: 1,
+          groundedTimeoutMs: 20,
+        },
         client,
       ),
       youtube: new YoutubeService({ apiKey: "test-key", fetchFn: youtubeFetch() }),

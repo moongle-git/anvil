@@ -39,6 +39,5 @@ export async function runInterviewer(
     systemInstruction: INTERVIEWER_SYSTEM_PROMPT,
     prompt,
     schema: InterviewQuestionsSchema,
-    useGrounding: false,
   });
 }
