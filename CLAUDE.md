@@ -8,7 +8,7 @@
 - vitest — 테스트
 
 ## 아키텍처 규칙
-- CRITICAL: 외부 API(Gemini, YouTube) 호출은 반드시 `src/services/`에서만 처리할 것. agents/·pipeline/·cli/에서 직접 fetch나 SDK를 호출하지 말 것
+- CRITICAL: 외부 API(Gemini, YouTube, Hacker News, 네이버) 호출은 반드시 `src/services/`에서만 처리할 것. agents/·pipeline/·cli/·research/에서 직접 fetch나 SDK를 호출하지 말 것 — `research/`는 services/를 주입받아 `CommunityVoice`로 정규화만 한다
 - CRITICAL: 모든 에이전트 산출물은 zod 스키마 검증을 통과해야 다음 step으로 전달할 것. 검증 실패는 에러 피드백과 함께 재시도(최대 3회)
 - CRITICAL: 테스트에서 실제 외부 API를 호출하지 말 것. Gemini/YouTube는 반드시 mock으로 대체 (API 키 없이 `npm test`가 통과해야 함)
 - 파이프라인 상태는 `runs/{run-id}/state.json`이 단일 진실 공급원. resume 시 completed step은 건너뛴다
@@ -26,5 +26,9 @@ npm run web        # 웹 UI 개발 서버 실행 (Next.js)
 npm run consult -- "아이디어 텍스트"   # 컨설팅 파이프라인 실행 (CLI)
 
 ## 환경변수 (.env — git 미추적)
-GEMINI_API_KEY     # Gemini API 키
-YOUTUBE_API_KEY    # YouTube Data API v3 키
+GEMINI_API_KEY       # Gemini API 키
+YOUTUBE_API_KEY      # YouTube Data API v3 키
+NAVER_CLIENT_ID      # 네이버 개발자센터 검색 API Client ID
+NAVER_CLIENT_SECRET  # 네이버 개발자센터 검색 API Client Secret
+
+`GEMINI_API_KEY`만 필수다. 나머지 키는 없으면 해당 자료조사 소스를 건너뛴다 (Hacker News는 키가 필요 없다).

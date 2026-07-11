@@ -2,15 +2,58 @@
   "project": "anvil",
   "phase": "3-multi-source-research",
   "steps": [
-    { "step": 0, "name": "design-docs", "status": "pending" },
-    { "step": 1, "name": "research-types", "status": "pending" },
-    { "step": 2, "name": "html-util", "status": "pending" },
-    { "step": 3, "name": "hackernews-service", "status": "pending" },
-    { "step": 4, "name": "naver-service", "status": "pending" },
-    { "step": 5, "name": "grounded-citations", "status": "pending" },
-    { "step": 6, "name": "research-layer", "status": "pending" },
-    { "step": 7, "name": "research-planner", "status": "pending" },
-    { "step": 8, "name": "evidence-render", "status": "pending" },
-    { "step": 9, "name": "source-wiring", "status": "pending" }
-  ]
+    {
+      "step": 0,
+      "name": "design-docs",
+      "status": "completed",
+      "started_at": "2026-07-11T21:13:32+0900",
+      "summary": "가드레일 문서 4종(ADR·ARCHITECTURE·PRD·CLAUDE.md)만 갱신(코드 무변경). ADR-012 신설 — ADR-003을 '뒤집는 결정'으로 갱신하며 4가지를 결정: (1) 유저 목소리를 YouTube+Hacker News+네이버 3소스로 확장하고 소스별 원시 타입을 공통 CommunityVoice {source,title,url,text,authorName?,score?,extra?}로 정규화(스키마·프롬프트 JSON 예시·렌더러 3배 비용 회피, grounding은 responseSchema 불가라 예시 블록이 유일한 형식 지시), src/research/에서 Promise.allSettled 병렬 수집 + fail-soft(키 없는 소스는 배열에서 제외, 전부 실패해도 웹검색만으로 진행); (2) groundingMetadata.groundingChunks에서 코드가 추출한 citations[]를 기존 sources[]와 공존시킴(대체 아님 — chunk URI는 만료되는 vertexaisearch 리다이렉트, 자기보고는 부정확하지만 안 만료 → 실패 모드가 상보적); (3) urlContext 툴을 googleSearch와 병용해 경쟁사 공식 페이지 직접 read(타임아웃 180초·재시도 2회로 조정); (4) researchPlanner는 파이프라인 step이 아니라 context-hunter 내부 호출(HN=영어, YouTube·네이버=한국어 쿼리 생성). 하위호환: MarketContext.youtubeVoices→communityVoices를 z.preprocess로 승격(source:'youtube') — ADR-011과 달리 구 run이 빈 리포트가 되지 않음. 또한 STALLED_THRESHOLD_MS를 10분→15분으로 상향(PRD 'run 상태 파생 규칙' + ARCHITECTURE 상태 관리 동시 반영). ARCHITECTURE에 services/(hackerNews.ts·naver.ts)·research/·lib/html 추가 및 context-hunter 데이터 흐름 갱신, CLAUDE.md에 NAVER_CLIENT_ID/SECRET 추가(GEMINI_API_KEY만 필수, 나머지 없으면 해당 소스 skip)."
+    },
+    {
+      "step": 1,
+      "name": "research-types",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "html-util",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "hackernews-service",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "naver-service",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "grounded-citations",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "research-layer",
+      "status": "pending"
+    },
+    {
+      "step": 7,
+      "name": "research-planner",
+      "status": "pending"
+    },
+    {
+      "step": 8,
+      "name": "evidence-render",
+      "status": "pending"
+    },
+    {
+      "step": 9,
+      "name": "source-wiring",
+      "status": "pending"
+    }
+  ],
+  "created_at": "2026-07-11T21:13:32+0900"
 }

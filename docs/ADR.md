@@ -62,3 +62,24 @@ MVP 속도 최우선. 외부 의존성 최소화. 작동하는 최소 구현을 
 **결정**: `painPointReality`/`bmWeakness`/`copycatRisk` 세 배열을 없애고, `axis` 필드(`painPoint` | `bm` | `copycat`)를 가진 단일 `points[]`로 바꾼다. Thesis에도 같은 축을 가진 `points[]`를 추가한다.
 **이유**: 축이 배열 이름에만 존재하면 正의 주장과 反의 비판을 짝지을 수 없어 Split View가 성립하지 않는다. 배열 이름과 `axis` 필드가 공존하면 두 개의 진실이 생겨 LLM이 불일치를 만든다.
 **트레이드오프**: 구 `criticism.json`·`thesis.json`은 스키마 검증에 실패한다. `RunStore.loadStepOutput`이 검증 실패 시 `null`을 반환하므로 완료된 구버전 run은 리포트 뷰에서 빈 상태가 되고 `report.md` 다운로드로 대체한다. 미완료 run은 resume 시 해당 step이 재실행되어 마이그레이션된다.
+
+### ADR-012: 자료조사를 다중 소스로 확장하고 grounding 인용을 코드로 추출
+**결정**: 유저 목소리 수집을 YouTube 단일 소스에서 **YouTube + Hacker News + 네이버 검색** 3소스로 확장한다.
+소스별 원시 타입은 `src/services/`에 유지하되 얇은 어댑터로 공통 `CommunityVoice`로 정규화하고, `src/research/`에서 `Promise.allSettled`로 **병렬 수집**한다.
+웹검색은 계속 Gemini grounding을 쓰되, `groundingMetadata.groundingChunks`에서 **코드가 인용을 추출해 `MarketContext.citations[]`에 담는다**.
+`urlContext` 툴을 `googleSearch`와 병용해 경쟁사 공식 페이지를 직접 읽는다.
+소스별 검색어는 `researchPlanner`가 생성한다 — 파이프라인 step이 아니라 `context-hunter` 내부 호출이다.
+
+**뒤집는 결정**: ADR-003의 "웹검색은 grounding, 유저 목소리는 YouTube Data API"라는 범위를 갱신한다. grounding을 웹검색 엔진으로 쓴다는 결정 자체는 유지하되, **그 결과를 LLM의 자기보고로만 받던 방식은 폐기한다.** YouTube가 유일한 유저 목소리 소스라는 전제도 폐기한다. ADR-003의 "자막(Transcript) 수집 제외"는 그대로 유효하다.
+
+**이유**:
+- `sources[]`는 LLM이 자기 기억으로 적어낸 URL이라 환각을 검증할 장치가 없었다. `groundingMetadata`는 SDK가 이미 응답에 실어 보내는데 코드(`gemini.ts`)가 `response.text`만 읽고 버리고 있었다.
+- **`groundingChunks[].web.uri`는 원 사이트 URL이 아니라 `vertexaisearch.cloud.google.com/grounding-api-redirect/...` 형태의 만료되는 리다이렉트 URL**이다. 그래서 `citations[]`가 `sources[]`를 대체하지 않고 **공존**한다 — 두 필드의 실패 모드가 상보적이기 때문이다(자기보고는 부정확하지만 만료되지 않고, 인용은 정확하지만 만료된다). 하나로 합치면 "grounding이 아무것도 돌려주지 않았다"는 사실이 자기보고에 가려져 보이지 않게 된다.
+- YouTube 댓글만으로는 한국 커뮤니티(카페·지식iN)의 생활 언어와 영어권 빌더 담론(HN)을 둘 다 놓친다.
+- 소스별 타입을 산출물 스키마까지 끌고 가면 스키마 3개 × 프롬프트 JSON 예시 3블록 × 렌더러 3개 × 웹 카드 3개로 비용이 곱해진다. 특히 **grounding 모드는 `responseSchema`를 쓸 수 없어 프롬프트의 JSON 예시가 유일한 형식 지시**이므로, 예시 블록이 3배가 되는 것은 형식 실패율 3배의 리스크다. 따라서 `{source, title, url, text, authorName?, score?, extra?}` 하나로 정규화한다.
+
+**기각한 대안**: 플러그인 레지스트리(동적 소스 등록). 소스는 정확히 3개이고 전부 컴파일 타임에 알려져 있으며 생성 지점이 `src/cli/index.ts` 한 곳이다 — `readonly ResearchSource[]` 배열 자체가 레지스트리다. 쿼리 생성을 별도 pipeline step으로 분리하는 안도 기각했다. resume 이득이 거의 없는데(non-grounding 구조화 호출, 2~4초) `PIPELINE_STEPS`·`STEP_OUTPUT_FILES`·웹 진행 뷰까지 파급되고, 사용자에게 노출되는 "변증법 단계" 언어를 구현 디테일로 오염시킨다.
+
+**트레이드오프**: `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` 발급이 필요하다(무료, 일 25,000회). Gemini 호출이 run당 1회 늘어난다(researchPlanner). `urlContext` 병용으로 grounding 호출 지연이 늘어 타임아웃을 180초로 올리고 재시도를 2회로 줄인다(최악 6분으로 기존과 동일). 그만큼 context-hunter가 길어지므로 ADR-007의 "중단됨" mtime 휴리스틱을 **10분에서 15분으로 올린다**(`STALLED_THRESHOLD_MS`) — 10분은 정상 실행을 중단됨으로 오탐한다. HN은 영어권이라 한국어 쿼리로는 조용히 0건이 되므로, planner의 영어 쿼리 생성이 필수 전제다.
+
+**하위호환**: `MarketContext.youtubeVoices`를 `communityVoices`로 대체하되, `z.preprocess`로 구 `context.json`의 `youtubeVoices[]`를 `communityVoices[]`(`source: "youtube"`)로 **승격**한다. ADR-011과 달리 구 run을 빈 리포트로 만들지 않는다 — MarketContext에 대해서는 더 나은 하위호환을 택했다. `.default([])`만으로는 zod의 `strip` 정책 때문에 구 데이터가 조용히 소멸하므로 부족하다.
