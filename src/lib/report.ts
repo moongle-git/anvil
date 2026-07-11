@@ -25,29 +25,87 @@ function tableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
+/**
+ * 벌거벗은 URL은 대부분의 마크다운 뷰어에서 자동 링크가 된다.
+ * 검증되지 않은 URL에 href가 붙는 것은 거짓 신호이므로 코드 스팬으로 자동 링크를 차단한다 (ADR-013).
+ */
+function inlineCode(value: string): string {
+  // 코드 스팬은 줄바꿈을 넘지 못한다
+  const oneLine = value.replace(/\n/g, " ");
+  // 값 안의 백틱보다 긴 울타리를 쓰고, 값이 백틱으로 시작·끝나면 공백을 덧대야 코드 스팬이 성립한다
+  const runs = oneLine.match(/`+/g) ?? [];
+  const fence = "`".repeat(
+    runs.reduce((longest, run) => Math.max(longest, run.length), 0) + 1,
+  );
+  const pad = oneLine.startsWith("`") || oneLine.endsWith("`") ? " " : "";
+  return `${fence}${pad}${oneLine}${pad}${fence}`;
+}
+
 function competitorRow(competitor: CompetitorService): string {
-  const link =
-    competitor.url === undefined ? "—" : `[링크](${competitor.url})`;
+  // LLM이 타이핑한 URL이라 실측 60%가 죽어 있다 — 링크를 걸지 않고 텍스트로만 남긴다 (ADR-013)
+  const url =
+    competitor.url === undefined
+      ? "—"
+      : inlineCode(tableCell(competitor.url));
   const pricing =
     competitor.pricingHint === undefined
       ? "—"
       : tableCell(competitor.pricingHint);
-  return `| ${tableCell(competitor.name)} | ${tableCell(competitor.description)} | ${pricing} | ${link} |`;
+  return `| ${tableCell(competitor.name)} | ${tableCell(competitor.description)} | ${pricing} | ${url} |`;
 }
 
-/** 출처 줄에 소스 라벨을 박는다 — 같은 인용도 어느 커뮤니티에서 왔는지에 따라 무게가 다르다 */
+/**
+ * 출처 줄에 소스 라벨을 박는다 — 같은 인용도 어느 커뮤니티에서 왔는지에 따라 무게가 다르다.
+ * url은 코드가 수집 API 응답에서 주입한 permalink라 링크로 남긴다 (ADR-013).
+ */
 function voiceBlock(voice: CommunityVoice): string {
   // 댓글 원문에 줄바꿈이 있어도 인용 블록이 끊기지 않게 한다
   const text = voice.text.replace(/\n/g, "\n> ");
-  const meta = [voice.url];
+  const meta = [`[출처](${voice.url})`];
   if (voice.score !== undefined) meta.push(`좋아요 ${voice.score}`);
   if (voice.extra !== undefined) meta.push(voice.extra);
   return `> "${text}"\n> — [${SOURCE_LABELS[voice.source]}] ${voice.title} (${meta.join(", ")})`;
 }
 
-/** citations의 uri는 만료되는 리다이렉트 URL이라 링크 텍스트에 사람이 읽을 이름을 남긴다 */
-function citationLink(citation: Citation): string {
-  return `[${citation.title ?? citation.domain ?? citation.uri}](${citation.uri})`;
+/**
+ * origin은 urlContext가 실제로 읽어낸 원본 URL이라 링크로 남기고,
+ * redirect는 만료되면 404가 되는 vertexaisearch URL이라 링크를 박탈한다 (ADR-013).
+ */
+function citationItem(citation: Citation): string {
+  if (citation.kind === "origin") {
+    return `[${citation.title ?? citation.domain ?? citation.uri}](${citation.uri})`;
+  }
+  const label = citation.title ?? citation.domain ?? inlineCode(citation.uri);
+  const domain =
+    citation.domain !== undefined && citation.domain !== label
+      ? ` (${citation.domain})`
+      : "";
+  return `${label}${domain} — 만료 가능한 검색 리다이렉트`;
+}
+
+/** 가장 강한 인용과 반드시 깨질 인용을 한 목록에 섞지 않는다 — 독자가 무엇을 믿을지 판단해야 한다 */
+function citationSection(citations: readonly Citation[]): string[] {
+  const origins = citations.filter((citation) => citation.kind === "origin");
+  const redirects = citations.filter((citation) => citation.kind === "redirect");
+  const lines = ["#### 검색 인용", ""];
+
+  if (origins.length > 0) {
+    lines.push(
+      "##### 원본 (직접 읽어낸 페이지)",
+      "",
+      ...bullets(origins.map(citationItem)),
+      "",
+    );
+  }
+  if (redirects.length > 0) {
+    lines.push(
+      "##### 검색 리다이렉트 (만료 가능 · 링크 없음)",
+      "",
+      ...bullets(redirects.map(citationItem)),
+      "",
+    );
+  }
+  return lines;
 }
 
 /** 소스별 수집 편중이 <summary> 한 줄에 드러나야 한다 — HN 0건은 근거 편향이다 */
@@ -76,7 +134,8 @@ function evidenceSummary(context: MarketContext): string {
     parts.push(`트렌드 ${context.trends.length}건`);
   }
   if (context.sources.length > 0) {
-    parts.push(`출처 ${context.sources.length}개`);
+    // 접기 전에도 신뢰도가 드러나야 한다 — "출처 N개"는 검증됐다는 오해를 부른다 (ADR-013)
+    parts.push(`미검증 출처 ${context.sources.length}개`);
   }
   if (context.citations.length > 0) {
     parts.push(`검색 인용 ${context.citations.length}개`);
@@ -107,7 +166,10 @@ function rawEvidenceDetails(context: MarketContext): string[] {
   if (context.competitors.length === 0) {
     lines.push("수집된 경쟁 서비스 없음", "");
   } else {
-    lines.push("| 이름 | 설명 | 가격 힌트 | 링크 |", "| --- | --- | --- | --- |");
+    lines.push(
+      "| 이름 | 설명 | 가격 힌트 | URL (미검증) |",
+      "| --- | --- | --- | --- |",
+    );
     lines.push(...context.competitors.map(competitorRow), "");
   }
 
@@ -132,16 +194,18 @@ function rawEvidenceDetails(context: MarketContext): string[] {
     ...bullets(context.painPointEvidence),
     "",
   );
-  lines.push("#### 출처", "", ...bullets(context.sources), "");
+  lines.push(
+    "#### 출처 (LLM 자기보고 · 미검증)",
+    "",
+    "> 아래 항목은 모델이 자기 기억으로 적어낸 것이라 검증되지 않았다. 링크를 걸지 않는다.",
+    "",
+    ...bullets(context.sources.map(inlineCode)),
+    "",
+  );
   // sources(LLM 자기보고)와 citations(코드가 grounding에서 추출)는 실패 모드가 상보적이라
   // 한 목록으로 합치지 않는다 — 무엇을 믿을지는 독자가 판단한다 (ADR-012)
   if (context.citations.length > 0) {
-    lines.push(
-      "#### 검색 인용",
-      "",
-      ...bullets(context.citations.map(citationLink)),
-      "",
-    );
+    lines.push(...citationSection(context.citations));
   }
   lines.push("</details>", "");
 

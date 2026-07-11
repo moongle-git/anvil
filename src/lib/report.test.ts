@@ -13,6 +13,28 @@ import { renderReport } from "./report.js";
 
 const IDEA = "AI가 반려식물 상태를 진단하고 관리 일정을 챙겨주는 서비스";
 
+/** urlContext가 실제로 읽어낸 원본 URL — 만료되지 않는 유일한 검색 인용이다 (ADR-013) */
+const ORIGIN_CITATION = {
+  uri: "https://getplanta.com/pricing",
+  title: "Planta 요금제",
+  domain: "getplanta.com",
+  kind: "origin" as const,
+};
+
+/** groundingChunks의 vertexaisearch 리다이렉트 — 만료되면 404다 */
+const REDIRECT_CITATION = {
+  uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
+  title: "홈가드닝 시장 리포트 2026",
+  domain: "statista.com",
+  kind: "redirect" as const,
+};
+
+const REDIRECT_CITATION_NO_TITLE = {
+  uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
+  domain: "getplanta.com",
+  kind: "redirect" as const,
+};
+
 const context: MarketContext = {
   ideaTitle: "AI 반려식물 관리 서비스",
   briefing:
@@ -67,19 +89,7 @@ const context: MarketContext = {
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험이 반복된다"],
   sources: ["https://example.com/trend"],
   researchCoverage: [],
-  citations: [
-    {
-      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
-      title: "홈가드닝 시장 리포트 2026",
-      domain: "statista.com",
-      kind: "redirect",
-    },
-    {
-      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
-      domain: "getplanta.com",
-      kind: "redirect",
-    },
-  ],
+  citations: [REDIRECT_CITATION, REDIRECT_CITATION_NO_TITLE, ORIGIN_CITATION],
 };
 
 const thesis: Thesis = {
@@ -239,7 +249,7 @@ describe("renderReport", () => {
         context.trends[0],
         context.painPointEvidence[0],
         context.sources[0],
-        context.citations[0].uri,
+        ORIGIN_CITATION.uri,
       ];
       for (const value of raw) {
         const index = report.indexOf(value);
@@ -254,7 +264,7 @@ describe("renderReport", () => {
           ` · 유저 목소리 ${context.communityVoices.length}건` +
           `(${SOURCE_LABELS.youtube} 2 · ${SOURCE_LABELS.hackernews} 1 · ${SOURCE_LABELS.naver} 1)` +
           ` · 트렌드 ${context.trends.length}건` +
-          ` · 출처 ${context.sources.length}개` +
+          ` · 미검증 출처 ${context.sources.length}개` +
           ` · 검색 인용 ${context.citations.length}개`,
       );
     });
@@ -364,12 +374,62 @@ describe("renderReport", () => {
       const naver = context.communityVoices[3];
 
       expect(report).toContain(
-        `> "${hn.text}"\n> — [${SOURCE_LABELS.hackernews}] ${hn.title} (${hn.url}, 좋아요 ${hn.score})`,
+        `> "${hn.text}"\n> — [${SOURCE_LABELS.hackernews}] ${hn.title} ([출처](${hn.url}), 좋아요 ${hn.score})`,
       );
       // score가 없으면 생략하고, extra가 있으면 출처 줄에 덧붙인다
       expect(report).toContain(
-        `> "${naver.text}"\n> — [${SOURCE_LABELS.naver}] ${naver.title} (${naver.url}, ${naver.extra})`,
+        `> "${naver.text}"\n> — [${SOURCE_LABELS.naver}] ${naver.title} ([출처](${naver.url}), ${naver.extra})`,
       );
+    });
+
+    // ── 링크 박탈 (ADR-013): 클릭 가능한 링크는 코드가 API 응답에서 주입한 것뿐이다 ──
+
+    it("communityVoices의 출처는 링크로 남는다 — 코드가 수집 API에서 주입한 사실이다", () => {
+      for (const voice of context.communityVoices) {
+        expect(report).toContain(`[출처](${voice.url})`);
+      }
+    });
+
+    it("sources를 인라인 코드로 감싸 마크다운 자동 링크를 막는다", () => {
+      const [source] = context.sources;
+      expect(report).toContain(`*   \`${source}\``);
+      // 벌거벗은 URL은 대부분의 뷰어에서 자동 링크가 된다 — 그 자리에 남기지 않는다
+      expect(report).not.toContain(`*   ${source}`);
+      expect(report).not.toContain(`](${source})`);
+    });
+
+    it("출처 소제목과 도입부에 미검증임을 밝힌다", () => {
+      expect(report).toContain("#### 출처 (LLM 자기보고 · 미검증)");
+      expect(report).toContain(
+        "> 아래 항목은 모델이 자기 기억으로 적어낸 것이라 검증되지 않았다. 링크를 걸지 않는다.",
+      );
+    });
+
+    it("백틱이 든 source도 코드 스팬을 깨뜨리지 않는다", () => {
+      const rendered = renderReport(
+        IDEA,
+        { ...context, sources: ["https://example.com/`weird`"] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      expect(rendered).toContain("*   `` https://example.com/`weird` ``");
+    });
+
+    it("경쟁사 URL을 링크가 아니라 인라인 코드 텍스트로 렌더링한다", () => {
+      const [competitor] = context.competitors;
+      expect(report).toContain(`\`${competitor.url}\``);
+      expect(report).not.toContain(`[링크](${competitor.url})`);
+      expect(report).not.toContain("| [링크]");
+      // 표 헤더도 클릭 가능성을 약속하지 않는다
+      expect(report).toContain("| 이름 | 설명 | 가격 힌트 | URL (미검증) |");
+    });
+
+    it("URL이 없는 경쟁사는 —로 표기한다", () => {
+      const withoutUrl = context.competitors[1];
+      expect(withoutUrl.url).toBeUndefined();
+      expect(report).toContain(`| ${withoutUrl.name} | ${withoutUrl.description} | — | — |`);
     });
 
     it("citations를 '출처'와 분리된 '검색 인용' 소절로 렌더링한다 (ADR-012)", () => {
@@ -380,13 +440,33 @@ describe("renderReport", () => {
       expect(sourcesAt).toBeGreaterThan(open);
       expect(citationsAt).toBeGreaterThan(sourcesAt);
       expect(citationsAt).toBeLessThan(close);
-
-      const [withTitle, withoutTitle] = context.citations;
-      expect(report).toContain(`[${withTitle.title}](${withTitle.uri})`);
-      expect(report).toContain(`[${withoutTitle.domain}](${withoutTitle.uri})`);
     });
 
-    it("title도 domain도 없는 citation은 링크 텍스트가 uri로 폴백된다", () => {
+    it("origin 인용은 링크로 남는다 — urlContext가 실제로 읽어낸 원본이다", () => {
+      expect(report).toContain(
+        `[${ORIGIN_CITATION.title}](${ORIGIN_CITATION.uri})`,
+      );
+    });
+
+    it("redirect 인용은 링크가 아니라 만료 고지가 붙은 텍스트다", () => {
+      expect(report).toContain(
+        `${REDIRECT_CITATION.title} (${REDIRECT_CITATION.domain}) — 만료 가능한 검색 리다이렉트`,
+      );
+      // 만료되면 404가 되는 URL은 href로도, 자동 링크되는 벌거벗은 텍스트로도 남기지 않는다
+      for (const redirect of [REDIRECT_CITATION, REDIRECT_CITATION_NO_TITLE]) {
+        expect(report).not.toContain(`](${redirect.uri})`);
+        expect(report).not.toContain(`*   ${redirect.uri}`);
+      }
+    });
+
+    it("origin과 redirect를 소분류 제목으로 구분해 독자가 신뢰도를 판단하게 한다", () => {
+      const originAt = report.indexOf("##### 원본");
+      const redirectAt = report.indexOf("##### 검색 리다이렉트");
+      expect(originAt).toBeGreaterThan(report.indexOf("#### 검색 인용"));
+      expect(redirectAt).toBeGreaterThan(originAt);
+    });
+
+    it("title도 domain도 없는 redirect 인용은 uri를 인라인 코드로만 남긴다", () => {
       const uri = "https://example.com/grounding-api-redirect/ccc";
       const rendered = renderReport(
         IDEA,
@@ -396,7 +476,34 @@ describe("renderReport", () => {
         solution,
         verdict,
       );
+      expect(rendered).toContain(`*   \`${uri}\` — 만료 가능한 검색 리다이렉트`);
+      expect(rendered).not.toContain(`[${uri}](${uri})`);
+    });
+
+    it("title도 domain도 없는 origin 인용은 링크 텍스트가 uri로 폴백된다", () => {
+      const uri = "https://example.com/pricing";
+      const rendered = renderReport(
+        IDEA,
+        { ...context, citations: [{ uri, kind: "origin" as const }] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
       expect(rendered).toContain(`[${uri}](${uri})`);
+    });
+
+    it("한 종류만 있으면 그 소분류 제목만 출력한다", () => {
+      const rendered = renderReport(
+        IDEA,
+        { ...context, citations: [REDIRECT_CITATION] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      expect(rendered).toContain("##### 검색 리다이렉트");
+      expect(rendered).not.toContain("##### 원본");
     });
 
     it("citations가 비면 '검색 인용' 소제목 자체를 출력하지 않는다", () => {

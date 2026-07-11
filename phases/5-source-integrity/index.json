@@ -37,7 +37,10 @@
     {
       "step": 4,
       "name": "link-revocation",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-12T01:14:02+0900",
+      "completed_at": "2026-07-12T01:24:40+0900",
+      "summary": "미검증 URL의 링크를 박탈했다 (ADR-013) — 클릭 가능한 링크로 렌더되는 URL은 코드가 API 응답에서 주입한 것뿐이라는 불변식이 렌더러에 섰다. 링크가 남는 것: communityVoices[].url(step 3 이후 코드 주입), citations[].uri 중 kind='origin'(urlContext가 실제로 읽어낸 원본). 링크가 박탈된 것: sources[](LLM 자기보고 — 실측 URL 형식조차 아닌 값이 들어온다), competitors[].url(실측 60% 도달 불가), citations[].uri 중 kind='redirect'(만료되면 404). src/lib/report.ts — inlineCode()로 sources·경쟁사 URL·title/domain 없는 redirect uri를 코드 스팬으로 감싸 마크다운 자동 링크를 차단한다(백틱 포함 값은 더 긴 울타리 + 패딩으로 이스케이프, 표 셀은 tableCell의 파이프 이스케이프를 먼저 통과). '#### 출처'는 '#### 출처 (LLM 자기보고 · 미검증)' + 도입부 경고 인용으로, 경쟁사 표의 '링크' 컬럼은 'URL (미검증)' 텍스트 컬럼으로 바뀌었다. citationLink → citationItem/citationSection으로 갈라져 '#### 검색 인용' 아래 '##### 원본(직접 읽어낸 페이지)'(링크 유지)과 '##### 검색 리다이렉트(만료 가능 · 링크 없음)'(제목 (도메인) — 만료 가능한 검색 리다이렉트) 소분류로 나뉜다. voiceBlock의 벌거벗은 URL은 명시적 [출처](url) 링크가 됐다. web — MarketContextSection의 href={source}가 제거되고(ul[data-source-list] + aria-label '미검증 출처 목록 — 링크 없음' + li title로 스크린리더에도 미검증임을 전달), citations는 CitationList가 kind로 분기해 origin만 <a href>·redirect는 텍스트 + '만료 가능' 무채색 뱃지로 렌더한다(ul[data-citation-list='origin'|'redirect']). CompetitorTable의 '바로가기' <a>는 span[data-unverified-url]+title 텍스트가 됐다. 강등된 요소에 링크색(blue-700)을 쓰지 않는다 — 색이 곧 클릭 가능이라는 신호다(UI_GUIDE 원칙 3). 접기 요약줄도 '출처 N개' → '미검증 출처 N개'(report.ts·web 양쪽). 스키마는 무변경 — sources[]에 z.url()을 걸지도, 필드를 삭제하지도 않았다(형식 검증은 실존을 보장하지 않고, ADR-012의 상보성 논거는 유효하다). 테스트는 클래스가 아니라 role/동작으로 검증한다 — queryAllByRole('link') 부재, origin href 일치, 목소리 링크 회귀 방지. 실 run 육안 검증: 앵커 17개 = 유저 목소리 16(YouTube·HN permalink) + origin 인용 1, sources·경쟁사 URL·redirect 인용 앵커 0개."
     },
     {
       "step": 5,

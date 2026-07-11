@@ -1,6 +1,7 @@
 import {
   RESEARCH_SOURCE_IDS,
   SOURCE_LABELS,
+  type Citation,
   type CommunityVoice,
   type MarketContext,
 } from "@anvil/types";
@@ -54,6 +55,77 @@ function Subheading({ children }: { children: React.ReactNode }) {
   );
 }
 
+function MinorHeading({ children }: { children: React.ReactNode }) {
+  return <h4 className="text-sm font-medium text-neutral-500">{children}</h4>;
+}
+
+function citationLabel(citation: Citation): string {
+  return citation.title ?? citation.domain ?? citation.uri;
+}
+
+// 검색 인용은 kind에 따라 신뢰도가 갈린다 (ADR-013). origin은 urlContext가 실제로 읽어낸 원본이라
+// 만료되지 않고, redirect는 vertexaisearch 리다이렉트라 만료되면 404다 — 한 목록에 섞으면
+// 렌더러가 그 차이를 표현할 수 없다. 가장 강한 인용에만 href를 남긴다.
+function CitationList({ citations }: { citations: Citation[] }) {
+  const origins = citations.filter((citation) => citation.kind === "origin");
+  const redirects = citations.filter((citation) => citation.kind === "redirect");
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Subheading>검색 인용</Subheading>
+
+      {origins.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <MinorHeading>원본 · 직접 읽어낸 페이지 {origins.length}개</MinorHeading>
+          <ul data-citation-list="origin" className="flex flex-col gap-1">
+            {origins.map((citation, index) => (
+              <li key={`${citation.uri}-${index}`}>
+                <a
+                  href={citation.uri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`break-all ${LINK}`}
+                >
+                  {citationLabel(citation)}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {redirects.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <MinorHeading>
+            검색 리다이렉트 · 만료 가능 {redirects.length}개
+          </MinorHeading>
+          <ul
+            data-citation-list="redirect"
+            aria-label="만료 가능한 검색 리다이렉트 — 링크 없음"
+            className="flex flex-col gap-2"
+          >
+            {redirects.map((citation, index) => (
+              <li
+                key={`${citation.uri}-${index}`}
+                title="만료되면 404가 되는 검색 리다이렉트라 링크를 걸지 않았습니다"
+                className="flex flex-wrap items-center gap-2 text-[15px] text-neutral-700"
+              >
+                <span className="break-all">{citationLabel(citation)}</span>
+                {citation.title !== undefined && citation.domain !== undefined ? (
+                  <span className="text-xs text-neutral-500">
+                    {citation.domain}
+                  </span>
+                ) : null}
+                <Badge tone="neutral">만료 가능</Badge>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function voicesOf(
   context: MarketContext,
   source: CommunityVoice["source"],
@@ -82,8 +154,9 @@ function evidenceSummary(context: MarketContext): string {
       `유저 목소리 ${context.communityVoices.length}건${voiceBreakdown(context)}`,
     );
   if (context.trends.length > 0) parts.push(`트렌드 ${context.trends.length}건`);
+  // 접기 전에도 신뢰도가 드러나야 한다 — "출처 N개"는 검증됐다는 오해를 부른다 (ADR-013)
   if (context.sources.length > 0)
-    parts.push(`출처 ${context.sources.length}개`);
+    parts.push(`미검증 출처 ${context.sources.length}개`);
   if (context.citations.length > 0)
     parts.push(`검색 인용 ${context.citations.length}개`);
   return parts.length > 0 ? `근거 자료 — ${parts.join(" · ")}` : "근거 자료";
@@ -211,20 +284,28 @@ export function MarketContextSection({
               </div>
             ) : null}
 
+            {/* LLM이 자기 기억으로 적어낸 URL이라 실측 60%가 도달 불가다. 클릭은 "이 URL이
+                검증됐다"는 신호이므로 href를 걸지 않고 텍스트로만 남긴다 — 색도 링크색(blue)을
+                쓰지 않는다. 색이 곧 클릭 가능이라는 신호다 (ADR-013 / UI_GUIDE 원칙 3) */}
             {context.sources.length > 0 ? (
               <div className="flex flex-col gap-2">
-                <Subheading>출처</Subheading>
-                <ul className="flex flex-col gap-1">
+                <Subheading>출처 (LLM 자기보고 · 미검증)</Subheading>
+                <p className="text-sm text-neutral-500">
+                  모델이 자기 기억으로 적어낸 출처다. 검증되지 않아 링크를 걸지
+                  않는다.
+                </p>
+                <ul
+                  data-source-list
+                  aria-label="미검증 출처 목록 — 링크 없음"
+                  className="flex flex-col gap-1"
+                >
                   {context.sources.map((source, index) => (
-                    <li key={`${source}-${index}`}>
-                      <a
-                        href={source}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`break-all ${LINK}`}
-                      >
-                        {source}
-                      </a>
+                    <li
+                      key={`${source}-${index}`}
+                      title="미검증 출처 — 모델 자기보고라 링크를 걸지 않았습니다"
+                      className="break-all text-xs text-neutral-500"
+                    >
+                      {source}
                     </li>
                   ))}
                 </ul>
@@ -232,26 +313,10 @@ export function MarketContextSection({
             ) : null}
 
             {/* 출처(에이전트 자기보고)와 형제로 두되 합치지 않는다: 검색 인용은 코드가 grounding
-                응답에서 추출한 것이라 정확하지만 리다이렉트 URL이라 만료된다 — 실패 모드가
-                상보적이므로 무엇을 믿을지는 독자가 판단한다 (ADR-012) */}
+                응답에서 추출한 것이라 정확하다 — 실패 모드가 상보적이므로 무엇을 믿을지는
+                독자가 판단한다 (ADR-012) */}
             {context.citations.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                <Subheading>검색 인용</Subheading>
-                <ul data-citation-list className="flex flex-col gap-1">
-                  {context.citations.map((citation, index) => (
-                    <li key={`${citation.uri}-${index}`}>
-                      <a
-                        href={citation.uri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`break-all ${LINK}`}
-                      >
-                        {citation.title ?? citation.domain ?? citation.uri}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <CitationList citations={context.citations} />
             ) : null}
           </div>
         </Collapsible>

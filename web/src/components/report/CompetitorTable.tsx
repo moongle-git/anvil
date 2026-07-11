@@ -26,7 +26,7 @@ export function CompetitorTable({
               <th className="py-2 pr-4 font-medium">이름</th>
               <th className="py-2 pr-4 font-medium">설명</th>
               <th className="py-2 pr-4 font-medium">가격</th>
-              <th className="py-2 font-medium">링크</th>
+              <th className="py-2 font-medium">URL (미검증)</th>
             </tr>
           </thead>
           <tbody>
@@ -48,14 +48,15 @@ export function CompetitorTable({
                 </td>
                 <td className="py-3">
                   {competitor.url ? (
-                    <a
-                      href={competitor.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-700 underline-offset-4 hover:underline"
+                    // LLM이 타이핑한 URL이라 실측 60%가 죽어 있다. href를 걸면 "검증됐다"는 거짓
+                    // 신호가 되므로 텍스트로만 남긴다 — 색도 링크색(blue)을 쓰지 않는다 (ADR-013)
+                    <span
+                      data-unverified-url
+                      title="LLM 자기보고 URL — 검증되지 않아 링크를 걸지 않았습니다"
+                      className="break-all text-xs text-neutral-500"
                     >
-                      바로가기
-                    </a>
+                      {competitor.url}
+                    </span>
                   ) : (
                     <span className="text-neutral-400">—</span>
                   )}

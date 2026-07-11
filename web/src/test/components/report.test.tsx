@@ -1,4 +1,11 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MarketContextSchema,
@@ -64,6 +71,28 @@ const criticism: Criticism = {
     },
   ],
   verdict: "현재 구조로는 시장에서 살아남기 어렵다.",
+};
+
+/** urlContext가 실제로 읽어낸 원본 URL — 만료되지 않는 유일한 검색 인용이다 (ADR-013) */
+const ORIGIN_CITATION = {
+  uri: "https://clovanote.naver.com/pricing",
+  title: "클로바노트 요금제",
+  domain: "clovanote.naver.com",
+  kind: "origin" as const,
+};
+
+/** groundingChunks의 vertexaisearch 리다이렉트 — 만료되면 404다 */
+const REDIRECT_CITATION = {
+  uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
+  title: "협업 도구 시장 리포트 2026",
+  domain: "statista.com",
+  kind: "redirect" as const,
+};
+
+const REDIRECT_CITATION_NO_TITLE = {
+  uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
+  domain: "clovanote.naver.com",
+  kind: "redirect" as const,
 };
 
 function makeCompetitors(n: number): CompetitorService[] {
@@ -150,19 +179,7 @@ const marketContext: MarketContext = {
   painPointEvidence: ["회의록 작성에 주당 3시간"],
   sources: ["https://vertexaisearch.google.com/redirect/very-long-url-aaaaaa"],
   researchCoverage: [],
-  citations: [
-    {
-      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
-      title: "협업 도구 시장 리포트 2026",
-      domain: "statista.com",
-      kind: "redirect",
-    },
-    {
-      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
-      domain: "clovanote.naver.com",
-      kind: "redirect",
-    },
-  ],
+  citations: [REDIRECT_CITATION, REDIRECT_CITATION_NO_TITLE, ORIGIN_CITATION],
 };
 
 const verdict: Verdict = {
@@ -219,6 +236,26 @@ describe("CompetitorTable", () => {
     render(<CompetitorTable competitors={makeCompetitors(8)} />);
     expect(screen.queryByRole("button", { name: /더보기/ })).toBeNull();
   });
+
+  // 링크 박탈 (ADR-013): competitors[].url은 LLM이 타이핑한 URL이라 실측 60%가 죽어 있다
+  it("경쟁사 URL에는 링크가 없고 URL 문자열만 텍스트로 남는다", () => {
+    const [competitor] = makeCompetitors(1);
+    render(<CompetitorTable competitors={[competitor]} />);
+
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(screen.getByText(competitor.url!)).toBeDefined();
+    expect(screen.queryByText("바로가기")).toBeNull();
+  });
+
+  it("URL이 없는 경쟁사는 —로 표기한다", () => {
+    render(
+      <CompetitorTable
+        competitors={[{ name: "경쟁사", description: "설명" }]}
+      />,
+    );
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+  });
 });
 
 describe("MarketContextSection", () => {
@@ -274,7 +311,7 @@ describe("MarketContextSection", () => {
     expect(summary).toContain(
       `${SOURCE_LABELS.youtube} 1 · ${SOURCE_LABELS.hackernews} 1 · ${SOURCE_LABELS.naver} 1`,
     );
-    expect(summary).toContain("인용 2개");
+    expect(summary).toContain("인용 3개");
   });
 
   it("세 소스의 목소리를 각각 소스 뱃지와 함께 접힌 영역에 렌더링한다", () => {
@@ -337,31 +374,18 @@ describe("MarketContextSection", () => {
     );
     const details = container.querySelector("details");
 
-    const sourcesHeading = screen.getByText("출처");
+    // 출처(LLM 자기보고)와 검색 인용(코드 추출)은 별개 목록이다 (ADR-012)
+    const sourcesHeading = screen.getByText(/^출처/);
     const citationsHeading = screen.getByText("검색 인용");
     expect(details?.contains(sourcesHeading)).toBe(true);
     expect(details?.contains(citationsHeading)).toBe(true);
 
-    // 출처(LLM 자기보고)와 검색 인용(코드 추출)은 별개 목록이다 (ADR-012)
-    const citationLinks = container.querySelectorAll(
-      "[data-citation-list] a",
-    );
-    expect(citationLinks.length).toBe(2);
-    expect(citationLinks[0].textContent).toBe("협업 도구 시장 리포트 2026");
-    // title이 없으면 domain으로 폴백한다
-    expect(citationLinks[1].textContent).toBe("clovanote.naver.com");
-  });
-
-  it("citation 링크가 새 탭(target·rel)으로 열린다", () => {
-    const { container } = render(
-      <MarketContextSection context={marketContext} />,
-    );
-    const link = container.querySelector(
-      "[data-citation-list] a",
-    ) as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe(marketContext.citations[0].uri);
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(
+      container.querySelector('[data-citation-list="origin"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-citation-list="redirect"]'),
+    ).not.toBeNull();
   });
 
   it("citations만 있고 나머지 원시 배열이 비어도 <details>를 렌더링한다", () => {
@@ -378,7 +402,76 @@ describe("MarketContextSection", () => {
       />,
     );
     expect(container.querySelector("details")).not.toBeNull();
-    expect(container.querySelectorAll("[data-citation-list] a").length).toBe(2);
+    expect(
+      container.querySelectorAll('[data-citation-list="origin"] a').length,
+    ).toBe(1);
+  });
+
+  // ── 링크 박탈 (ADR-013): 클릭 가능한 링크는 코드가 API 응답에서 주입한 것뿐이다 ──
+
+  it("sources 항목에는 링크가 하나도 없다 — LLM이 타이핑한 URL이다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const list = container.querySelector("[data-source-list]");
+    expect(list).not.toBeNull();
+
+    // URL 문자열 자체는 남기되(독자가 직접 검색할 수 있게) 클릭 가능성은 약속하지 않는다
+    expect(list!.textContent).toContain(marketContext.sources[0]);
+    expect(within(list as HTMLElement).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("강등된 출처가 미검증임을 스크린리더에도 알린다", () => {
+    render(<MarketContextSection context={marketContext} />);
+    // 목록의 접근 가능한 이름과 소제목 양쪽에서 미검증임이 드러난다
+    expect(screen.getByRole("list", { name: /미검증/ })).toBeDefined();
+    expect(screen.getByText(/LLM 자기보고 · 미검증/)).toBeDefined();
+  });
+
+  it("접기 요약줄의 출처 건수도 검증됐다고 오해시키지 않는다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const summary = container.querySelector("summary")?.textContent ?? "";
+    expect(summary).toContain("미검증 출처 1개");
+  });
+
+  it("kind가 origin인 citation만 링크이고 href가 uri와 일치한다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const origins = within(
+      container.querySelector('[data-citation-list="origin"]') as HTMLElement,
+    ).getAllByRole("link");
+
+    expect(origins).toHaveLength(1);
+    expect(origins[0].getAttribute("href")).toBe(ORIGIN_CITATION.uri);
+    expect(origins[0].textContent).toBe(ORIGIN_CITATION.title);
+    expect(origins[0].getAttribute("target")).toBe("_blank");
+    expect(origins[0].getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("kind가 redirect인 citation은 링크가 아니고 만료 가능함을 고지한다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const redirects = container.querySelector(
+      '[data-citation-list="redirect"]',
+    ) as HTMLElement;
+
+    expect(within(redirects).queryAllByRole("link")).toHaveLength(0);
+    expect(redirects.textContent).toContain(REDIRECT_CITATION.title);
+    // title이 없으면 domain으로 폴백한다
+    expect(redirects.textContent).toContain(REDIRECT_CITATION_NO_TITLE.domain);
+    expect(redirects.textContent).toContain("만료 가능");
+  });
+
+  it("communityVoices의 출처는 링크로 남는다 — 코드가 수집 API에서 주입한 사실이다", () => {
+    render(<MarketContextSection context={marketContext} />);
+    for (const voice of marketContext.communityVoices) {
+      const link = screen.getByRole("link", { name: voice.title });
+      expect(link.getAttribute("href")).toBe(voice.url);
+    }
   });
 
   it("구 형식(youtubeVoices) run도 승격 후 목소리를 렌더링한다 (ADR-012 하위호환)", () => {
