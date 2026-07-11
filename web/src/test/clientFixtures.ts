@@ -94,10 +94,36 @@ export function completedDetail(
           authorName: "PM",
           score: 12,
         },
+        {
+          source: "hackernews",
+          title: "Ask HN: What do you use for meeting notes?",
+          url: "https://news.ycombinator.com/item?id=40000001",
+          text: "Transcription is solved. Deciding who owns what is not.",
+          authorName: "hn_reader",
+          score: 96,
+        },
+        {
+          source: "naver",
+          title: "회의록 정리 어떻게 하시나요",
+          url: "https://cafe.naver.com/pmclub/12345",
+          text: "요약본은 나오는데 결정사항 추적은 결국 사람이 다시 정리해요...",
+          authorName: "기획자모임",
+          extra: "검색 스니펫",
+        },
       ],
       painPointEvidence: ["요약 후 후속 추적은 여전히 수작업이다"],
       sources: ["https://example.com/report"],
-      citations: [],
+      citations: [
+        {
+          uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
+          title: "협업 도구 시장 리포트 2026",
+          domain: "statista.com",
+        },
+        {
+          uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
+          domain: "clovanote.naver.com",
+        },
+      ],
     },
     thesis: {
       points: [

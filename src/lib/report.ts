@@ -2,8 +2,11 @@ import {
   DIALECTIC_AXES,
   DIALECTIC_AXIS_LABELS,
   RECOMMENDATION_LABELS,
+  RESEARCH_SOURCE_IDS,
+  SOURCE_LABELS,
 } from "../types/index.js";
 import type {
+  Citation,
   CommunityVoice,
   CompetitorService,
   Criticism,
@@ -32,11 +35,53 @@ function competitorRow(competitor: CompetitorService): string {
   return `| ${tableCell(competitor.name)} | ${tableCell(competitor.description)} | ${pricing} | ${link} |`;
 }
 
+/** 출처 줄에 소스 라벨을 박는다 — 같은 인용도 어느 커뮤니티에서 왔는지에 따라 무게가 다르다 */
 function voiceBlock(voice: CommunityVoice): string {
   // 댓글 원문에 줄바꿈이 있어도 인용 블록이 끊기지 않게 한다
   const text = voice.text.replace(/\n/g, "\n> ");
-  const score = voice.score === undefined ? "" : `, 좋아요 ${voice.score}`;
-  return `> "${text}"\n> — ${voice.title} (${voice.url}${score})`;
+  const meta = [voice.url];
+  if (voice.score !== undefined) meta.push(`좋아요 ${voice.score}`);
+  if (voice.extra !== undefined) meta.push(voice.extra);
+  return `> "${text}"\n> — [${SOURCE_LABELS[voice.source]}] ${voice.title} (${meta.join(", ")})`;
+}
+
+/** citations의 uri는 만료되는 리다이렉트 URL이라 링크 텍스트에 사람이 읽을 이름을 남긴다 */
+function citationLink(citation: Citation): string {
+  return `[${citation.title ?? citation.domain ?? citation.uri}](${citation.uri})`;
+}
+
+/** 소스별 수집 편중이 <summary> 한 줄에 드러나야 한다 — HN 0건은 근거 편향이다 */
+function voiceBreakdown(voices: readonly CommunityVoice[]): string {
+  const parts = RESEARCH_SOURCE_IDS.map((source) => ({
+    label: SOURCE_LABELS[source],
+    count: voices.filter((voice) => voice.source === source).length,
+  }))
+    .filter(({ count }) => count > 0)
+    .map(({ label, count }) => `${label} ${count}`);
+  return parts.length === 0 ? "" : `(${parts.join(" · ")})`;
+}
+
+/** 접힌 근거의 건수 표기. 0인 항목은 뺀다 (UI_GUIDE 정보 밀도) */
+function evidenceSummary(context: MarketContext): string {
+  const parts: string[] = [];
+  if (context.competitors.length > 0) {
+    parts.push(`경쟁 서비스 ${context.competitors.length}개`);
+  }
+  if (context.communityVoices.length > 0) {
+    parts.push(
+      `유저 목소리 ${context.communityVoices.length}건${voiceBreakdown(context.communityVoices)}`,
+    );
+  }
+  if (context.trends.length > 0) {
+    parts.push(`트렌드 ${context.trends.length}건`);
+  }
+  if (context.sources.length > 0) {
+    parts.push(`출처 ${context.sources.length}개`);
+  }
+  if (context.citations.length > 0) {
+    parts.push(`검색 인용 ${context.citations.length}개`);
+  }
+  return parts.length > 0 ? `원시 근거 — ${parts.join(" · ")}` : "원시 근거";
 }
 
 function bullets(items: readonly string[]): string[] {
@@ -52,13 +97,11 @@ function byAxis<T extends { axis: DialecticAxis }>(
 
 /** 1절 원시 근거 — 정제된 인사이트만 본문에 두고 원문은 접는다 (PRD 컴포넌트 매핑) */
 function rawEvidenceDetails(context: MarketContext): string[] {
-  const summary =
-    `원시 근거 — 경쟁 서비스 ${context.competitors.length}개` +
-    ` · 유저 목소리 ${context.communityVoices.length}건` +
-    ` · 트렌드 ${context.trends.length}건` +
-    ` · 출처 ${context.sources.length}개`;
-
-  const lines: string[] = ["<details>", `<summary>${summary}</summary>`, ""];
+  const lines: string[] = [
+    "<details>",
+    `<summary>${evidenceSummary(context)}</summary>`,
+    "",
+  ];
 
   lines.push("#### 경쟁 서비스", "");
   if (context.competitors.length === 0) {
@@ -72,8 +115,13 @@ function rawEvidenceDetails(context: MarketContext): string[] {
   if (context.communityVoices.length === 0) {
     lines.push("수집된 유저 목소리 없음", "");
   } else {
-    for (const voice of context.communityVoices) {
-      lines.push(voiceBlock(voice), "");
+    for (const source of RESEARCH_SOURCE_IDS) {
+      const voices = context.communityVoices.filter(
+        (voice) => voice.source === source,
+      );
+      if (voices.length === 0) continue;
+      lines.push(`##### ${SOURCE_LABELS[source]}`, "");
+      lines.push(...voices.flatMap((voice) => [voiceBlock(voice), ""]));
     }
   }
 
@@ -85,6 +133,16 @@ function rawEvidenceDetails(context: MarketContext): string[] {
     "",
   );
   lines.push("#### 출처", "", ...bullets(context.sources), "");
+  // sources(LLM 자기보고)와 citations(코드가 grounding에서 추출)는 실패 모드가 상보적이라
+  // 한 목록으로 합치지 않는다 — 무엇을 믿을지는 독자가 판단한다 (ADR-012)
+  if (context.citations.length > 0) {
+    lines.push(
+      "#### 검색 인용",
+      "",
+      ...bullets(context.citations.map(citationLink)),
+      "",
+    );
+  }
   lines.push("</details>", "");
 
   return lines;

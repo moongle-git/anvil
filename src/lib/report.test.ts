@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DIALECTIC_AXIS_LABELS,
   RECOMMENDATION_LABELS,
+  SOURCE_LABELS,
   type Criticism,
   type MarketContext,
   type Solution,
@@ -46,10 +47,36 @@ const context: MarketContext = {
       url: "https://youtube.com/watch?v=def",
       text: "앱 알림은 결국 다 꺼버리게 되더라고요",
     },
+    {
+      source: "hackernews",
+      title: "Show HN: Plant care reminders that actually work",
+      url: "https://news.ycombinator.com/item?id=1234",
+      text: "Reminders are useless. I need to know the plant is dying before it looks dead.",
+      authorName: "hn_user",
+      score: 120,
+    },
+    {
+      source: "naver",
+      title: "몬스테라 잎이 노랗게 변했어요",
+      url: "https://cafe.naver.com/plant/1",
+      text: "물을 준 지 3일밖에 안 됐는데 잎이 노래져요...",
+      authorName: "식집사카페",
+      extra: "검색 스니펫",
+    },
   ],
   painPointEvidence: ["물주기 실패로 식물을 죽인 경험이 반복된다"],
   sources: ["https://example.com/trend"],
-  citations: [],
+  citations: [
+    {
+      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
+      title: "홈가드닝 시장 리포트 2026",
+      domain: "statista.com",
+    },
+    {
+      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
+      domain: "getplanta.com",
+    },
+  ],
 };
 
 const thesis: Thesis = {
@@ -198,15 +225,18 @@ describe("renderReport", () => {
       }
     });
 
-    it("경쟁사·유저 목소리·트렌드·출처 원문은 <details> 안에 있다", () => {
+    it("경쟁사·유저 목소리·트렌드·출처·검색 인용 원문은 <details> 안에 있다", () => {
       const { open, close } = firstDetailsRange(report);
       const raw = [
         context.competitors[0].name,
         context.competitors[0].description,
         context.communityVoices[0].text,
+        context.communityVoices[2].text,
+        context.communityVoices[3].text,
         context.trends[0],
         context.painPointEvidence[0],
         context.sources[0],
+        context.citations[0].uri,
       ];
       for (const value of raw) {
         const index = report.indexOf(value);
@@ -215,10 +245,33 @@ describe("renderReport", () => {
       }
     });
 
-    it("<summary>에 원시 근거 건수를 표기한다", () => {
+    it("<summary>에 원시 근거 건수와 소스별 내역을 표기한다", () => {
       expect(report).toContain(
-        `원시 근거 — 경쟁 서비스 ${context.competitors.length}개 · 유저 목소리 ${context.communityVoices.length}건 · 트렌드 ${context.trends.length}건 · 출처 ${context.sources.length}개`,
+        `원시 근거 — 경쟁 서비스 ${context.competitors.length}개` +
+          ` · 유저 목소리 ${context.communityVoices.length}건` +
+          `(${SOURCE_LABELS.youtube} 2 · ${SOURCE_LABELS.hackernews} 1 · ${SOURCE_LABELS.naver} 1)` +
+          ` · 트렌드 ${context.trends.length}건` +
+          ` · 출처 ${context.sources.length}개` +
+          ` · 검색 인용 ${context.citations.length}개`,
       );
+    });
+
+    it("<summary>에서 0건인 항목은 생략한다", () => {
+      const rendered = renderReport(
+        IDEA,
+        { ...context, citations: [], trends: [] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      const summary = rendered.slice(
+        rendered.indexOf("<summary>"),
+        rendered.indexOf("</summary>"),
+      );
+      expect(summary).not.toContain("트렌드");
+      expect(summary).not.toContain("검색 인용");
+      expect(summary).toContain(`유저 목소리 ${context.communityVoices.length}건`);
     });
 
     it("marketSizeIndicators가 있으면 소제목과 지표를 렌더링한다", () => {
@@ -268,6 +321,92 @@ describe("renderReport", () => {
         verdict,
       );
       expect(rendered).toContain('> "첫 줄\n> 둘째 줄"');
+    });
+
+    it("유저 목소리를 소스별 소제목 아래로 그룹핑한다", () => {
+      const { open, close } = firstDetailsRange(report);
+      const section = report.slice(open, close);
+
+      for (const source of ["youtube", "hackernews", "naver"] as const) {
+        expect(section).toContain(`##### ${SOURCE_LABELS[source]}`);
+      }
+      // 목소리는 자기 소스 소제목 아래에 온다
+      const naverHeading = section.indexOf(`##### ${SOURCE_LABELS.naver}`);
+      expect(section.indexOf("몬스테라 잎이 노랗게 변했어요")).toBeGreaterThan(
+        naverHeading,
+      );
+    });
+
+    it("목소리가 없는 소스는 소제목째 생략한다", () => {
+      const rendered = renderReport(
+        IDEA,
+        {
+          ...context,
+          communityVoices: context.communityVoices.filter(
+            (voice) => voice.source === "youtube",
+          ),
+        },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      expect(rendered).toContain(`##### ${SOURCE_LABELS.youtube}`);
+      expect(rendered).not.toContain(`##### ${SOURCE_LABELS.hackernews}`);
+      expect(rendered).not.toContain(`##### ${SOURCE_LABELS.naver}`);
+    });
+
+    it("인용 출처 줄에 소스 라벨·인기도·extra를 싣고 원문은 축자로 남긴다", () => {
+      const hn = context.communityVoices[2];
+      const naver = context.communityVoices[3];
+
+      expect(report).toContain(
+        `> "${hn.text}"\n> — [${SOURCE_LABELS.hackernews}] ${hn.title} (${hn.url}, 좋아요 ${hn.score})`,
+      );
+      // score가 없으면 생략하고, extra가 있으면 출처 줄에 덧붙인다
+      expect(report).toContain(
+        `> "${naver.text}"\n> — [${SOURCE_LABELS.naver}] ${naver.title} (${naver.url}, ${naver.extra})`,
+      );
+    });
+
+    it("citations를 '출처'와 분리된 '검색 인용' 소절로 렌더링한다 (ADR-012)", () => {
+      const { open, close } = firstDetailsRange(report);
+
+      const sourcesAt = report.indexOf("#### 출처");
+      const citationsAt = report.indexOf("#### 검색 인용");
+      expect(sourcesAt).toBeGreaterThan(open);
+      expect(citationsAt).toBeGreaterThan(sourcesAt);
+      expect(citationsAt).toBeLessThan(close);
+
+      const [withTitle, withoutTitle] = context.citations;
+      expect(report).toContain(`[${withTitle.title}](${withTitle.uri})`);
+      expect(report).toContain(`[${withoutTitle.domain}](${withoutTitle.uri})`);
+    });
+
+    it("title도 domain도 없는 citation은 링크 텍스트가 uri로 폴백된다", () => {
+      const uri = "https://example.com/grounding-api-redirect/ccc";
+      const rendered = renderReport(
+        IDEA,
+        { ...context, citations: [{ uri }] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      expect(rendered).toContain(`[${uri}](${uri})`);
+    });
+
+    it("citations가 비면 '검색 인용' 소제목 자체를 출력하지 않는다", () => {
+      const rendered = renderReport(
+        IDEA,
+        { ...context, citations: [] },
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+      expect(rendered).not.toContain("검색 인용");
+      expect(rendered).toContain("#### 출처");
     });
   });
 

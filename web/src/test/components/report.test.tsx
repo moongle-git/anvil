@@ -1,12 +1,14 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  CompetitorService,
-  Criticism,
-  MarketContext,
-  Solution,
-  Thesis,
-  Verdict,
+import {
+  MarketContextSchema,
+  SOURCE_LABELS,
+  type CompetitorService,
+  type Criticism,
+  type MarketContext,
+  type Solution,
+  type Thesis,
+  type Verdict,
 } from "@anvil/types";
 import type { RunDetail } from "@/lib/server/runs";
 import { CompetitorTable } from "@/components/report/CompetitorTable";
@@ -14,6 +16,7 @@ import { MarketContextSection } from "@/components/report/MarketContextSection";
 import { SectionNav } from "@/components/report/SectionNav";
 import { SolutionSection } from "@/components/report/SolutionSection";
 import { ReportView } from "@/components/report/ReportView";
+import legacyContextFixture from "@/test/fixtures/2026-07-01T09-00-00-000Z-ai-meeting-notes-fx01/context.json";
 import {
   MONETIZATION_NUMBERED,
   REVISED_CONCEPT_NESTED,
@@ -127,10 +130,36 @@ const marketContext: MarketContext = {
       authorName: "user1",
       score: 42,
     },
+    {
+      source: "hackernews",
+      title: "Ask HN: meeting notes tools",
+      url: "https://news.ycombinator.com/item?id=42",
+      text: "Summaries are commoditized. Action tracking is where the pain is.",
+      authorName: "hn_user",
+      score: 88,
+    },
+    {
+      source: "naver",
+      title: "회의록 정리 팁 공유합니다",
+      url: "https://cafe.naver.com/pm/1",
+      text: "요약은 되는데 누가 뭘 하기로 했는지는 결국 손으로 옮겨 적어요...",
+      authorName: "기획자모임",
+      extra: "검색 스니펫",
+    },
   ],
   painPointEvidence: ["회의록 작성에 주당 3시간"],
   sources: ["https://vertexaisearch.google.com/redirect/very-long-url-aaaaaa"],
-  citations: [],
+  citations: [
+    {
+      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
+      title: "협업 도구 시장 리포트 2026",
+      domain: "statista.com",
+    },
+    {
+      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
+      domain: "clovanote.naver.com",
+    },
+  ],
 };
 
 const verdict: Verdict = {
@@ -232,13 +261,136 @@ describe("MarketContextSection", () => {
     expect(details.open).toBe(true);
   });
 
-  it("summary 문자열에 경쟁사·유저 목소리 건수를 표기한다", () => {
+  it("summary 문자열에 경쟁사·유저 목소리 건수와 소스별 내역·인용 개수를 표기한다", () => {
     const { container } = render(
       <MarketContextSection context={marketContext} />,
     );
     const summary = container.querySelector("summary")?.textContent ?? "";
     expect(summary).toContain("경쟁 서비스 9개");
-    expect(summary).toContain("유저 목소리 1건");
+    expect(summary).toContain("유저 목소리 3건");
+    expect(summary).toContain(
+      `${SOURCE_LABELS.youtube} 1 · ${SOURCE_LABELS.hackernews} 1 · ${SOURCE_LABELS.naver} 1`,
+    );
+    expect(summary).toContain("인용 2개");
+  });
+
+  it("세 소스의 목소리를 각각 소스 뱃지와 함께 접힌 영역에 렌더링한다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const details = container.querySelector("details");
+
+    for (const voice of marketContext.communityVoices) {
+      const card = container.querySelector(
+        `[data-voice-source="${voice.source}"]`,
+      );
+      expect(card, `누락된 소스 카드: ${voice.source}`).not.toBeNull();
+      expect(card?.textContent).toContain(voice.text);
+      expect(card?.textContent).toContain(SOURCE_LABELS[voice.source]);
+      expect(details?.contains(card!)).toBe(true);
+    }
+  });
+
+  it("목소리를 소스별 그룹(라벨 · 건수)으로 묶는다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    for (const source of ["youtube", "hackernews", "naver"] as const) {
+      const group = container.querySelector(`[data-voice-group="${source}"]`);
+      expect(group, `누락된 소스 그룹: ${source}`).not.toBeNull();
+      expect(group?.textContent).toContain(`${SOURCE_LABELS[source]} · 1건`);
+    }
+  });
+
+  it("목소리가 없는 소스는 그룹째 렌더링하지 않는다", () => {
+    const { container } = render(
+      <MarketContextSection
+        context={{
+          ...marketContext,
+          communityVoices: marketContext.communityVoices.filter(
+            (voice) => voice.source === "youtube",
+          ),
+        }}
+      />,
+    );
+    expect(container.querySelector('[data-voice-group="youtube"]')).not.toBeNull();
+    expect(container.querySelector('[data-voice-group="naver"]')).toBeNull();
+    expect(
+      container.querySelector('[data-voice-group="hackernews"]'),
+    ).toBeNull();
+  });
+
+  it("네이버 목소리의 extra(검색 스니펫) 표시를 노출한다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const naverCard = container.querySelector('[data-voice-source="naver"]');
+    expect(naverCard?.textContent).toContain("검색 스니펫");
+  });
+
+  it("citations를 '출처'와 분리된 '검색 인용' 소제목으로 접힌 영역에 렌더링한다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const details = container.querySelector("details");
+
+    const sourcesHeading = screen.getByText("출처");
+    const citationsHeading = screen.getByText("검색 인용");
+    expect(details?.contains(sourcesHeading)).toBe(true);
+    expect(details?.contains(citationsHeading)).toBe(true);
+
+    // 출처(LLM 자기보고)와 검색 인용(코드 추출)은 별개 목록이다 (ADR-012)
+    const citationLinks = container.querySelectorAll(
+      "[data-citation-list] a",
+    );
+    expect(citationLinks.length).toBe(2);
+    expect(citationLinks[0].textContent).toBe("협업 도구 시장 리포트 2026");
+    // title이 없으면 domain으로 폴백한다
+    expect(citationLinks[1].textContent).toBe("clovanote.naver.com");
+  });
+
+  it("citation 링크가 새 탭(target·rel)으로 열린다", () => {
+    const { container } = render(
+      <MarketContextSection context={marketContext} />,
+    );
+    const link = container.querySelector(
+      "[data-citation-list] a",
+    ) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(marketContext.citations[0].uri);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("citations만 있고 나머지 원시 배열이 비어도 <details>를 렌더링한다", () => {
+    const { container } = render(
+      <MarketContextSection
+        context={{
+          ...marketContext,
+          trends: [],
+          competitors: [],
+          communityVoices: [],
+          painPointEvidence: [],
+          sources: [],
+        }}
+      />,
+    );
+    expect(container.querySelector("details")).not.toBeNull();
+    expect(container.querySelectorAll("[data-citation-list] a").length).toBe(2);
+  });
+
+  it("구 형식(youtubeVoices) run도 승격 후 목소리를 렌더링한다 (ADR-012 하위호환)", () => {
+    const legacy = MarketContextSchema.parse(legacyContextFixture);
+    const { container } = render(<MarketContextSection context={legacy} />);
+
+    const details = container.querySelector("details");
+    expect(details).not.toBeNull();
+
+    const cards = container.querySelectorAll('[data-voice-source="youtube"]');
+    expect(cards.length).toBe(legacy.communityVoices.length);
+    expect(cards.length).toBeGreaterThan(0);
+    expect(details?.contains(cards[0])).toBe(true);
+    expect(cards[0].textContent).toContain(legacy.communityVoices[0].text);
+    expect(cards[0].textContent).toContain(SOURCE_LABELS.youtube);
   });
 
   it("marketSizeIndicators가 비면 '시장 규모 지표' 소제목을 렌더링하지 않는다", () => {
@@ -278,7 +430,7 @@ describe("MarketContextSection", () => {
     expect(details?.contains(voicesInsightNode)).toBe(false);
   });
 
-  it("원시 배열이 모두 비면 <details> 자체를 렌더링하지 않는다", () => {
+  it("원시 배열이 모두 비고 citations도 비면 <details> 자체를 렌더링하지 않는다", () => {
     const { container } = render(
       <MarketContextSection
         context={{
@@ -288,6 +440,7 @@ describe("MarketContextSection", () => {
           communityVoices: [],
           painPointEvidence: [],
           sources: [],
+          citations: [],
         }}
       />,
     );
