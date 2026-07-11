@@ -13,7 +13,8 @@
     {
       "step": 1,
       "name": "grounding-citations",
-      "status": "pending"
+      "status": "pending",
+      "started_at": "2026-07-12T00:44:27+0900"
     },
     {
       "step": 2,
