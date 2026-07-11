@@ -59,5 +59,6 @@
       "summary": "YouTube 인용의 granularity를 댓글 단위로 맞췄다 (ADR-013) — 댓글을 인용해놓고 영상 페이지로 보내면 독자가 수백 개 댓글 중 어느 것인지 찾을 수 없다. src/services/youtube.ts: CommentThreadListBody의 topLevelComment에 id를 추가하고 fetchComments가 이를 파싱한다(part=snippet 그대로 — topLevelComment.id가 이미 그 안에 있어 quota를 더 쓰지 않는다). YoutubeComment에 commentId·url 필드 추가, url은 항상 댓글 퍼머링크다(HackerNewsComment.url과 같은 계약 — '인용의 출처는 그 댓글이지 원문/영상이 아니다'). URL 지식은 youtube.ts가 단독 소유한다: YOUTUBE_WATCH_BASE 상수 + videoUrl(videoId) / commentUrl(videoId, commentId) → `${videoUrl}&lc=${commentId}` — URL/URLSearchParams로 조립하지 않는다(lc 값이 인코딩되면 permalink가 깨진다). id가 없거나 빈 항목은 건너뛴다 — 영상 URL로 폴백하지 않는다(잘못된 근거가 없는 근거보다 나쁘다; 네이버 어댑터가 link 없는 item을 버리는 것과 같은 패턴). commentsDisabled 흡수 / 그 외(quotaExceeded) rethrow는 무변경. src/research/sources.ts: youtubeSource가 url: video.url → comment.url로 매핑만 바꾼다(문자열 조립 없음 — research/는 정규화 레이어다). title은 여전히 영상 제목이다(댓글에는 제목이 없다). 테스트(전부 mock, 실제 API 호출 없음): youtube.test.ts — topLevelComment.id 파싱, permalink 문자열 동등 비교로 못박기(&가 &amp;로 이스케이프되거나 lc가 URL 인코딩되면 실패한다), id 없는 항목 드롭, commentsDisabled/quota 회귀. sources.test.ts — 댓글 voice의 url이 영상 URL이 아닌 퍼머링크인가, 같은 영상의 두 댓글이 서로 다른 url을 갖는가(기존 버그의 회귀 방지), CommunityVoiceSchema 통과. e2e.test.ts 픽스처도 id를 갖도록 갱신하고 기대 URL을 퍼머링크로 바꿨다 — 프롬프트에 URL이 없다는 ADR-013 단언은 그대로 통과한다. AC: build/test(632+290)/lint 모두 통과."
     }
   ],
-  "created_at": "2026-07-12T00:41:00+0900"
+  "created_at": "2026-07-12T00:41:00+0900",
+  "completed_at": "2026-07-12T01:37:24+0900"
 }
