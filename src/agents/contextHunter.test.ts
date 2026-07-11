@@ -54,6 +54,7 @@ const CITATIONS: Citation[] = [
     uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
     title: "펫 시장 리포트",
     domain: "example.com",
+    kind: "redirect",
   },
 ];
 

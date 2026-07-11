@@ -487,11 +487,13 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     );
     const context = MarketContextSchema.parse(raw);
 
-    // uri 없는 chunk는 드롭되므로 2개 chunk 중 1건만 남는다
+    // uri 없는 chunk는 드롭되므로 2개 chunk 중 1건만 남는다.
+    // 검색 chunk가 실어온 uri는 만료되는 리다이렉트다 — kind가 그 사실을 남긴다 (ADR-013)
     expect(context.citations).toEqual([
       {
         uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x",
         title: "홈가드닝 시장 리포트",
+        kind: "redirect",
       },
     ]);
     // LLM 자기보고 sources는 대체되지 않고 공존한다 (실패 모드가 상보적이다 — ADR-012)

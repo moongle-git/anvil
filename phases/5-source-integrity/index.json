@@ -13,8 +13,10 @@
     {
       "step": 1,
       "name": "grounding-citations",
-      "status": "pending",
-      "started_at": "2026-07-12T00:44:27+0900"
+      "status": "completed",
+      "started_at": "2026-07-12T00:44:27+0900",
+      "completed_at": "2026-07-12T00:58:10+0900",
+      "summary": "재시도 전 시도의 grounding 인용을 누적한다 (ADR-013). 시그니처 — GeminiService.generateValidated는 { data, response } 대신 { data, responses: GenerateContentResponse[] }(형식·검증 실패 시도 포함 전부 누적)를 반환하고, extractCitations(responses: readonly GenerateContentResponse[]): GroundingCitation[]는 배열을 받아 uri 기준 dedupe한다. generateGrounded의 공개 시그니처 { data, citations, webSearchQueries }는 불변이라 contextHunter 호출부는 무변경(webSearchQueries도 전 시도 누적·dedupe). CitationSchema/GroundingCitation에 필수 kind 판별자 추가 — groundingChunks[].web.uri는 'redirect', urlContextMetadata의 SUCCESS retrievedUrl은 'origin'이며 같은 uri면 origin이 이긴다(.default 없음; 구 run은 citations: []라 승격 대상 없음). citations가 비어도 throw하지 않는다."
     },
     {
       "step": 2,

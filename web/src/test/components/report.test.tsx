@@ -154,10 +154,12 @@ const marketContext: MarketContext = {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
       title: "협업 도구 시장 리포트 2026",
       domain: "statista.com",
+      kind: "redirect",
     },
     {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
       domain: "clovanote.naver.com",
+      kind: "redirect",
     },
   ],
 };

@@ -292,20 +292,38 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
 
     expect(result).toEqual({
       data: { title: "아이디어", score: 42 },
-      citations: [{ uri: "https://x.example", title: "T", domain: "x.example" }],
+      citations: [
+        {
+          uri: "https://x.example",
+          title: "T",
+          domain: "x.example",
+          kind: "redirect",
+        },
+      ],
       webSearchQueries: ["회의록 요약 서비스"],
     });
   });
 
-  it("★ 인용은 검증을 통과한 시도의 응답에서 읽는다 (실패한 시도의 metadata는 버린다)", async () => {
-    // 1차는 JSON 형식 실패 — 그 시도의 groundingMetadata(A)는 함께 버려져야 한다
+  it("★ 형식 검증에 실패한 시도의 grounding 인용도 보존된다 (ADR-013)", async () => {
+    // 이 테스트는 "실패한 시도의 metadata는 함께 버린다"는 기존 계약을 의도적으로 뒤집은 것이다.
+    //
+    // 뒤집은 이유: 실측 8개 run 전부에서 citations가 0건이었다. grounding은 responseSchema를
+    // 못 써 1차 시도의 JSON 형식 실패가 잦은데, 재시도 프롬프트는 `[교정 요청]`이라 모델이
+    // 새로 검색하지 않는다 → 2차 응답에는 groundingMetadata가 아예 없다 → 1차가 실제로 수행한
+    // 검색의 인용이 통째로 버려진다. 그 결과 리포트의 유일한 검증된 출처 필드가 늘 비고,
+    // LLM이 손으로 타이핑한 환각 URL(sources[])만 남았다. 인용 0건 + 환각 필드 잔존이
+    // "본문과 대응하지 않는 인용이 섞일 수 있음"보다 압도적으로 나쁜 실패다.
+    //
+    // 실패한 것은 JSON 형식이지 검색이 아니다 — 그 시도의 인용은 실재한다. citations는
+    // 문장별 각주가 아니라 "이 run의 grounding이 무엇을 가져왔는가"의 run 단위 기록이다.
+    //
+    // 아래가 실전에서 8/8 run을 망친 바로 그 시나리오다:
+    // 1차 = 검색은 했지만(A) JSON 형식 실패 / 2차 = JSON은 정상이나 메타데이터 없음
     const { client, generateContent } = fakeClient(
       grounded("JSON 없이 설명만 있는 응답", {
-        chunks: [{ web: { uri: "https://a.example" } }],
+        chunks: [{ web: { uri: "https://a.example", title: "A" } }],
       }),
-      grounded(VALID_JSON, {
-        chunks: [{ web: { uri: "https://b.example" } }],
-      }),
+      VALID_JSON,
     );
 
     const result = await grounding(client).generateGrounded({
@@ -315,7 +333,25 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
     });
 
     expect(generateContent).toHaveBeenCalledTimes(2);
-    expect(result.citations).toEqual([{ uri: "https://b.example" }]);
+    // 채택된 2차 응답에는 metadata가 없다. A가 살아남지 못하면 citations는 0건이 된다
+    expect(result.citations).toEqual([
+      { uri: "https://a.example", title: "A", kind: "redirect" },
+    ]);
+  });
+
+  it("webSearchQueries도 모든 시도에서 누적하고 dedupe한다", async () => {
+    const { client } = fakeClient(
+      grounded("형식 실패", { queries: ["회의록 요약", "AI 노트"] }),
+      grounded(VALID_JSON, { queries: ["AI 노트", "회의 자동화"] }),
+    );
+
+    const { webSearchQueries } = await grounding(client).generateGrounded({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+    });
+
+    expect(webSearchQueries).toEqual(["회의록 요약", "AI 노트", "회의 자동화"]);
   });
 
   it("```json 펜스로 감싼 응답에서 JSON을 추출해 검증한다", async () => {
@@ -417,7 +453,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
 
 describe("extractCitations", () => {
   it("web.uri가 없는 chunk는 버린다 (인용으로 쓸 수 없다)", () => {
-    const citations = extractCitations(
+    const citations = extractCitations([
       asResponse([
         {
           groundingMetadata: {
@@ -430,13 +466,13 @@ describe("extractCitations", () => {
           },
         },
       ]),
-    );
+    ]);
 
-    expect(citations).toEqual([{ uri: "https://a.example" }]);
+    expect(citations).toEqual([{ uri: "https://a.example", kind: "redirect" }]);
   });
 
   it("같은 uri가 여러 chunk에 나오면 1개로 dedupe한다", () => {
-    const citations = extractCitations(
+    const citations = extractCitations([
       asResponse([
         {
           groundingMetadata: {
@@ -448,28 +484,57 @@ describe("extractCitations", () => {
           },
         },
       ]),
-    );
+    ]);
 
     expect(citations).toEqual([
-      { uri: "https://a.example", title: "첫 조각" },
-      { uri: "https://b.example" },
+      { uri: "https://a.example", title: "첫 조각", kind: "redirect" },
+      { uri: "https://b.example", kind: "redirect" },
+    ]);
+  });
+
+  it("여러 시도에 걸쳐 같은 uri가 나와도 1개로 dedupe한다 (ADR-013)", () => {
+    // 재시도는 같은 검색 결과를 다시 물어온다 — 누적하되 중복은 남기지 않는다
+    const citations = extractCitations([
+      asResponse([
+        {
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: "https://a.example", title: "1차" } }],
+          },
+        },
+      ]),
+      asResponse([
+        {
+          groundingMetadata: {
+            groundingChunks: [
+              { web: { uri: "https://a.example", title: "2차" } },
+              { web: { uri: "https://b.example" } },
+            ],
+          },
+        },
+      ]),
+    ]);
+
+    expect(citations).toEqual([
+      { uri: "https://a.example", title: "1차", kind: "redirect" },
+      { uri: "https://b.example", kind: "redirect" },
     ]);
   });
 
   it("title·domain이 없으면 결과 객체에 키 자체가 없다", () => {
-    const [citation] = extractCitations(
+    const [citation] = extractCitations([
       asResponse([
         { groundingMetadata: { groundingChunks: [{ web: { uri: "https://a.example" } }] } },
       ]),
-    );
+    ]);
 
-    expect(Object.keys(citation)).toEqual(["uri"]);
+    expect(Object.keys(citation)).toEqual(["uri", "kind"]);
     expect("title" in citation).toBe(false);
     expect("domain" in citation).toBe(false);
   });
 
-  it("urlContext로 실제로 읽어낸 페이지를 인용에 병합하고, 실패 항목은 무시한다", () => {
-    const citations = extractCitations(
+  it("urlContext로 읽어낸 페이지는 origin, 검색 chunk는 redirect로 태깅한다", () => {
+    // urlRetrievalStatus가 SUCCESS가 아닌 항목은 제외한다 — 읽지 못한 URL은 인용이 아니다
+    const citations = extractCitations([
       asResponse([
         {
           groundingMetadata: {
@@ -493,16 +558,18 @@ describe("extractCitations", () => {
           },
         },
       ]),
-    );
+    ]);
 
     expect(citations).toEqual([
-      { uri: "https://search.example" },
-      { uri: "https://competitor.example/pricing" },
+      { uri: "https://search.example", kind: "redirect" },
+      { uri: "https://competitor.example/pricing", kind: "origin" },
     ]);
   });
 
-  it("groundingChunk와 urlContext가 같은 uri를 주면 dedupe한다", () => {
-    const citations = extractCitations(
+  it("같은 uri가 chunk와 urlContext 양쪽에 있으면 origin이 이긴다 (ADR-013)", () => {
+    // 원본을 실제로 읽어낸 인용이 만료되는 리다이렉트보다 강하다.
+    // chunk가 실어온 title은 같은 uri의 설명이므로 그대로 살린다
+    const citations = extractCitations([
       asResponse([
         {
           groundingMetadata: {
@@ -515,17 +582,45 @@ describe("extractCitations", () => {
           },
         },
       ]),
-    );
+    ]);
 
-    expect(citations).toEqual([{ uri: "https://a.example", title: "T" }]);
+    expect(citations).toEqual([
+      { uri: "https://a.example", title: "T", kind: "origin" },
+    ]);
+  });
+
+  it("시도 경계를 넘어서도 origin이 redirect를 이긴다", () => {
+    // 1차 시도는 검색으로만 만난 uri를, 2차 시도는 그 페이지를 실제로 읽어냈다
+    const citations = extractCitations([
+      asResponse([
+        {
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: "https://a.example" } }],
+          },
+        },
+      ]),
+      asResponse([
+        {
+          urlContextMetadata: {
+            urlMetadata: [
+              { retrievedUrl: "https://a.example", urlRetrievalStatus: SUCCESS },
+            ],
+          },
+        },
+      ]),
+    ]);
+
+    expect(citations).toEqual([{ uri: "https://a.example", kind: "origin" }]);
   });
 
   it("candidates·metadata가 없어도 빈 배열을 반환하고 throw하지 않는다", () => {
-    expect(extractCitations(asResponse())).toEqual([]);
-    expect(extractCitations(asResponse([]))).toEqual([]);
-    expect(extractCitations(asResponse([{}]))).toEqual([]);
-    expect(
-      extractCitations(asResponse([{ groundingMetadata: {} }])),
-    ).toEqual([]);
+    // grounding이 아무것도 못 찾는 것은 정상적인 결과다 — 파이프라인을 죽이지 않는다
+    expect(extractCitations([])).toEqual([]);
+    expect(extractCitations([asResponse()])).toEqual([]);
+    expect(extractCitations([asResponse([])])).toEqual([]);
+    expect(extractCitations([asResponse([{}])])).toEqual([]);
+    expect(extractCitations([asResponse([{ groundingMetadata: {} }])])).toEqual(
+      [],
+    );
   });
 });

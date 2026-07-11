@@ -47,9 +47,10 @@ describe("CompetitorServiceSchema", () => {
 });
 
 describe("CitationSchema", () => {
-  it("uri만 있는 인용을 허용한다", () => {
+  it("uri·kind만 있는 인용을 허용한다", () => {
     const result = CitationSchema.safeParse({
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
+      kind: "redirect",
     });
     expect(result.success).toBe(true);
   });
@@ -59,12 +60,29 @@ describe("CitationSchema", () => {
       uri: "https://example.com/report",
       title: "2026 반려식물 시장 리포트",
       domain: "example.com",
+      kind: "origin",
     });
     expect(result.success).toBe(true);
   });
 
   it("URL 형식이 아닌 uri를 거부한다", () => {
-    expect(CitationSchema.safeParse({ uri: "출처 미상" }).success).toBe(false);
+    expect(
+      CitationSchema.safeParse({ uri: "출처 미상", kind: "redirect" }).success,
+    ).toBe(false);
+  });
+
+  it("kind 없는 인용을 거부한다 — 기본값을 두지 않는다 (ADR-013)", () => {
+    // 기본값은 잘못된 데이터를 조용히 통과시킨다. 구 context.json은 citations가 전부
+    // 빈 배열이라 승격할 원소가 없고, 빈 배열은 원소 스키마와 무관하게 통과한다.
+    const result = CitationSchema.safeParse({ uri: "https://example.com/a" });
+    expect(result.success).toBe(false);
+  });
+
+  it("origin·redirect가 아닌 kind를 거부한다", () => {
+    expect(
+      CitationSchema.safeParse({ uri: "https://example.com/a", kind: "web" })
+        .success,
+    ).toBe(false);
   });
 });
 
@@ -238,7 +256,13 @@ describe("MarketContextSchema", () => {
 
     it("주입된 citations를 보존한다", () => {
       const citations = [
-        { uri: "https://example.com/a", title: "A", domain: "example.com" },
+        {
+          uri: "https://example.com/a",
+          title: "A",
+          domain: "example.com",
+          kind: "origin" as const,
+        },
+        { uri: "https://example.com/b", kind: "redirect" as const },
       ];
       const parsed = MarketContextSchema.parse({ ...validContext, citations });
       expect(parsed.citations).toEqual(citations);

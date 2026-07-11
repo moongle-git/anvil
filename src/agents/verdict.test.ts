@@ -55,6 +55,7 @@ const MARKET_CONTEXT: MarketContext = {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
       title: "펫 시장 리포트",
       domain: "example.com",
+      kind: "redirect",
     },
   ],
 };

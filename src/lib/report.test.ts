@@ -71,10 +71,12 @@ const context: MarketContext = {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/aaa",
       title: "홈가드닝 시장 리포트 2026",
       domain: "statista.com",
+      kind: "redirect",
     },
     {
       uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/bbb",
       domain: "getplanta.com",
+      kind: "redirect",
     },
   ],
 };
@@ -387,7 +389,7 @@ describe("renderReport", () => {
       const uri = "https://example.com/grounding-api-redirect/ccc";
       const rendered = renderReport(
         IDEA,
-        { ...context, citations: [{ uri }] },
+        { ...context, citations: [{ uri, kind: "redirect" as const }] },
         thesis,
         criticism,
         solution,
