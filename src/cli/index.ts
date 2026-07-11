@@ -1,11 +1,14 @@
 import "dotenv/config";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { RunStore } from "../lib/runStore.js";
 import { PipelineStepError, runPipeline } from "../pipeline/orchestrator.js";
-import { youtubeSource } from "../research/sources.js";
+import { hackerNewsSource, naverSource, youtubeSource } from "../research/sources.js";
 import type { ResearchSource } from "../research/types.js";
 import { GeminiService } from "../services/gemini.js";
+import { HackerNewsService } from "../services/hackerNews.js";
+import { NaverService } from "../services/naver.js";
 import { YoutubeService } from "../services/youtube.js";
 
 const USAGE = '사용법: npm run consult -- "아이디어 텍스트" [--resume <run-id>]';
@@ -25,20 +28,43 @@ function parseCliArgs(argv: string[]): { idea: string; resumeRunId?: string } {
 }
 
 /**
- * YOUTUBE_API_KEY가 없으면 네트워크 호출 없이 즉시 실패하는 fetchFn을 주입한다.
- * contextHunter가 이 실패를 흡수하고 웹검색만으로 진행한다 (실패 내성).
+ * 등록된 소스 배열이 곧 레지스트리다 (ADR-012).
+ *
+ * 키가 없는 소스는 "수집 실패"가 아니라 **부재**다 — 배열에 넣지 않는다. 동작할 수 없는
+ * 서비스 객체를 만들면 collectAll이 그것을 failures[]에 기록하고 LLM 프롬프트는 "네이버
+ * 수집이 실패했다"고 적는데, 사실은 애초에 키가 없었던 것이다. 두 상황은 다르다.
+ * 소스가 0개여도(collectAll([])) 합법이며 웹검색만으로 파이프라인은 완주한다.
  */
-function buildYoutubeService(apiKey: string | undefined): YoutubeService {
-  if (apiKey !== undefined && apiKey !== "") {
-    return new YoutubeService({ apiKey });
+export function buildResearchSources(env: NodeJS.ProcessEnv): ResearchSource[] {
+  const sources: ResearchSource[] = [];
+
+  const youtubeKey = env.YOUTUBE_API_KEY;
+  if (youtubeKey !== undefined && youtubeKey !== "") {
+    sources.push(youtubeSource(new YoutubeService({ apiKey: youtubeKey })));
+  } else {
+    console.warn("YOUTUBE_API_KEY 미설정 — YouTube 수집을 건너뛴다.");
   }
-  return new YoutubeService({
-    apiKey: "",
-    fetchFn: () =>
-      Promise.reject(
-        new Error("YOUTUBE_API_KEY가 설정되지 않아 YouTube 수집을 건너뛴다"),
-      ),
-  });
+
+  // Hacker News(Algolia)는 인증이 없다 — 항상 켠다
+  sources.push(hackerNewsSource(new HackerNewsService({})));
+
+  // 반쪽 설정(ID만 있고 SECRET이 없음)은 부재로 취급한다 — 반쪽으로 만든 서비스는 401로 죽는다
+  const clientId = env.NAVER_CLIENT_ID;
+  const clientSecret = env.NAVER_CLIENT_SECRET;
+  if (
+    clientId !== undefined &&
+    clientId !== "" &&
+    clientSecret !== undefined &&
+    clientSecret !== ""
+  ) {
+    sources.push(naverSource(new NaverService({ clientId, clientSecret })));
+  } else {
+    console.warn(
+      "NAVER_CLIENT_ID/NAVER_CLIENT_SECRET 미설정 — 네이버 수집을 건너뛴다.",
+    );
+  }
+
+  return sources;
 }
 
 async function main(): Promise<void> {
@@ -61,20 +87,10 @@ async function main(): Promise<void> {
     return;
   }
 
-  const youtubeKey = process.env.YOUTUBE_API_KEY;
-  if (youtubeKey === undefined || youtubeKey === "") {
-    console.warn(
-      "YOUTUBE_API_KEY가 설정되지 않았다 — YouTube 수집 없이 웹검색만으로 진행한다.",
-    );
-  }
-
-  // 등록된 소스 배열이 곧 레지스트리다 (ADR-012). 수집 실패는 collectAll이 흡수한다
-  const sources: ResearchSource[] = [youtubeSource(buildYoutubeService(youtubeKey))];
-
   const deps = {
     store: new RunStore(path.resolve(process.cwd(), "runs")),
     gemini: new GeminiService({ apiKey: geminiKey }),
-    sources,
+    sources: buildResearchSources(process.env),
   };
 
   try {
@@ -99,4 +115,9 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+// 이 파일을 직접 실행할 때만 파이프라인을 돈다. buildResearchSources를 import하는 테스트가
+// main()까지 실행하면 dotenv가 실은 .env 키로 실제 API를 때린다.
+const entrypoint = process.argv[1];
+if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
+  void main();
+}

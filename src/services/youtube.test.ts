@@ -27,6 +27,28 @@ function fakeFetch(...responses: FakeResponse[]) {
   return fetchFn;
 }
 
+/** fetch가 실제로 resolve하는 모양 — 수동 제어 promise가 이 값을 나중에 정착시킨다 */
+interface FetchResult {
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+}
+
+function okResponse(body: unknown): FetchResult {
+  return { ok: true, status: 200, json: () => Promise.resolve(body) };
+}
+
+function deferred(): {
+  promise: Promise<FetchResult>;
+  resolve: (value: FetchResult) => void;
+} {
+  let resolve!: (value: FetchResult) => void;
+  const promise = new Promise<FetchResult>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 function service(
   fetchFn: ReturnType<typeof vi.fn>,
   options: Partial<YoutubeServiceOptions> = {},
@@ -256,5 +278,73 @@ describe("YoutubeService.collectVoices", () => {
     );
 
     await expect(service(fetchFn).collectVoices("q")).rejects.toThrow(/quota/);
+  });
+
+  it("commentsDisabled와 quota 초과가 함께 나도 quota 에러를 던진다", async () => {
+    // 병렬화의 가장 위험한 회귀: rejected를 전부 무시하면 quota 초과가 조용히 "댓글 0개"가 된다
+    const fetchFn = fakeFetch(
+      jsonResponse(searchBody("v1", "v2")),
+      jsonResponse(errorBody("commentsDisabled", "Comments are disabled"), 403),
+      jsonResponse(errorBody("quotaExceeded", "Quota exceeded"), 403),
+    );
+
+    await expect(service(fetchFn).collectVoices("q")).rejects.toThrow(/quota/);
+  });
+
+  it("댓글 요청을 병렬로 보낸다 — 첫 응답이 정착하기 전에 나머지 요청이 이미 나갔다", async () => {
+    const pending = [deferred(), deferred(), deferred()];
+    let commentCall = 0;
+    const fetchFn = vi.fn((input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/search")) {
+        return Promise.resolve(okResponse(searchBody("v1", "v2", "v3")));
+      }
+      return pending[commentCall++].promise;
+    });
+
+    // await하지 않는다 — 순차 구현이면 search + 첫 댓글 = 2회에서 멈춘다
+    const collecting = service(fetchFn).collectVoices("q");
+
+    await vi.waitFor(() => {
+      expect(fetchFn).toHaveBeenCalledTimes(4);
+    });
+
+    for (const [index, d] of pending.entries()) {
+      d.resolve(okResponse({ items: [commentItem(`댓글${index + 1}`)] }));
+    }
+    const voices = await collecting;
+
+    expect(voices.map((v) => v.comments[0].text)).toEqual([
+      "댓글1",
+      "댓글2",
+      "댓글3",
+    ]);
+  });
+
+  it("댓글 응답이 늦게 도착한 순서와 무관하게 영상 순서를 보존한다", async () => {
+    const pending = [deferred(), deferred(), deferred()];
+    let commentCall = 0;
+    const fetchFn = vi.fn((input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/search")) {
+        return Promise.resolve(okResponse(searchBody("v1", "v2", "v3")));
+      }
+      return pending[commentCall++].promise;
+    });
+
+    const collecting = service(fetchFn).collectVoices("q");
+    await vi.waitFor(() => {
+      expect(fetchFn).toHaveBeenCalledTimes(4);
+    });
+
+    // 응답은 v3 → v1 → v2 순으로 정착한다
+    pending[2].resolve(okResponse({ items: [commentItem("댓글3")] }));
+    pending[0].resolve(okResponse({ items: [commentItem("댓글1")] }));
+    pending[1].resolve(okResponse({ items: [commentItem("댓글2")] }));
+
+    const voices = await collecting;
+
+    expect(voices.map((v) => v.video.videoId)).toEqual(["v1", "v2", "v3"]);
+    expect(voices.map((v) => v.comments[0].videoId)).toEqual(["v1", "v2", "v3"]);
   });
 });

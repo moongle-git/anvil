@@ -153,21 +153,32 @@ export class YoutubeService {
   ): Promise<{ video: YoutubeVideo; comments: YoutubeComment[] }[]> {
     const videos = await this.searchVideos(query);
 
-    const voices: { video: YoutubeVideo; comments: YoutubeComment[] }[] = [];
-    for (const video of videos) {
-      try {
-        voices.push({ video, comments: await this.fetchComments(video.videoId) });
-      } catch (error) {
-        // 댓글 비활성화는 정상 케이스 — 해당 영상만 건너뛴다
-        if (
-          error instanceof YoutubeApiError &&
-          error.reason === "commentsDisabled"
-        ) {
-          continue;
-        }
-        throw error;
-      }
+    // 영상별 댓글 요청은 서로 독립이다 — 병렬로 보내 지연을 sum이 아니라 max로 만든다
+    const settled = await Promise.allSettled(
+      videos.map((video) => this.fetchComments(video.videoId)),
+    );
+
+    // 댓글 비활성화만 정상 케이스로 건너뛴다. 나머지(특히 quotaExceeded)를 삼키면
+    // quota 초과가 조용히 "댓글 0개"가 되어 수집 실패가 보이지 않는다
+    const fatal = settled.find(
+      (result): result is PromiseRejectedResult =>
+        result.status === "rejected" &&
+        !(
+          result.reason instanceof YoutubeApiError &&
+          result.reason.reason === "commentsDisabled"
+        ),
+    );
+    if (fatal !== undefined) {
+      throw fatal.reason;
     }
+
+    // allSettled는 입력 순서로 결과를 준다 — 응답이 늦게 도착해도 영상 순서가 보존된다
+    const voices: { video: YoutubeVideo; comments: YoutubeComment[] }[] = [];
+    settled.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        voices.push({ video: videos[index], comments: result.value });
+      }
+    });
     return voices;
   }
 

@@ -4,9 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoogleGenAI } from "@google/genai";
 import { RunStore } from "../lib/runStore.js";
-import { youtubeSource } from "../research/sources.js";
+import { hackerNewsSource, naverSource, youtubeSource } from "../research/sources.js";
 import type { ResearchSource } from "../research/types.js";
 import { GeminiService } from "../services/gemini.js";
+import { HackerNewsService } from "../services/hackerNews.js";
+import { NaverService } from "../services/naver.js";
 import { YoutubeService } from "../services/youtube.js";
 import {
   MarketContextSchema,
@@ -154,6 +156,30 @@ function researchFetch(): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
+/**
+ * 지정한 host만 HTTP 에러로 응답하고 나머지 소스는 정상 응답한다.
+ * 에러 본문은 세 서비스의 파서를 한 번에 만족시킨다 (YouTube는 error.errors[].reason,
+ * 네이버는 errorCode/errorMessage, HN은 status만 본다).
+ */
+function brokenFetch(status: number, ...hosts: string[]): typeof fetch {
+  const healthy = researchFetch();
+  return vi.fn((input: string | URL | Request) => {
+    if (!hosts.includes(new URL(String(input)).host)) {
+      return healthy(input);
+    }
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          error: { errors: [{ reason: "quotaExceeded" }], message: "quota" },
+          errorCode: "012",
+          errorMessage: "호출 한도 초과",
+        }),
+        { status, headers: { "content-type": "application/json" } },
+      ),
+    );
+  }) as unknown as typeof fetch;
+}
+
 // ── LLM 응답 원문 ────────────────────────────────────────────────────
 // researchPlanner는 pipeline step이 아니라 context-hunter 내부 호출이다 (ADR-012).
 // non-grounding 구조화 출력이라 펜스 없는 순수 JSON으로 돌아온다.
@@ -187,6 +213,21 @@ const CONTEXT_TEXT = `조사 결과를 정리했습니다.
       "text": "${COMMENT_TEXT}",
       "authorName": null,
       "score": null
+    },
+    {
+      "source": "hackernews",
+      "title": "Show HN: Plant care assistant",
+      "url": "https://news.ycombinator.com/item?id=42",
+      "text": "${HN_COMMENT_TEXT}",
+      "authorName": "pg"
+    },
+    {
+      "source": "naver",
+      "title": "식물 키우기 실패 후기",
+      "url": "https://cafe.naver.com/cafearticle/1",
+      "text": "${NAVER_SNIPPET}",
+      "authorName": "식물카페",
+      "extra": "검색 스니펫"
     }
   ],
   "painPointEvidence": ["물주기 실패로 식물을 죽인 경험"],
@@ -313,9 +354,19 @@ const ALL_STEPS: PipelineStepName[] = [
 let tmpDir: string;
 let store: RunStore;
 
-/** CLI와 동일하게 YouTube 소스 하나만 등록한다 (HN·네이버 활성화는 step 9) */
+/** CLI의 buildResearchSources와 동일한 3소스 구성 (키가 전부 있는 경우) */
 function researchSources(fetchFn: typeof fetch): ResearchSource[] {
-  return [youtubeSource(new YoutubeService({ apiKey: "test-key", fetchFn }))];
+  return [
+    youtubeSource(new YoutubeService({ apiKey: "test-key", fetchFn })),
+    hackerNewsSource(new HackerNewsService({ fetchFn })),
+    naverSource(
+      new NaverService({
+        clientId: "test-id",
+        clientSecret: "test-secret",
+        fetchFn,
+      }),
+    ),
+  ];
 }
 
 function deps(client: GoogleGenAI, fetchFn: typeof fetch): PipelineDeps {
@@ -383,6 +434,41 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     ).not.toBeNull();
   });
 
+  it("세 소스의 수집 결과가 grounding 프롬프트에 실리고 context.json까지 살아남는다", async () => {
+    const { client, generateContent } = fakeGenAI(
+      PLANNER_TEXT,
+      CONTEXT_RESPONSE,
+      THESIS_TEXT,
+      CRITICISM_TEXT,
+      SOLUTION_TEXT,
+      VERDICT_TEXT,
+    );
+
+    const result = await runPipeline(deps(client, researchFetch()), { idea: IDEA });
+
+    // 수집 → 프롬프트: 세 소스의 원문이 context-hunter의 grounding 호출(planner 다음)에 들어간다
+    const contextPrompt = (
+      generateContent.mock.calls[1][0] as { contents: string }
+    ).contents;
+    expect(contextPrompt).toContain(COMMENT_TEXT);
+    expect(contextPrompt).toContain(HN_COMMENT_TEXT);
+    expect(contextPrompt).toContain(NAVER_SNIPPET);
+
+    // 프롬프트 → 산출물: LLM이 돌려준 세 소스의 목소리가 디스크까지 살아남는다
+    const context = store.loadStepOutput(
+      result.runId,
+      "context-hunter",
+      MarketContextSchema,
+    );
+    expect(context?.communityVoices.map((voice) => voice.source)).toEqual([
+      "youtube",
+      "hackernews",
+      "naver",
+    ]);
+    // 네이버 항목은 잘린 검색 스니펫이라는 표시를 달고 온다 (완결된 원문 인용이 아니다)
+    expect(context?.communityVoices[2].extra).toBe("검색 스니펫");
+  });
+
   it("grounding 응답의 인용이 코드 추출을 거쳐 디스크의 context.json에 남는다", async () => {
     const { client } = fakeGenAI(
       PLANNER_TEXT,
@@ -438,18 +524,34 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     expect(context?.communityVoices[0].score).toBeUndefined();
   });
 
-  it("YouTube가 quota로 실패해도 웹검색만으로 완주한다", async () => {
+  it("YouTube가 quota로 실패해도 나머지 두 소스로 완주한다", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const quotaFetch = vi.fn(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            error: { errors: [{ reason: "quotaExceeded" }], message: "quota" },
-          }),
-          { status: 403, headers: { "content-type": "application/json" } },
-        ),
-      ),
-    ) as unknown as typeof fetch;
+    const { client, generateContent } = fakeGenAI(
+      PLANNER_TEXT,
+      CONTEXT_RESPONSE,
+      THESIS_TEXT,
+      CRITICISM_TEXT,
+      SOLUTION_TEXT,
+      VERDICT_TEXT,
+    );
+
+    const result = await runPipeline(
+      deps(client, brokenFetch(403, "www.googleapis.com")),
+      { idea: IDEA },
+    );
+
+    expect(result.status).toBe("completed");
+    // 죽은 소스만 빠진다 — 살아있는 HN·네이버 원문은 그대로 프롬프트에 실린다
+    const contextPrompt = (
+      generateContent.mock.calls[1][0] as { contents: string }
+    ).contents;
+    expect(contextPrompt).not.toContain(COMMENT_TEXT);
+    expect(contextPrompt).toContain(HN_COMMENT_TEXT);
+    expect(contextPrompt).toContain(NAVER_SNIPPET);
+  });
+
+  it("Hacker News와 네이버가 429로 실패해도 파이프라인이 완주한다", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { client } = fakeGenAI(
       PLANNER_TEXT,
       CONTEXT_RESPONSE,
@@ -459,9 +561,44 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       VERDICT_TEXT,
     );
 
-    const result = await runPipeline(deps(client, quotaFetch), { idea: IDEA });
+    const result = await runPipeline(
+      deps(client, brokenFetch(429, "hn.algolia.com", "openapi.naver.com")),
+      { idea: IDEA },
+    );
 
     expect(result.status).toBe("completed");
+    expect(
+      fs.existsSync(path.join(tmpDir, result.runId, "context.json")),
+    ).toBe(true);
+    expect(fs.existsSync(result.reportPath as string)).toBe(true);
+  });
+
+  it("모든 소스가 실패해도 웹검색만으로 완주한다", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { client } = fakeGenAI(
+      PLANNER_TEXT,
+      CONTEXT_RESPONSE,
+      THESIS_TEXT,
+      CRITICISM_TEXT,
+      SOLUTION_TEXT,
+      VERDICT_TEXT,
+    );
+
+    const result = await runPipeline(
+      deps(
+        client,
+        brokenFetch(
+          503,
+          "www.googleapis.com",
+          "hn.algolia.com",
+          "openapi.naver.com",
+        ),
+      ),
+      { idea: IDEA },
+    );
+
+    expect(result.status).toBe("completed");
+    expect(fs.existsSync(result.reportPath as string)).toBe(true);
   });
 });
 
