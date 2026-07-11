@@ -17,7 +17,8 @@
     },
     {
       "dir": "3-multi-source-research",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-07-11T22:46:43+0900"
     }
   ]
 }
