@@ -26,6 +26,8 @@ runs/{run-id}/         # 실행 산출물 (git 미추적)
 ├── state.json         # step별 status/timestamp — resume 판정의 단일 진실 공급원
 ├── questions.json     # Interviewer 산출물 (InterviewQuestions) — 웹 생성 run에서만
 ├── answers.json       # 사용자가 제출한 인터뷰 답변 (InterviewAnswers) — step 산출물이 아닌 사람의 아티팩트
+├── research.json      # 수집된 원시 증거 (ResearchEvidence) — voices[] + 소스별 coverage[].
+│                      #   context.json의 communityVoices는 이 파일의 부분집합이어야 한다
 ├── context.json       # Context Hunter 산출물 (MarketContext)
 ├── thesis.json        # Thesis 산출물 (Thesis, 正)
 ├── criticism.json     # Cold Critic 산출물 (Criticism, 反)
@@ -40,16 +42,22 @@ runs/{run-id}/         # 실행 산출물 (git 미추적)
 - **서비스 레이어 격리**: 외부 API(Gemini, YouTube, Hacker News, 네이버) 호출은 services/에서만 일어난다. agents/는 services/를 통해서만 외부와 통신하고, research/도 직접 fetch하지 않고 주입받은 services/를 정규화만 한다.
 - **다중 소스 병렬 수집 + fail-soft** (ADR-012): 유저 목소리 소스(YouTube·Hacker News·네이버)는 `src/research/`의 `collectAll`이 `Promise.allSettled`로 병렬 수집한다. 일부 소스의 실패(quota 초과, 네트워크 오류)는 흡수하고 성공한 소스만 사용하며, **전부 실패해도 파이프라인을 멈추지 않는다** — 웹검색만으로 진행한다. API 키가 없는 소스는 실패가 아니라 애초에 소스 배열에서 제외한다.
 - **순차 논증 렌더링**: 리포트는 5단계 서사(시장 맥락 → 正 → 反 → 合 → 최종 판정)를 따라 렌더링되며, 결론(최종 판정)은 마지막에 온다. 상단 요약 배너는 두지 않는다 (ADR-008).
+- **출처는 사실이다** (ADR-013): 클릭 가능한 링크로 렌더되는 URL은 코드가 API 응답에서 주입한 것뿐이다(`citations`, `communityVoices`). LLM이 타이핑한 URL(`sources[]`, `competitors[].url`)은 텍스트로만 표시한다.
 
 ## 데이터 흐름
 ```
 사용자 입력(아이디어) → cli → pipeline/orchestrator
   → step: interviewer     (웹 전용, gemini)                  → runs/{id}/questions.json
                                                              ← runs/{id}/answers.json (사용자 제출)
-  → step: context-hunter                                     → runs/{id}/context.json
+  → step: context-hunter                       → runs/{id}/research.json → runs/{id}/context.json
       ├ researchPlanner (gemini, 소스별 검색어 생성 — step 아님)
       ├ collectAll (youtube + hackernews + naver 병렬, fail-soft)
-      └ gemini grounding + urlContext → citations 코드 추출
+      │   └ 수집 즉시 research.json으로 영속화 (voices[] + coverage[]) — LLM 이전의 사실
+      ├ gemini grounding + urlContext (프롬프트에는 증거를 V1·V2… ID로 붙여 넣는다)
+      │   └ LLM은 유의미한 목소리의 ID만 고른다 (판단은 LLM, 사실은 코드 — ADR-013)
+      └ 코드 주입 → context.json
+          ├ citations[]      : 재시도 전체에서 누적 추출 (kind: origin | redirect)
+          └ communityVoices[]: 선택된 ID를 research.json의 voices[]로 치환
   → step: thesis (正)     (gemini, context 주입)             → runs/{id}/thesis.json
   → step: cold-critic (反) (gemini, context+thesis 주입)      → runs/{id}/criticism.json
   → step: solution-designer (合) (gemini, context+thesis+criticism 주입) → runs/{id}/solution.json

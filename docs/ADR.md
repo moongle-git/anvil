@@ -83,3 +83,29 @@ MVP 속도 최우선. 외부 의존성 최소화. 작동하는 최소 구현을 
 **트레이드오프**: `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET` 발급이 필요하다(무료, 일 25,000회). Gemini 호출이 run당 1회 늘어난다(researchPlanner). `urlContext` 병용으로 grounding 호출 지연이 늘어 타임아웃을 180초로 올리고 재시도를 2회로 줄인다(최악 6분으로 기존과 동일). 그만큼 context-hunter가 길어지므로 ADR-007의 "중단됨" mtime 휴리스틱을 **10분에서 15분으로 올린다**(`STALLED_THRESHOLD_MS`) — 10분은 정상 실행을 중단됨으로 오탐한다. HN은 영어권이라 한국어 쿼리로는 조용히 0건이 되므로, planner의 영어 쿼리 생성이 필수 전제다.
 
 **하위호환**: `MarketContext.youtubeVoices`를 `communityVoices`로 대체하되, `z.preprocess`로 구 `context.json`의 `youtubeVoices[]`를 `communityVoices[]`(`source: "youtube"`)로 **승격**한다. ADR-011과 달리 구 run을 빈 리포트로 만들지 않는다 — MarketContext에 대해서는 더 나은 하위호환을 택했다. `.default([])`만으로는 zod의 `strip` 정책 때문에 구 데이터가 조용히 소멸하므로 부족하다.
+
+### ADR-013: 출처를 판단이 아니라 사실로 만든다 — 코드 주입 인용과 링크 박탈
+**결정**: 리포트에서 **클릭 가능한 링크로 렌더되는 URL은 코드가 API 응답에서 주입한 것뿐**이라는 불변식을 세운다. 네 가지를 바꾼다.
+
+1. **`communityVoices[]`를 코드 주입 필드로 전환한다.** `collectAll()`의 수집 결과를 먼저 `runs/{id}/research.json`(`ResearchEvidence` — `voices[]` + 소스별 `coverage[]`)으로 영속화하고, 프롬프트에는 증거를 ID(`V1`, `V2`…)와 함께 넣는다. LLM은 **어느 목소리가 유의미한가를 ID로만 선택**하고, 코드가 그 ID를 `research.json`의 실제 `CommunityVoice` 객체로 치환해 `context.json`에 쓴다. `CODE_INJECTED_CONTEXT_KEYS`에 `communityVoices`가 추가되며, `context.json`의 `communityVoices`는 `research.json` `voices[]`의 **부분집합**임이 구조적으로 보장된다.
+2. **재시도 간 grounding 메타데이터를 누적한다.** `generateValidated`가 검증에 성공한 시도의 response만 반환하고 실패한 시도의 `groundingMetadata`를 버리는 현행 동작을 뒤집는다. 재시도 루프 전체에서 인용을 uri 기준으로 dedupe하며 누적하고, 최종 결과에 함께 돌려준다.
+3. **검증되지 않은 URL의 링크를 박탈한다.** `sources[]`·`competitors[].url`은 LLM 자기보고이므로 텍스트로만 표시하고 `href`를 걸지 않는다(`report.md`·웹 리포트 모두). 클릭 가능한 링크는 `citations[]`와 `communityVoices[]`뿐이다.
+4. **`CitationSchema`에 `kind` 판별자를 추가한다.** `"origin"`(`urlContextMetadata.retrievedUrl` — urlContext가 실제로 읽어낸 원본 URL) | `"redirect"`(`groundingChunks[].web.uri` — 만료되는 vertexaisearch 리다이렉트).
+
+**뒤집는 결정**: ADR-012는 "`citations[]`와 `sources[]`는 실패 모드가 상보적이므로 **공존**한다"고 했다. **공존 자체는 유지한다** — 자기보고는 부정확하지만 만료되지 않고, 인용은 정확하지만 만료된다는 논거는 그대로 유효하다. 뒤집는 것은 두 필드를 **동등한 신뢰도로 렌더링해온 것**이다. 상보성은 두 필드가 **둘 다 채워질 때만** 성립하는데, 실전에서 `citations`가 8/8 run 전부 비면서 공존이 아니라 *환각 필드만 살아남는 구조*가 됐다. 따라서 (a) citations를 실제로 채우고(결정 2), (b) 자기보고 필드의 링크를 박탈해(결정 3) 둘의 신뢰도 차이를 렌더링에서 드러낸다.
+ADR-012의 "인용은 LLM이 아니라 코드가 추출한다"는 원칙은 폐기가 아니라 **인용문으로 확장**된다(결정 1) — `communityVoices`가 "LLM이 선별한 목소리"라던 ADR-012의 서술은 "LLM이 **ID로** 선별하고 코드가 실체를 채운다"로 갱신된다. 아울러 `src/services/gemini.test.ts`가 *의도된 동작*으로 못박은 "형식 실패한 시도의 groundingMetadata는 함께 버린다"는 계약을 폐기한다(결정 2).
+
+**이유**: 실제 산출물 8개 run을 전수조사하고 URL을 라이브 HTTP 검증한 결과 — `citations[]` **8/8 run 0건**, 네이버 인용 **0건**, 경쟁사 URL 89개 중 **53개(60%) 도달 불가**. 반면 YouTube 영상 ID는 10/10 실존이다. 즉 **수집 계층은 멀쩡하고, 망가지는 지점은 LLM이 증거를 "다시 받아적는" 구간뿐이다.** 그 구간을 없앤다.
+- **citations가 항상 비는 원인은 재시도 폐기다.** grounding 모드는 `responseSchema`를 못 써 자유 텍스트 → `extractJsonText` → zod 검증 경로라 1차 시도의 형식 실패가 잦은데, 재시도 프롬프트는 `[교정 요청]`이라 모델이 **새 검색을 하지 않는다**. 따라서 채택되는 최종 response에는 `groundingMetadata`가 아예 없다. 폐기의 명분(검증된 본문과 인용의 대응 유지)보다, 그 결과로 **인용이 0건이 되어 환각 필드만 살아남는 실패**가 압도적으로 나쁘다. `citations[]`는 문장별 각주가 아니라 "grounding이 이 run에서 실제로 무엇을 가져왔는가"의 **run 단위 기록**이므로, 누적이 오히려 더 정직한 정의다.
+- **LLM은 코드가 준 URL조차 다시 타이핑하면 망가뜨린다.** 스모킹건 — 실제 산출물에 `https://vertexaisearch.cloud.google.google.com/grounding-api-redirect/AUZIYQEe... [4] 10 Best AI Meeting Assistants…`가 저장돼 있다. 도메인에 `.google`이 중복됐고(같은 파일의 나머지 29개는 정상) URL·각주번호·제목이 한 문자열로 뭉개졌다. **코드가 API 응답에서 주입한 URL은 오타가 날 수 없다.** LLM의 판단(어느 목소리가 유의미한가)은 남기되, 사실(그 목소리의 원문·출처·작성자)은 코드가 소유한다 — `citations`에 이미 적용된 원칙("LLM에게 인용을 채우라고 하면 URL을 지어낸다", `marketContext.ts`)을 인용문에도 적용하는 것뿐이다.
+- **링크 박탈의 근거는 사망률 60%다.** 사용자가 링크를 클릭한다는 것은 그 URL이 검증됐다고 믿는다는 뜻이다. 형식만 맞는 URL에 `href`를 거는 것은 거짓 신호다. 텍스트로 남기는 편이 정직하다 — 독자는 이름으로 직접 검색할 수 있다.
+- **`kind`가 없으면 가장 강한 인용과 반드시 깨질 인용을 구분할 수 없다.** urlContext가 실제로 읽어낸 원본 URL과 만료되는 리다이렉트가 한 배열에 섞여 있어, 렌더러가 신뢰도 차이를 표현할 수도 만료를 고지할 수도 없다.
+
+**기각한 대안**:
+- **`sources[]`를 스키마에서 제거** — ADR-012의 상보성 논거가 여전히 유효하다. 자기보고는 부정확하지만 만료되지 않고, citations가 0건일 때 "grounding이 아무것도 못 가져왔다"는 사실을 가리지 않고 병렬로 남는다. 제거가 아니라 **링크 박탈**이 이번 결정이다.
+- **저장 시점에 URL을 HTTP로 라이브 검증해 죽은 링크를 거르기** — 89개 왕복이 context-hunter에 얹히고, 네트워크 상태에 따라 산출물이 달라져 상태 파일 쓰기의 멱등성(ARCHITECTURE "상태 관리")이 깨진다. 게다가 도메인은 살아 있고 경로만 틀린 환각 URL은 통과하므로 거짓 신호를 오히려 강화한다.
+- **"URL을 그대로 복사하라"고 프롬프트로 지시** — 이미 그렇게 하고 있고, 스모킹건이 그 실패다. 프롬프트로는 사실을 지킬 수 없다.
+
+**트레이드오프**: LLM이 수집 증거에 없는 목소리를 인용하고 싶어도 못 한다 — **그것이 목적이다.** 전 소스가 실패하면 `communityVoices`는 빈 배열이 되고 리포트는 근거 부재를 그대로 드러낸다. `sources[]`가 링크가 아니게 되어 독자가 URL을 직접 복사해야 한다. 재시도 시 누적된 citations는 최종 채택 본문에 대응하지 않는 인용(폐기된 시도의 검색 결과)을 포함할 수 있다 — `citations[]`를 run 단위 기록으로 재정의해 이를 수용한다. `research.json`이 늘어 run 디렉토리가 커지고 `context.json`과 일부 중복되지만, 수집물과 선별물의 차이 자체가 관측 대상이다.
+
+**하위호환**: 구 `context.json`은 계속 유효하다. `communityVoices[]`는 **필드 모양이 바뀌지 않는다** — 바뀌는 것은 *누가 채우는가*이지 스키마가 아니다(ADR-012의 `youtubeVoices` 승격도 그대로 유지된다). `kind`가 없는 구 인용은 `"redirect"`로 승격한다(만료 가능 쪽이 보수적 기본값이다 — 실측상 구 run의 citations는 전부 0건이라 대상이 사실상 없다). `research.json`이 없는 구 run은 수집 커버리지 표시만 비고 나머지 리포트는 그대로 렌더된다. ADR-011과 달리 구 run을 빈 리포트로 만들지 않는다.
