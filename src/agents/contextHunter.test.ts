@@ -1,15 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
-import type {
-  YoutubeComment,
-  YoutubeService,
-  YoutubeVideo,
-} from "../services/youtube.js";
-import type { Citation } from "../types/index.js";
+import type { Citation, CommunityVoice, ResearchSourceId } from "../types/index.js";
 import {
   CODE_INJECTED_CONTEXT_KEYS,
   MarketContextDraftSchema,
   MarketContextObjectSchema,
+  SOURCE_LABELS,
   type MarketContextDraft,
 } from "../types/index.js";
 import {
@@ -56,47 +53,61 @@ const CITATIONS: Citation[] = [
 
 const SEARCH_QUERIES = ["반려견 산책 대행 서비스"];
 
-function video(id: string, title: string): YoutubeVideo {
-  return {
-    videoId: id,
-    title,
-    channelTitle: "채널",
-    url: `https://www.youtube.com/watch?v=${id}`,
-    description: "설명",
-  };
-}
+const YOUTUBE_VOICE: CommunityVoice = {
+  source: "youtube",
+  title: "강아지 산책 브이로그",
+  url: "https://www.youtube.com/watch?v=abc123",
+  text: "산책 시킬 시간이 없어서 너무 미안해요...",
+  authorName: "집사",
+  score: 12,
+};
 
-function comment(videoId: string, text: string): YoutubeComment {
-  return { videoId, text, authorName: "user1", likeCount: 3 };
+const NAVER_VOICE: CommunityVoice = {
+  source: "naver",
+  title: "산책 대행 후기",
+  url: "https://cafe.naver.com/dog/1",
+  text: "펫시터 구하기가 생각보다 어렵네요...",
+  extra: "검색 스니펫",
+};
+
+/** collectAll이 실패를 흡수하므로, 어댑터는 그대로 throw한다 */
+function fakeSource(
+  id: ResearchSourceId,
+  result: CommunityVoice[] | Error,
+): ResearchSource {
+  return {
+    id,
+    label: SOURCE_LABELS[id],
+    collect:
+      result instanceof Error
+        ? vi.fn().mockRejectedValue(result)
+        : vi.fn().mockResolvedValue(result),
+  };
 }
 
 interface FakeDeps {
   deps: ContextHunterDeps;
   generateGrounded: ReturnType<typeof vi.fn>;
-  collectVoices: ReturnType<typeof vi.fn>;
 }
 
-function fakeDeps(
-  voices: { video: YoutubeVideo; comments: YoutubeComment[] }[] | Error,
-): FakeDeps {
+function fakeDeps(sources: ResearchSource[]): FakeDeps {
   const generateGrounded = vi.fn().mockResolvedValue({
     data: DRAFT,
     citations: CITATIONS,
     webSearchQueries: SEARCH_QUERIES,
   });
-  const collectVoices =
-    voices instanceof Error
-      ? vi.fn().mockRejectedValue(voices)
-      : vi.fn().mockResolvedValue(voices);
 
   return {
     deps: {
       gemini: { generateGrounded } as unknown as GeminiService,
-      youtube: { collectVoices } as unknown as YoutubeService,
+      sources,
     },
     generateGrounded,
-    collectVoices,
   };
+}
+
+function promptOf(generateGrounded: ReturnType<typeof vi.fn>): string {
+  return generateGrounded.mock.calls[0][0].prompt as string;
 }
 
 afterEach(() => {
@@ -104,37 +115,47 @@ afterEach(() => {
 });
 
 describe("runContextHunter (정상 흐름)", () => {
-  it("YouTube 수집 결과와 아이디어를 담아 grounding 모드로 Gemini를 호출하고 결과를 반환한다", async () => {
-    const { deps, generateGrounded, collectVoices } = fakeDeps([
-      {
-        video: video("abc123", "강아지 산책 브이로그"),
-        comments: [comment("abc123", "산책 시킬 시간이 없어서 너무 미안해요...")],
-      },
-    ]);
+  it("등록된 모든 소스를 수집해 프롬프트에 담고 grounding 모드로 Gemini를 호출한다", async () => {
+    const youtube = fakeSource("youtube", [YOUTUBE_VOICE]);
+    const naver = fakeSource("naver", [NAVER_VOICE]);
+    const { deps, generateGrounded } = fakeDeps([youtube, naver]);
 
     const result = await runContextHunter(deps, IDEA);
 
     expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
 
-    // YouTube는 아이디어 기반 검색어로 호출된다
-    expect(collectVoices).toHaveBeenCalledTimes(1);
-    expect(collectVoices).toHaveBeenCalledWith(IDEA);
+    // 소스별 쿼리 생성은 step 7의 몫 — 지금은 모든 소스가 아이디어 원문을 받는다
+    expect(youtube.collect).toHaveBeenCalledTimes(1);
+    expect(youtube.collect).toHaveBeenCalledWith(IDEA);
+    expect(naver.collect).toHaveBeenCalledTimes(1);
+    expect(naver.collect).toHaveBeenCalledWith(IDEA);
 
     // grounding 호출은 LLM이 채우는 draft 스키마로 한다 — citations는 LLM이 채우지 않는다
     expect(generateGrounded).toHaveBeenCalledTimes(1);
     const params = generateGrounded.mock.calls[0][0];
     expect(params.schema).toBe(MarketContextDraftSchema);
 
-    // 프롬프트에 아이디어 원문과 YouTube 수집 결과(제목/URL/댓글 원문)가 포함된다
+    // 프롬프트에 아이디어 원문과 수집된 목소리(원문·출처·소스 라벨)가 포함된다
     const prompt = params.prompt as string;
     expect(prompt).toContain(IDEA);
-    expect(prompt).toContain("강아지 산책 브이로그");
-    expect(prompt).toContain("https://www.youtube.com/watch?v=abc123");
-    expect(prompt).toContain("산책 시킬 시간이 없어서 너무 미안해요...");
+    expect(prompt).toContain(SOURCE_LABELS.youtube);
+    expect(prompt).toContain(YOUTUBE_VOICE.text);
+    expect(prompt).toContain(YOUTUBE_VOICE.url);
+    expect(prompt).toContain(NAVER_VOICE.text);
+  });
+
+  it("치환되지 않은 placeholder가 프롬프트에 남지 않는다", async () => {
+    const { deps, generateGrounded } = fakeDeps([
+      fakeSource("youtube", [YOUTUBE_VOICE]),
+    ]);
+
+    await runContextHunter(deps, IDEA);
+
+    expect(promptOf(generateGrounded)).not.toMatch(/\{[a-zA-Z]+\}/);
   });
 
   it("citations는 LLM 산출물이 아니라 코드가 grounding 응답에서 주입한다", async () => {
-    const { deps } = fakeDeps([]);
+    const { deps } = fakeDeps([fakeSource("youtube", [])]);
 
     const result = await runContextHunter(deps, IDEA);
 
@@ -147,7 +168,7 @@ describe("runContextHunter (정상 흐름)", () => {
 
   it("webSearchQueries는 로그로만 노출하고 산출물에 넣지 않는다", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const { deps } = fakeDeps([]);
+    const { deps } = fakeDeps([fakeSource("youtube", [])]);
 
     const result = await runContextHunter(deps, IDEA);
 
@@ -157,10 +178,7 @@ describe("runContextHunter (정상 흐름)", () => {
 
   it("프롬프트에 댓글 원문 보존(요약 금지) 지시가 포함된다", async () => {
     const { deps, generateGrounded } = fakeDeps([
-      {
-        video: video("abc123", "강아지 산책 브이로그"),
-        comments: [comment("abc123", "댓글 원문")],
-      },
+      fakeSource("youtube", [YOUTUBE_VOICE]),
     ]);
 
     await runContextHunter(deps, IDEA);
@@ -174,64 +192,101 @@ describe("runContextHunter (정상 흐름)", () => {
 
 describe("runContextHunter (인터뷰 답변 반영)", () => {
   it("clarifications가 있으면 프롬프트에 인터뷰 답변 섹션을 추가한다", async () => {
-    const { deps, generateGrounded } = fakeDeps([]);
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
     const clarifications = "Q: 핵심 타깃은?\nA: 바쁜 1인 가구 직장인";
 
     await runContextHunter(deps, IDEA, clarifications);
 
-    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
+    const prompt = promptOf(generateGrounded);
     expect(prompt).toContain("사용자 추가 설명");
     expect(prompt).toContain("바쁜 1인 가구 직장인");
   });
 
   it("clarifications가 없으면 인터뷰 답변 섹션을 넣지 않는다 (기존 동작 유지)", async () => {
-    const { deps, generateGrounded } = fakeDeps([]);
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
 
     await runContextHunter(deps, IDEA);
 
-    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
-    expect(prompt).not.toContain("사용자 추가 설명");
+    expect(promptOf(generateGrounded)).not.toContain("사용자 추가 설명");
   });
 
   it("clarifications가 공백뿐이면 섹션을 넣지 않는다", async () => {
-    const { deps, generateGrounded } = fakeDeps([]);
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
 
     await runContextHunter(deps, IDEA, "   ");
 
-    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
-    expect(prompt).not.toContain("사용자 추가 설명");
+    expect(promptOf(generateGrounded)).not.toContain("사용자 추가 설명");
   });
 });
 
-describe("runContextHunter (YouTube 실패 내성)", () => {
-  it("YouTube 수집이 실패해도 웹검색만으로 진행하고 실패를 로깅한다", async () => {
+describe("runContextHunter (소스 실패 내성)", () => {
+  it("한 소스가 실패해도 나머지 소스의 목소리로 진행하고 실패를 프롬프트에 명기한다", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const { deps, generateGrounded } = fakeDeps(
-      new Error("YouTube API quota가 초과되었다"),
-    );
+    const { deps, generateGrounded } = fakeDeps([
+      fakeSource("youtube", [YOUTUBE_VOICE]),
+      fakeSource("naver", new Error("네이버 API 일일 호출 한도(25,000)를 초과했다")),
+    ]);
+
+    const result = await runContextHunter(deps, IDEA);
+
+    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    const prompt = promptOf(generateGrounded);
+    expect(prompt).toContain(YOUTUBE_VOICE.text);
+    // 실패한 소스가 프롬프트에 남아야 LLM이 근거 편향을 스스로 진술한다
+    expect(prompt).toContain("수집 실패");
+    expect(prompt).toContain("일일 호출 한도");
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("모든 소스가 실패해도 웹검색만으로 진행한다 (throw하지 않는다)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { deps, generateGrounded } = fakeDeps([
+      fakeSource("youtube", new Error("YouTube API quota가 초과되었다")),
+      fakeSource("hackernews", new Error("Hacker News API 요청이 실패했다")),
+      fakeSource("naver", new Error("네이버 API 인증에 실패했다")),
+    ]);
 
     const result = await runContextHunter(deps, IDEA);
 
     expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
     expect(generateGrounded).toHaveBeenCalledTimes(1);
-
-    // 프롬프트는 YouTube 데이터 없음을 명시하고, communityVoices를 빈 배열로 지시한다
-    const prompt = generateGrounded.mock.calls[0][0].prompt as string;
-    expect(prompt).toContain("communityVoices");
-    expect(prompt).toContain("빈 배열");
-
-    // 실패 사실 로깅
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain("quota");
+    expect(promptOf(generateGrounded)).toContain("quota");
   });
 
-  it("YouTube 결과가 빈 배열이어도 정상 진행한다", async () => {
+  it("등록된 소스가 없으면 빈 수집 안내로 진행한다", async () => {
     const { deps, generateGrounded } = fakeDeps([]);
 
     const result = await runContextHunter(deps, IDEA);
 
     expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
-    expect(generateGrounded).toHaveBeenCalledTimes(1);
+    const prompt = promptOf(generateGrounded);
+    expect(prompt).toContain("communityVoices는 빈 배열로");
+  });
+
+  it("모든 소스가 0건이면 빈 수집 안내로 진행한다", async () => {
+    const { deps, generateGrounded } = fakeDeps([
+      fakeSource("youtube", []),
+      fakeSource("hackernews", []),
+    ]);
+
+    const result = await runContextHunter(deps, IDEA);
+
+    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(promptOf(generateGrounded)).toContain("communityVoices는 빈 배열로");
+  });
+
+  it("일부 소스만 0건이면 그 0건이 프롬프트에 숫자로 드러난다", async () => {
+    const { deps, generateGrounded } = fakeDeps([
+      fakeSource("youtube", [YOUTUBE_VOICE]),
+      fakeSource("hackernews", []),
+    ]);
+
+    await runContextHunter(deps, IDEA);
+
+    // HN이 한국어 쿼리를 받아 조용히 0건이 되는 실패는 숫자로 적혀야 LLM이 근거 부재를 진술한다
+    expect(promptOf(generateGrounded)).toContain(
+      `${SOURCE_LABELS.hackernews} — 0건`,
+    );
   });
 });
 
@@ -266,6 +321,20 @@ describe("CONTEXT_HUNTER_PROMPT_TEMPLATE (출력 형식 계약)", () => {
     expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("naver");
   });
 
+  it("수집 결과 placeholder는 소스별로 쪼개지 않고 하나다", () => {
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("{evidenceSection}");
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).not.toContain("{youtubeSection}");
+  });
+
+  it("★ 네이버 항목이 검색 스니펫임을 경고한다 (잘린 문장을 원문 인용으로 싣지 못하게)", () => {
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("스니펫");
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("잘린 문장");
+  });
+
+  it("★ urlContext로 읽을 경쟁사 페이지 수의 상한을 명시한다 (입력 토큰 폭발 방지)", () => {
+    expect(CONTEXT_HUNTER_PROMPT_TEMPLATE).toContain("3곳");
+  });
+
   it.each(["briefing", "marketSizeIndicators", "competitorInsight", "voicesInsight"])(
     "JSON 예시에 인사이트 필드 %s가 있다",
     (field) => {
@@ -296,6 +365,11 @@ describe("CONTEXT_HUNTER_SYSTEM_PROMPT (인사이트 변환 지시)", () => {
   it("communityVoices가 비었을 때 voicesInsight에 그 한계를 진술하라고 지시한다", () => {
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("communityVoices");
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("지어내지");
+  });
+
+  it("★ 일부 소스만 실패했을 때의 근거 편향도 진술하라고 지시한다", () => {
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("수집이 실패");
+    expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("편향");
   });
 
   it("댓글 원문 보존 규칙을 유지한다", () => {

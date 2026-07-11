@@ -3,14 +3,16 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunStore, STEP_OUTPUT_FILES } from "../lib/runStore.js";
+import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
-import type { YoutubeService } from "../services/youtube.js";
 import {
   CriticismSchema,
   InterviewQuestionsSchema,
   MarketContextDraftSchema,
   MarketContextSchema,
+  RESEARCH_SOURCE_IDS,
   SolutionSchema,
+  SOURCE_LABELS,
   ThesisSchema,
   VerdictSchema,
   type Criticism,
@@ -192,10 +194,13 @@ function fakeGemini(options?: {
   };
 }
 
-function fakeYoutube(): YoutubeService {
-  return {
-    collectVoices: vi.fn().mockResolvedValue([]),
-  } as unknown as YoutubeService;
+/** 자료조사 소스 3종. 수집 결과는 비어 있어도 파이프라인은 웹검색만으로 완주한다 */
+function fakeSources(): ResearchSource[] {
+  return RESEARCH_SOURCE_IDS.map((id) => ({
+    id,
+    label: SOURCE_LABELS[id],
+    collect: vi.fn().mockResolvedValue([]),
+  }));
 }
 
 function calledSchemas(generateStructured: ReturnType<typeof vi.fn>): unknown[] {
@@ -219,7 +224,7 @@ describe("runPipeline", () => {
   });
 
   function makeDeps(gemini: GeminiService): PipelineDeps {
-    return { store, gemini, youtube: fakeYoutube(), log: () => undefined };
+    return { store, gemini, sources: fakeSources(), log: () => undefined };
   }
 
   it("신규 run(CLI): 인터뷰 없이 정반합·판정 5개 step을 순서대로 실행하고 리포트를 생성한다", async () => {
@@ -379,9 +384,9 @@ describe("runPipeline", () => {
 
     // 2차 실행 (resume) — context-hunter는 skip, 나머지만 실행
     const second = fakeGemini();
-    const youtube = fakeYoutube();
+    const sources = fakeSources();
     const result = await runPipeline(
-      { store, gemini: second.gemini, youtube, log: () => undefined },
+      { store, gemini: second.gemini, sources, log: () => undefined },
       { idea: IDEA, resumeRunId: error.runId },
     );
 
@@ -392,7 +397,10 @@ describe("runPipeline", () => {
       SolutionSchema,
       VerdictSchema,
     ]);
-    expect(youtube.collectVoices).not.toHaveBeenCalled();
+    // skip된 step은 어떤 소스도 수집하지 않는다
+    for (const source of sources) {
+      expect(source.collect).not.toHaveBeenCalled();
+    }
 
     const saved = store.loadRun(result.runId);
     expect(saved.steps.map((s) => s.status)).toEqual([

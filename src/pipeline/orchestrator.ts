@@ -7,8 +7,8 @@ import { runThesis } from "../agents/thesis.js";
 import { runVerdict } from "../agents/verdict.js";
 import { renderReport } from "../lib/report.js";
 import type { RunStore } from "../lib/runStore.js";
+import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
-import type { YoutubeService } from "../services/youtube.js";
 import {
   CriticismSchema,
   MarketContextSchema,
@@ -25,7 +25,8 @@ import {
 export interface PipelineDeps {
   store: RunStore;
   gemini: GeminiService;
-  youtube: YoutubeService;
+  /** 자료조사 소스. 키가 없는 소스는 애초에 배열에서 빠진다 (ADR-012) */
+  sources: readonly ResearchSource[];
   log?: (msg: string) => void;
 }
 
@@ -197,7 +198,7 @@ export async function runPipeline(
 
   const context = await executeStep("context-hunter", MarketContextSchema, () =>
     runContextHunter(
-      { gemini: deps.gemini, youtube: deps.youtube },
+      { gemini: deps.gemini, sources: deps.sources, log },
       idea,
       clarifications || undefined,
     ),

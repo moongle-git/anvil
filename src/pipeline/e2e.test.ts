@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoogleGenAI } from "@google/genai";
 import { RunStore } from "../lib/runStore.js";
+import { youtubeSource } from "../research/sources.js";
+import type { ResearchSource } from "../research/types.js";
 import { GeminiService } from "../services/gemini.js";
 import { YoutubeService } from "../services/youtube.js";
 import {
@@ -45,46 +47,110 @@ function fakeGenAI(...responses: FakeResponse[]): {
   };
 }
 
-// ── 최외곽 경계 2: YouTube HTTP ──────────────────────────────────────
+// ── 최외곽 경계 2: 자료조사 소스들의 HTTP ────────────────────────────
+// ★ 세 API가 전부 경로에 "/search"를 포함한다(youtube/v3/search · hn api/v1/search ·
+// naver v1/search/cafearticle.json). url.includes("/search")로 가르면 조용히 잘못된 body를
+// 먹는다 — host로 먼저 가르고, 모르는 host는 던진다.
 const COMMENT_TEXT = "물주기 타이밍을 늘 놓쳐서 결국 죽였어요";
+const HN_COMMENT_TEXT = "Reminder apps fire after the plant is already dead.";
+const NAVER_SNIPPET = "물주기를 놓쳐서 결국 시들었어요... 다들 어떻게";
 
-function youtubeFetch(): typeof fetch {
+const YT_SEARCH = {
+  items: [
+    {
+      id: { videoId: "vid1" },
+      snippet: {
+        title: "식물 키우기 실패담",
+        channelTitle: "플랜트TV",
+        description: "초보자가 식물을 죽이는 이유",
+      },
+    },
+  ],
+};
+
+const YT_COMMENTS = {
+  items: [
+    {
+      snippet: {
+        topLevelComment: {
+          snippet: {
+            textOriginal: COMMENT_TEXT,
+            authorDisplayName: "초보집사",
+            likeCount: 42,
+          },
+        },
+      },
+    },
+  ],
+};
+
+const HN_STORIES = {
+  hits: [
+    {
+      objectID: "41",
+      title: "Show HN: Plant care assistant",
+      url: "https://example.com/plant-app",
+      author: "founder",
+      points: 120,
+      num_comments: 37,
+    },
+  ],
+};
+
+const HN_COMMENTS = {
+  hits: [
+    {
+      objectID: "42",
+      comment_text: `<p>${HN_COMMENT_TEXT}`,
+      author: "pg",
+      story_title: "Show HN: Plant care assistant",
+    },
+  ],
+};
+
+function naverBody(pathname: string): unknown {
+  const corpus = pathname.split("/").pop()?.replace(".json", "") ?? "";
+  return {
+    items: [
+      {
+        title: "식물 키우기 <b>실패</b> 후기",
+        link: `https://cafe.naver.com/${corpus}/1`,
+        description: NAVER_SNIPPET,
+        cafename: "식물카페",
+      },
+    ],
+  };
+}
+
+function jsonResponse(body: unknown): Promise<Response> {
+  return Promise.resolve(
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+}
+
+/** host 우선 분기. 미지의 host는 던져서 조용한 오분기를 막는다 */
+function researchFetch(): typeof fetch {
   return vi.fn((input: string | URL | Request) => {
-    const url = String(input);
-    const body = url.includes("/search")
-      ? {
-          items: [
-            {
-              id: { videoId: "vid1" },
-              snippet: {
-                title: "식물 키우기 실패담",
-                channelTitle: "플랜트TV",
-                description: "초보자가 식물을 죽이는 이유",
-              },
-            },
-          ],
-        }
-      : {
-          items: [
-            {
-              snippet: {
-                topLevelComment: {
-                  snippet: {
-                    textOriginal: COMMENT_TEXT,
-                    authorDisplayName: "초보집사",
-                    likeCount: 42,
-                  },
-                },
-              },
-            },
-          ],
-        };
-    return Promise.resolve(
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const url = new URL(String(input));
+    if (url.host === "www.googleapis.com") {
+      return jsonResponse(
+        url.pathname.endsWith("/search") ? YT_SEARCH : YT_COMMENTS,
+      );
+    }
+    if (url.host === "hn.algolia.com") {
+      return jsonResponse(
+        url.searchParams.get("tags")?.startsWith("comment")
+          ? HN_COMMENTS
+          : HN_STORIES,
+      );
+    }
+    if (url.host === "openapi.naver.com") {
+      return jsonResponse(naverBody(url.pathname));
+    }
+    throw new Error(`예상하지 못한 호스트: ${url.host}`);
   }) as unknown as typeof fetch;
 }
 
@@ -238,11 +304,16 @@ const ALL_STEPS: PipelineStepName[] = [
 let tmpDir: string;
 let store: RunStore;
 
+/** CLI와 동일하게 YouTube 소스 하나만 등록한다 (HN·네이버 활성화는 step 9) */
+function researchSources(fetchFn: typeof fetch): ResearchSource[] {
+  return [youtubeSource(new YoutubeService({ apiKey: "test-key", fetchFn }))];
+}
+
 function deps(client: GoogleGenAI, fetchFn: typeof fetch): PipelineDeps {
   return {
     store,
     gemini: new GeminiService({ apiKey: "test-key" }, client),
-    youtube: new YoutubeService({ apiKey: "test-key", fetchFn }),
+    sources: researchSources(fetchFn),
     log: () => undefined,
   };
 }
@@ -267,7 +338,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       VERDICT_TEXT,
     );
 
-    const result = await runPipeline(deps(client, youtubeFetch()), { idea: IDEA });
+    const result = await runPipeline(deps(client, researchFetch()), { idea: IDEA });
 
     expect(result.status).toBe("completed");
 
@@ -310,7 +381,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       VERDICT_TEXT,
     );
 
-    const result = await runPipeline(deps(client, youtubeFetch()), { idea: IDEA });
+    const result = await runPipeline(deps(client, researchFetch()), { idea: IDEA });
 
     // 파일에 실제로 쓰인 원문을 본다 — 스키마 default([])가 빈 배열을 채워 통과하는 것과 구별하기 위해
     const raw: unknown = JSON.parse(
@@ -338,7 +409,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       VERDICT_TEXT,
     );
 
-    const result = await runPipeline(deps(client, youtubeFetch()), { idea: IDEA });
+    const result = await runPipeline(deps(client, researchFetch()), { idea: IDEA });
 
     const context = store.loadStepOutput(
       result.runId,
@@ -393,7 +464,7 @@ describe("E2E: 웹 인터뷰 흐름 (waiting → 답변 → resume)", () => {
       SOLUTION_TEXT,
       VERDICT_TEXT,
     );
-    const d = deps(client, youtubeFetch());
+    const d = deps(client, researchFetch());
 
     // 웹에서 생성된 run만 인터뷰를 켠다
     const { runId } = store.createRun(IDEA, { interview: true });
@@ -435,7 +506,7 @@ describe("E2E: 장애 내성", () => {
         },
         client,
       ),
-      youtube: new YoutubeService({ apiKey: "test-key", fetchFn: youtubeFetch() }),
+      sources: researchSources(researchFetch()),
       log: () => undefined,
     };
 
@@ -454,5 +525,35 @@ describe("E2E: 장애 내성", () => {
     const step = state.steps.find((s) => s.name === "context-hunter");
     expect(step?.status).toBe("error");
     expect(step?.failedAt).toBeDefined();
+  });
+});
+
+describe("자료조사 fetch mock (host 분기 계약)", () => {
+  // 세 API가 전부 "/search"를 경로에 갖는다. 경로로 가르면 HN·네이버 요청이 YouTube 응답을
+  // 조용히 받아 먹는다 — step 9에서 소스를 켤 때 그 오분기가 테스트를 통과해 버린다.
+  it("host로 분기해 소스별 응답을 준다", async () => {
+    const fetchFn = researchFetch();
+
+    const yt = await fetchFn(
+      "https://www.googleapis.com/youtube/v3/search?q=x",
+    ).then((r) => r.json() as Promise<typeof YT_SEARCH>);
+    const hn = await fetchFn(
+      "https://hn.algolia.com/api/v1/search?query=x&tags=comment",
+    ).then((r) => r.json() as Promise<typeof HN_COMMENTS>);
+    const naver = await fetchFn(
+      "https://openapi.naver.com/v1/search/cafearticle.json?query=x",
+    ).then((r) => r.json() as Promise<{ items: { link: string }[] }>);
+
+    expect(yt.items[0].id.videoId).toBe("vid1");
+    expect(hn.hits[0].comment_text).toContain(HN_COMMENT_TEXT);
+    expect(naver.items[0].link).toContain("cafearticle");
+  });
+
+  it("모르는 host는 던진다 (조용한 오분기 방지)", () => {
+    const fetchFn = researchFetch();
+
+    expect(() => fetchFn("https://example.com/v1/search")).toThrow(
+      /예상하지 못한 호스트/,
+    );
   });
 });

@@ -3,6 +3,8 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { RunStore } from "../lib/runStore.js";
 import { PipelineStepError, runPipeline } from "../pipeline/orchestrator.js";
+import { youtubeSource } from "../research/sources.js";
+import type { ResearchSource } from "../research/types.js";
 import { GeminiService } from "../services/gemini.js";
 import { YoutubeService } from "../services/youtube.js";
 
@@ -66,10 +68,13 @@ async function main(): Promise<void> {
     );
   }
 
+  // 등록된 소스 배열이 곧 레지스트리다 (ADR-012). 수집 실패는 collectAll이 흡수한다
+  const sources: ResearchSource[] = [youtubeSource(buildYoutubeService(youtubeKey))];
+
   const deps = {
     store: new RunStore(path.resolve(process.cwd(), "runs")),
     gemini: new GeminiService({ apiKey: geminiKey }),
-    youtube: buildYoutubeService(youtubeKey),
+    sources,
   };
 
   try {
