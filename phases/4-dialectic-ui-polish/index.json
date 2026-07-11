@@ -21,7 +21,10 @@
     {
       "step": 2,
       "name": "card-accent",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-11T23:42:49+0900",
+      "summary": "Card에 액센트 레일을 1급 prop으로 추가 — `accent?: CardAccent` where `CardAccent = { side: AccentSide; tone: AccentTone }`, `AccentSide = \"left\" | \"right\"`, `AccentTone = \"strong\" | \"danger\" | \"warning\" | \"neutral\"` (strong=neutral-900 무채색 강조(正), danger=red-600/warning=amber-600/neutral=gray-500 severity 팔레트(fatal/major/minor)). Tailwind 클래스는 Card.tsx 내부 ACCENT_CLASSES[side][tone]에 격리(side-specific 두께 border-l|r-2 + side-specific 색 border-l|r-*, 정적 문자열 8종)하고 호출부는 의미만 넘긴다. 훅으로 `data-accent-side`(left|right)·`data-accent-tone`(strong|danger|warning|neutral)을 노출 — step 3·4·5는 이 훅으로 검증한다. accent 미지정 시 클래스 문자열·속성 모두 기존과 동일(회귀 없음). ui/index.ts에서 Card와 함께 AccentSide·AccentTone·CardAccent 타입 export. ui.test.tsx에 accent 미지정 시 data-accent-* 부재, side×tone 5조합 훅 노출, className·rest 스프레드 병존 검증 추가(클래스 단언 없음).",
+      "completed_at": "2026-07-11T23:46:30+0900"
     },
     {
       "step": 3,

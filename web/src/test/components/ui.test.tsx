@@ -188,6 +188,54 @@ describe("Card", () => {
     expect(screen.getByLabelText("리포트 카드")).toBeDefined();
     expect(screen.getByText("본문")).toBeDefined();
   });
+
+  it("accent 없이 쓰면 액센트 훅이 붙지 않는다 (리포트 밖 화면 회귀 방지)", () => {
+    render(
+      <Card aria-label="기본 카드">
+        <p>본문</p>
+      </Card>,
+    );
+    const card = screen.getByLabelText("기본 카드");
+    expect(card.hasAttribute("data-accent-side")).toBe(false);
+    expect(card.hasAttribute("data-accent-tone")).toBe(false);
+  });
+
+  it.each([
+    ["left", "strong"],
+    ["left", "danger"],
+    ["right", "danger"],
+    ["right", "warning"],
+    ["right", "neutral"],
+  ] as const)(
+    "accent {side: '%s', tone: '%s'}를 data-accent-* 훅으로 노출한다 (Tailwind 클래스가 아닌 계약 검증)",
+    (side, tone) => {
+      render(
+        <Card accent={{ side, tone }} aria-label="액센트 카드">
+          <p>본문</p>
+        </Card>,
+      );
+      const card = screen.getByLabelText("액센트 카드");
+      expect(card.getAttribute("data-accent-side")).toBe(side);
+      expect(card.getAttribute("data-accent-tone")).toBe(tone);
+    },
+  );
+
+  it("accent와 함께 className·나머지 속성을 그대로 전달한다", () => {
+    render(
+      <Card
+        accent={{ side: "right", tone: "warning" }}
+        className="flex flex-col gap-2"
+        aria-label="비판 카드"
+        data-testid="critique"
+      >
+        <p>본문</p>
+      </Card>,
+    );
+    const card = screen.getByTestId("critique");
+    expect(card.className).toContain("flex flex-col gap-2");
+    expect(screen.getByLabelText("비판 카드")).toBe(card);
+    expect(card.getAttribute("data-accent-side")).toBe("right");
+  });
 });
 
 describe("TextAreaField", () => {
