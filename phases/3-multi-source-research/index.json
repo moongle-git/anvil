@@ -1,0 +1,16 @@
+{
+  "project": "anvil",
+  "phase": "3-multi-source-research",
+  "steps": [
+    { "step": 0, "name": "design-docs", "status": "pending" },
+    { "step": 1, "name": "research-types", "status": "pending" },
+    { "step": 2, "name": "html-util", "status": "pending" },
+    { "step": 3, "name": "hackernews-service", "status": "pending" },
+    { "step": 4, "name": "naver-service", "status": "pending" },
+    { "step": 5, "name": "grounded-citations", "status": "pending" },
+    { "step": 6, "name": "research-layer", "status": "pending" },
+    { "step": 7, "name": "research-planner", "status": "pending" },
+    { "step": 8, "name": "evidence-render", "status": "pending" },
+    { "step": 9, "name": "source-wiring", "status": "pending" }
+  ]
+}
