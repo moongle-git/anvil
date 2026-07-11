@@ -155,6 +155,15 @@ function researchFetch(): typeof fetch {
 }
 
 // ── LLM 응답 원문 ────────────────────────────────────────────────────
+// researchPlanner는 pipeline step이 아니라 context-hunter 내부 호출이다 (ADR-012).
+// non-grounding 구조화 출력이라 펜스 없는 순수 JSON으로 돌아온다.
+const PLANNER_TEXT = JSON.stringify({
+  youtube: "식물 키우기 실패담",
+  hackernews: "plant care reminder app",
+  naver: "화분 물주기 자꾸 까먹어요",
+  web: ["홈가드닝 시장 규모", "식물 관리 앱 경쟁 서비스"],
+});
+
 // context-hunter는 grounding 모드라 자유 텍스트(펜스 두른 JSON)로 돌아온다.
 // 값 없는 선택 필드를 키 생략이 아니라 명시적 null로 내보내는, 실측된 실패 형태 그대로다.
 const CONTEXT_TEXT = `조사 결과를 정리했습니다.
@@ -331,6 +340,7 @@ afterEach(() => {
 describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
   it("전 구간을 재시도 없이 완주하고 리포트를 남긴다", async () => {
     const { client, generateContent } = fakeGenAI(
+      PLANNER_TEXT,
       CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
@@ -342,8 +352,9 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
 
     expect(result.status).toBe("completed");
 
-    // step당 정확히 1회 — 재시도가 끼면 초과한다. 검증이 첫 응답에서 통과했다는 뜻.
-    expect(generateContent).toHaveBeenCalledTimes(ALL_STEPS.length);
+    // step당 정확히 1회 + researchPlanner 1회 — 재시도가 끼면 초과한다.
+    // planner는 pipeline step이 아니라 context-hunter 내부 호출이라 ALL_STEPS에 없다 (ADR-012).
+    expect(generateContent).toHaveBeenCalledTimes(ALL_STEPS.length + 1);
 
     // 리포트가 디스크에 실제로 있고, 5개 섹션과 원문 댓글을 담고 있다
     expect(result.reportPath).toBeDefined();
@@ -374,6 +385,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
 
   it("grounding 응답의 인용이 코드 추출을 거쳐 디스크의 context.json에 남는다", async () => {
     const { client } = fakeGenAI(
+      PLANNER_TEXT,
       CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
@@ -402,6 +414,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
 
   it("LLM이 선택 필드에 null을 넣어도 시장조사가 통과한다 (키 부재로 정규화)", async () => {
     const { client } = fakeGenAI(
+      PLANNER_TEXT,
       CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
@@ -438,6 +451,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       ),
     ) as unknown as typeof fetch;
     const { client } = fakeGenAI(
+      PLANNER_TEXT,
       CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,
@@ -458,6 +472,7 @@ describe("E2E: 웹 인터뷰 흐름 (waiting → 답변 → resume)", () => {
     });
     const { client } = fakeGenAI(
       questionsText,
+      PLANNER_TEXT,
       CONTEXT_RESPONSE,
       THESIS_TEXT,
       CRITICISM_TEXT,

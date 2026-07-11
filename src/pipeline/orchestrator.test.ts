@@ -11,6 +11,7 @@ import {
   MarketContextDraftSchema,
   MarketContextSchema,
   RESEARCH_SOURCE_IDS,
+  SearchQueriesSchema,
   SolutionSchema,
   SOURCE_LABELS,
   ThesisSchema,
@@ -18,6 +19,7 @@ import {
   type Criticism,
   type InterviewQuestions,
   type MarketContext,
+  type SearchQueries,
   type Solution,
   type Thesis,
   type Verdict,
@@ -145,6 +147,14 @@ interface FakeGemini {
   generateGrounded: ReturnType<typeof vi.fn>;
 }
 
+/** researchPlanner 산출물 — pipeline step이 아니라 context-hunter 내부 호출이다 (ADR-012) */
+const searchQueries: SearchQueries = {
+  youtube: "식물 죽이는 이유",
+  hackernews: "plant care app",
+  naver: "화분 물주기 실패",
+  web: ["홈가드닝 시장 규모"],
+};
+
 /**
  * schema 파라미터로 어떤 step의 호출인지 판별해 해당 산출물을 돌려주는 fake.
  * context-hunter만 generateGrounded를 쓰고, LLM이 채우는 draft(citations 제외)를 돌려받는다 (ADR-012).
@@ -162,6 +172,7 @@ function fakeGemini(options?: {
       if (schema === InterviewQuestionsSchema) {
         return Promise.resolve(options?.questions ?? { questions: [] });
       }
+      if (schema === SearchQueriesSchema) return Promise.resolve(searchQueries);
       if (schema === ThesisSchema) return Promise.resolve(thesis);
       if (schema === CriticismSchema) return Promise.resolve(criticism);
       if (schema === SolutionSchema) return Promise.resolve(solution);
@@ -236,7 +247,10 @@ describe("runPipeline", () => {
 
     // step 순서: context-hunter → thesis → cold-critic → solution-designer → verdict
     // (interviewer는 CLI에서 미실행). verdict는 合을 채점하므로 반드시 solution-designer 다음이다 (ADR-010).
+    // SearchQueriesSchema는 step이 아니라 context-hunter 내부의 researchPlanner 호출이다 (ADR-012) —
+    // PIPELINE_STEPS는 여전히 6개다.
     expect(calledSchemas(generateStructured)).toEqual([
+      SearchQueriesSchema,
       ThesisSchema,
       CriticismSchema,
       SolutionSchema,
@@ -434,8 +448,10 @@ describe("runPipeline", () => {
       resumeRunId: runId,
     });
 
-    // context-hunter는 재실행, 산출물이 멀쩡한 나머지 step은 skip
-    expect(calledSchemas(second.generateStructured)).toEqual([]);
+    // context-hunter는 재실행(그 안에서 planner도 다시 돈다), 산출물이 멀쩡한 나머지 step은 skip
+    expect(calledSchemas(second.generateStructured)).toEqual([
+      SearchQueriesSchema,
+    ]);
     expect(calledSchemas(second.generateGrounded)).toEqual([
       MarketContextDraftSchema,
     ]);
@@ -510,6 +526,7 @@ describe("runPipeline", () => {
 
       expect(result.status).toBe("completed");
       expect(calledSchemas(second.generateStructured)).toEqual([
+        SearchQueriesSchema,
         ThesisSchema,
         CriticismSchema,
         SolutionSchema,
@@ -520,6 +537,12 @@ describe("runPipeline", () => {
       const contextCall = second.generateGrounded.mock.calls[0];
       const prompt = (contextCall[0] as { prompt: string }).prompt;
       expect(prompt).toContain("바쁜 1인 가구 직장인");
+
+      // 답변은 검색어에도 반영된다 — planner 프롬프트까지 흘러야 한다
+      const plannerCall = second.generateStructured.mock.calls[0];
+      expect((plannerCall[0] as { prompt: string }).prompt).toContain(
+        "바쁜 1인 가구 직장인",
+      );
 
       const saved = store.loadRun(runId);
       expect(saved.steps.find((s) => s.name === "interviewer")?.status).toBe(
@@ -541,6 +564,7 @@ describe("runPipeline", () => {
       expect(result.status).toBe("completed");
       expect(calledSchemas(generateStructured)).toEqual([
         InterviewQuestionsSchema,
+        SearchQueriesSchema,
         ThesisSchema,
         CriticismSchema,
         SolutionSchema,

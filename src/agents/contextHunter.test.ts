@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
-import type { Citation, CommunityVoice, ResearchSourceId } from "../types/index.js";
+import type {
+  Citation,
+  CommunityVoice,
+  ResearchSourceId,
+  SearchQueries,
+} from "../types/index.js";
 import {
   CODE_INJECTED_CONTEXT_KEYS,
   MarketContextDraftSchema,
   MarketContextObjectSchema,
+  SearchQueriesSchema,
   SOURCE_LABELS,
   type MarketContextDraft,
 } from "../types/index.js";
@@ -85,24 +91,49 @@ function fakeSource(
   };
 }
 
+/** researchPlanner 산출물 — 소스마다 다른 검색어다. 아이디어 원문(IDEA)이 아니다 */
+const PLANNED_QUERIES: SearchQueries = {
+  youtube: "강아지 산책 대행 후기",
+  hackernews: "dog walking marketplace",
+  naver: "산책 대행 맡겨보신 분",
+  web: ["반려동물 산책 대행 시장 규모", "펫시터 매칭 서비스 경쟁"],
+};
+
 interface FakeDeps {
   deps: ContextHunterDeps;
+  /** researchPlanner(non-grounding)의 호출 경로 */
+  generateStructured: ReturnType<typeof vi.fn>;
   generateGrounded: ReturnType<typeof vi.fn>;
+  log: ReturnType<typeof vi.fn>;
 }
 
-function fakeDeps(sources: ResearchSource[]): FakeDeps {
+function fakeDeps(
+  sources: ResearchSource[],
+  plannerError?: Error,
+): FakeDeps {
+  const generateStructured =
+    plannerError === undefined
+      ? vi.fn().mockResolvedValue(PLANNED_QUERIES)
+      : vi.fn().mockRejectedValue(plannerError);
   const generateGrounded = vi.fn().mockResolvedValue({
     data: DRAFT,
     citations: CITATIONS,
     webSearchQueries: SEARCH_QUERIES,
   });
+  const log = vi.fn();
 
   return {
     deps: {
-      gemini: { generateGrounded } as unknown as GeminiService,
+      gemini: {
+        generateStructured,
+        generateGrounded,
+      } as unknown as GeminiService,
       sources,
+      log,
     },
+    generateStructured,
     generateGrounded,
+    log,
   };
 }
 
@@ -124,11 +155,11 @@ describe("runContextHunter (정상 흐름)", () => {
 
     expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
 
-    // 소스별 쿼리 생성은 step 7의 몫 — 지금은 모든 소스가 아이디어 원문을 받는다
+    // 각 소스는 planner가 그 소스에 맞춰 만든 검색어를 받는다 (아이디어 원문이 아니다)
     expect(youtube.collect).toHaveBeenCalledTimes(1);
-    expect(youtube.collect).toHaveBeenCalledWith(IDEA);
+    expect(youtube.collect).toHaveBeenCalledWith(PLANNED_QUERIES.youtube);
     expect(naver.collect).toHaveBeenCalledTimes(1);
-    expect(naver.collect).toHaveBeenCalledWith(IDEA);
+    expect(naver.collect).toHaveBeenCalledWith(PLANNED_QUERIES.naver);
 
     // grounding 호출은 LLM이 채우는 draft 스키마로 한다 — citations는 LLM이 채우지 않는다
     expect(generateGrounded).toHaveBeenCalledTimes(1);
@@ -187,6 +218,79 @@ describe("runContextHunter (정상 흐름)", () => {
     const combined = `${params.systemInstruction as string}\n${params.prompt as string}`;
     expect(combined).toContain("요약하지 말");
     expect(combined).toContain("원문");
+  });
+});
+
+describe("runContextHunter (researchPlanner 연동)", () => {
+  it("★ 각 소스가 아이디어 원문이 아니라 planner가 만든 자기 검색어로 호출된다", async () => {
+    const youtube = fakeSource("youtube", []);
+    const hackernews = fakeSource("hackernews", []);
+    const naver = fakeSource("naver", []);
+    const { deps, generateStructured } = fakeDeps([youtube, hackernews, naver]);
+
+    await runContextHunter(deps, IDEA);
+
+    // planner는 non-grounding 구조화 출력이다 — 검색어를 짓는 단계지 검색하는 단계가 아니다
+    expect(generateStructured).toHaveBeenCalledTimes(1);
+    expect(generateStructured.mock.calls[0][0].schema).toBe(SearchQueriesSchema);
+
+    expect(youtube.collect).toHaveBeenCalledWith(PLANNED_QUERIES.youtube);
+    // HN은 영어권이라 한국어 쿼리를 받으면 에러 없이 조용히 0건이 된다
+    expect(hackernews.collect).toHaveBeenCalledWith(PLANNED_QUERIES.hackernews);
+    expect(naver.collect).toHaveBeenCalledWith(PLANNED_QUERIES.naver);
+
+    for (const source of [youtube, hackernews, naver]) {
+      expect(source.collect).not.toHaveBeenCalledWith(IDEA);
+    }
+  });
+
+  it("★ clarifications를 planner에 넘겨 검색어에 반영되게 한다", async () => {
+    // 이전에는 인터뷰 답변이 프롬프트 끝에만 붙고 검색어에는 전혀 반영되지 않았다
+    const { deps, generateStructured } = fakeDeps([fakeSource("youtube", [])]);
+    const clarifications = "Q: 핵심 타깃은?\nA: 바쁜 1인 가구 직장인";
+
+    await runContextHunter(deps, IDEA, clarifications);
+
+    const plannerPrompt = generateStructured.mock.calls[0][0].prompt as string;
+    expect(plannerPrompt).toContain("바쁜 1인 가구 직장인");
+  });
+
+  it("생성된 검색어를 로그로 남긴다 (0건 실패의 유일한 관측 수단)", async () => {
+    const { deps, log } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA);
+
+    const logged = log.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(logged).toContain(PLANNED_QUERIES.youtube);
+    expect(logged).toContain(PLANNED_QUERIES.hackernews);
+    expect(logged).toContain(PLANNED_QUERIES.naver);
+  });
+
+  it("queries.web을 grounding 프롬프트의 검색 힌트로 넣는다", async () => {
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA);
+
+    const prompt = promptOf(generateGrounded);
+    for (const hint of PLANNED_QUERIES.web) {
+      expect(prompt).toContain(hint);
+    }
+  });
+
+  it("planner가 실패해도 아이디어 원문으로 폴백해 완주한다", async () => {
+    const youtube = fakeSource("youtube", [YOUTUBE_VOICE]);
+    const { deps, generateGrounded } = fakeDeps(
+      [youtube],
+      new Error("Gemini 호출 실패"),
+    );
+
+    const result = await runContextHunter(deps, IDEA);
+
+    // 검색어 생성 실패는 자료조사를 멈출 이유가 아니다 (ADR-012 fail-soft)
+    expect(result).toEqual({ ...DRAFT, citations: CITATIONS });
+    expect(youtube.collect).toHaveBeenCalledWith(IDEA);
+    expect(generateGrounded).toHaveBeenCalledTimes(1);
+    expect(promptOf(generateGrounded)).toContain(IDEA);
   });
 });
 

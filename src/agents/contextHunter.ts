@@ -2,12 +2,8 @@ import { collectAll } from "../research/collect.js";
 import { formatEvidenceSection } from "../research/format.js";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
-import {
-  MarketContextDraftSchema,
-  RESEARCH_SOURCE_IDS,
-  type MarketContext,
-  type ResearchSourceId,
-} from "../types/index.js";
+import { MarketContextDraftSchema, type MarketContext } from "../types/index.js";
+import { planResearchQueries } from "./researchPlanner.js";
 
 export const CONTEXT_HUNTER_SYSTEM_PROMPT = `당신은 신규 서비스 아이디어의 시장 맥락을 수집·정제하는 리서치 애널리스트다.
 웹검색으로 최신 트렌드와 유사/경쟁 서비스를 조사하고, 제공된 커뮤니티 수집 결과(YouTube 댓글·Hacker News 토론·네이버 블로그/카페/지식iN)에서 타겟 유저의 실제 목소리를 선별한다.
@@ -38,7 +34,9 @@ export const CONTEXT_HUNTER_PROMPT_TEMPLATE = `## 아이디어 원문
 {evidenceSection}
 
 ## 지시사항
-1. 웹검색(Google Search)으로 이 아이디어와 관련된 최신 트렌드, 유사/경쟁 서비스(이름·설명·URL·가격 힌트), 시장 규모·성장률 지표를 조사하라.
+1. 아래 관점으로 웹검색(Google Search)하라:
+{webQueryHints}
+   이 아이디어와 관련된 최신 트렌드, 유사/경쟁 서비스(이름·설명·URL·가격 힌트), 시장 규모·성장률 지표를 조사하라.
 2. 경쟁 서비스를 찾으면 그 공식 페이지를 직접 읽어 가격·기능을 확인하라. 단 가장 중요한 3곳 이하만 읽어라.
 3. 위 커뮤니티 수집 결과에서 노이즈(광고, 인사말, 무관한 잡담)를 제거하고, 아이디어의 페인포인트와 관련된 유의미한 유저 목소리만 선별하라. text 필드에는 수집된 원문을 요약하지 말고 그대로 인용하라.
    네이버 항목("검색 스니펫"으로 표시된 항목)은 게시글 본문이 아니라 검색 스니펫이다. 잘린 문장을 완결된 원문인 양 인용하지 마라.
@@ -73,18 +71,28 @@ export async function runContextHunter(
   idea: string,
   clarifications?: string,
 ): Promise<MarketContext> {
-  // 소스별 검색어 생성은 researchPlanner의 몫이다 — 지금은 모든 소스가 아이디어 원문을 받는다
-  const queries = Object.fromEntries(
-    RESEARCH_SOURCE_IDS.map((id) => [id, idea]),
-  ) as Record<ResearchSourceId, string>;
+  // 아이디어 원문을 그대로 검색하면 긴 문장이 되어 검색 품질의 하한을 만든다. 인터뷰 답변도
+  // 검색어에 반영한다. planner는 실패해도 throw하지 않고 아이디어 원문으로 폴백한다 (ADR-012).
+  const queries = await planResearchQueries(
+    { gemini: deps.gemini, log: deps.log },
+    idea,
+    clarifications,
+  );
+
+  // Hacker News가 한국어 쿼리를 받으면 에러 없이 조용히 0건이 된다 — 로그가 유일한 관측 수단이다
+  deps.log?.(
+    `[context-hunter] 검색어 — youtube: "${queries.youtube}" / hackernews: "${queries.hackernews}" / naver: "${queries.naver}"`,
+  );
 
   // collectAll은 절대 throw하지 않는다 — 소스가 전부 죽어도 웹검색만으로 진행한다 (fail-soft)
   const evidence = await collectAll(deps.sources, queries);
 
-  let prompt = CONTEXT_HUNTER_PROMPT_TEMPLATE.replace("{idea}", idea).replace(
-    "{evidenceSection}",
-    formatEvidenceSection(evidence),
-  );
+  let prompt = CONTEXT_HUNTER_PROMPT_TEMPLATE.replace("{idea}", idea)
+    .replace(
+      "{webQueryHints}",
+      queries.web.map((query) => `   - ${query}`).join("\n"),
+    )
+    .replace("{evidenceSection}", formatEvidenceSection(evidence));
 
   // 인터뷰 답변이 있으면 아이디어의 핵심 맥락으로 반영한다 (웹 인터뷰 흐름)
   if (clarifications !== undefined && clarifications.trim().length > 0) {
