@@ -16,12 +16,13 @@ export function youtubeSource(service: YoutubeService): ResearchSource {
     label: SOURCE_LABELS.youtube,
     async collect(query: string): Promise<CommunityVoice[]> {
       const collected = await service.collectVoices(query);
-      // 영상 묶음이 아니라 댓글 하나가 목소리 하나다
+      // 영상 묶음이 아니라 댓글 하나가 목소리 하나다.
+      // url은 댓글 퍼머링크(service가 조립한다) — title만 영상 것이다. 댓글에는 제목이 없다
       return collected.flatMap(({ video, comments }) =>
         comments.map((comment) => ({
           source: "youtube" as const,
           title: video.title,
-          url: video.url,
+          url: comment.url,
           text: comment.text,
           ...(comment.authorName !== "" ? { authorName: comment.authorName } : {}),
           score: comment.likeCount,

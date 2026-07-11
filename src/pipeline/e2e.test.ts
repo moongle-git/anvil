@@ -70,11 +70,15 @@ const YT_SEARCH = {
   ],
 };
 
+const YT_COMMENT_ID = "UgxPlant1";
+const YT_COMMENT_URL = `https://www.youtube.com/watch?v=vid1&lc=${YT_COMMENT_ID}`;
+
 const YT_COMMENTS = {
   items: [
     {
       snippet: {
         topLevelComment: {
+          id: YT_COMMENT_ID,
           snippet: {
             textOriginal: COMMENT_TEXT,
             authorDisplayName: "초보집사",
@@ -476,10 +480,11 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
       "context-hunter",
       MarketContextSchema,
     );
+    // url은 영상이 아니라 댓글 퍼머링크다 — 독자가 인용된 그 댓글로 바로 갈 수 있다
     expect(context?.communityVoices[0]).toEqual({
       source: "youtube",
       title: "식물 키우기 실패담",
-      url: "https://www.youtube.com/watch?v=vid1",
+      url: YT_COMMENT_URL,
       text: COMMENT_TEXT,
       authorName: "초보집사",
       score: 42,

@@ -75,10 +75,16 @@ function searchBody(...videoIds: string[]): unknown {
   return { items: videoIds.map((id) => searchItem(id)) };
 }
 
-function commentItem(text: string, authorName = "작성자", likeCount = 3): unknown {
+function commentItem(
+  text: string,
+  authorName = "작성자",
+  likeCount = 3,
+  commentId = `Ugx-${text}`,
+): unknown {
   return {
     snippet: {
       topLevelComment: {
+        id: commentId,
         snippet: {
           textOriginal: text,
           authorDisplayName: authorName,
@@ -184,9 +190,11 @@ describe("YoutubeService.searchVideos", () => {
 });
 
 describe("YoutubeService.fetchComments", () => {
-  it("commentThreads 응답을 YoutubeComment 배열로 매핑한다", async () => {
+  it("commentThreads 응답을 YoutubeComment 배열로 매핑한다 — topLevelComment.id를 담는다", async () => {
     const fetchFn = fakeFetch(
-      jsonResponse({ items: [commentItem("너무 불편해요", "유저A", 12)] }),
+      jsonResponse({
+        items: [commentItem("너무 불편해요", "유저A", 12, "UgxComment1")],
+      }),
     );
 
     const comments = await service(fetchFn).fetchComments("vid1");
@@ -194,10 +202,45 @@ describe("YoutubeService.fetchComments", () => {
     expect(comments).toEqual([
       {
         videoId: "vid1",
+        commentId: "UgxComment1",
         text: "너무 불편해요",
         authorName: "유저A",
         likeCount: 12,
+        url: "https://www.youtube.com/watch?v=vid1&lc=UgxComment1",
       },
+    ]);
+  });
+
+  it("★ 댓글 url은 영상 페이지가 아니라 댓글 퍼머링크다 — &가 이스케이프되거나 lc가 인코딩되면 안 된다", async () => {
+    const fetchFn = fakeFetch(
+      jsonResponse({ items: [commentItem("댓글", "유저", 1, "UgxAbc123")] }),
+    );
+
+    const [comment] = await service(fetchFn).fetchComments("USGvvBKZme4");
+
+    // 문자열 동등 비교로 못박는다: &amp; 이스케이프나 lc 값 URL 인코딩은 permalink를 깨뜨린다
+    expect(comment.url).toBe(
+      "https://www.youtube.com/watch?v=USGvvBKZme4&lc=UgxAbc123",
+    );
+  });
+
+  it("id가 없는 댓글 항목은 건너뛴다 — 영상 URL로 폴백하지 않는다", async () => {
+    const noId = {
+      snippet: {
+        topLevelComment: {
+          snippet: { textOriginal: "id 없는 댓글", authorDisplayName: "유저", likeCount: 1 },
+        },
+      },
+    };
+    const fetchFn = fakeFetch(
+      jsonResponse({ items: [noId, commentItem("정상 댓글", "유저", 2, "UgxOk")] }),
+    );
+
+    const comments = await service(fetchFn).fetchComments("vid1");
+
+    expect(comments.map((c) => c.text)).toEqual(["정상 댓글"]);
+    expect(comments.map((c) => c.url)).toEqual([
+      "https://www.youtube.com/watch?v=vid1&lc=UgxOk",
     ]);
   });
 

@@ -23,8 +23,23 @@ function video(id: string, title: string): YoutubeVideo {
   };
 }
 
-function comment(videoId: string, text: string, likeCount = 3): YoutubeComment {
-  return { videoId, text, authorName: "초보집사", likeCount };
+let commentSeq = 0;
+
+/** commentId를 주지 않으면 유일한 값을 만든다 — 실제 API처럼 댓글마다 ID가 다르다 */
+function comment(
+  videoId: string,
+  text: string,
+  likeCount = 3,
+  commentId = `Ugx${(commentSeq += 1)}`,
+): YoutubeComment {
+  return {
+    videoId,
+    commentId,
+    text,
+    authorName: "초보집사",
+    likeCount,
+    url: `https://www.youtube.com/watch?v=${videoId}&lc=${commentId}`,
+  };
 }
 
 const HN_COMMENT: HackerNewsComment = {
@@ -88,11 +103,14 @@ describe("youtubeSource", () => {
     const service = fakeYoutube([
       {
         video: video("abc", "식물 키우기 실패담"),
-        comments: [comment("abc", "물주기를 놓쳤어요", 42), comment("abc", "저도요", 7)],
+        comments: [
+          comment("abc", "물주기를 놓쳤어요", 42, "UgxA1"),
+          comment("abc", "저도요", 7, "UgxA2"),
+        ],
       },
       {
         video: video("def", "초보 식집사"),
-        comments: [comment("def", "분갈이가 어려워요", 1)],
+        comments: [comment("def", "분갈이가 어려워요", 1, "UgxD1")],
       },
     ]);
 
@@ -102,7 +120,7 @@ describe("youtubeSource", () => {
       {
         source: "youtube",
         title: "식물 키우기 실패담",
-        url: "https://www.youtube.com/watch?v=abc",
+        url: "https://www.youtube.com/watch?v=abc&lc=UgxA1",
         text: "물주기를 놓쳤어요",
         authorName: "초보집사",
         score: 42,
@@ -110,7 +128,7 @@ describe("youtubeSource", () => {
       {
         source: "youtube",
         title: "식물 키우기 실패담",
-        url: "https://www.youtube.com/watch?v=abc",
+        url: "https://www.youtube.com/watch?v=abc&lc=UgxA2",
         text: "저도요",
         authorName: "초보집사",
         score: 7,
@@ -118,12 +136,43 @@ describe("youtubeSource", () => {
       {
         source: "youtube",
         title: "초보 식집사",
-        url: "https://www.youtube.com/watch?v=def",
+        url: "https://www.youtube.com/watch?v=def&lc=UgxD1",
         text: "분갈이가 어려워요",
         authorName: "초보집사",
         score: 1,
       },
     ]);
+  });
+
+  it("★ 댓글 voice의 url은 영상 페이지가 아니라 댓글 퍼머링크다 — 서비스가 만든 url을 그대로 매핑한다", async () => {
+    const service = fakeYoutube([
+      {
+        video: video("abc", "식물 키우기 실패담"),
+        comments: [comment("abc", "물주기를 놓쳤어요", 42, "UgxOne")],
+      },
+    ]);
+
+    const voices = await youtubeSource(service).collect("반려식물");
+
+    expect(voices[0].url).toBe("https://www.youtube.com/watch?v=abc&lc=UgxOne");
+    expect(voices[0].url).not.toBe("https://www.youtube.com/watch?v=abc");
+  });
+
+  it("★ 같은 영상의 서로 다른 두 댓글은 서로 다른 url을 갖는다 — 독자가 인용된 댓글을 찾을 수 있다", async () => {
+    const service = fakeYoutube([
+      {
+        video: video("abc", "식물 키우기 실패담"),
+        comments: [
+          comment("abc", "물주기를 놓쳤어요", 42, "UgxOne"),
+          comment("abc", "저도요", 7, "UgxTwo"),
+        ],
+      },
+    ]);
+
+    const voices = await youtubeSource(service).collect("반려식물");
+
+    expect(voices[0].url).not.toBe(voices[1].url);
+    expect(new Set(voices.map((v) => v.url)).size).toBe(2);
   });
 
   it("id·label과 매핑 결과가 스키마 계약을 지킨다", async () => {
@@ -149,7 +198,10 @@ describe("youtubeSource", () => {
     const service = fakeYoutube([
       {
         video: video("abc", "식물 키우기 실패담"),
-        comments: [{ videoId: "abc", text: "댓글", authorName: "", likeCount: 0 }],
+        comments: [comment("abc", "댓글", 0, "UgxNoAuthor")].map((c) => ({
+          ...c,
+          authorName: "",
+        })),
       },
     ]);
 

@@ -1,6 +1,7 @@
 import { withTimeout } from "./withTimeout.js";
 
 const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
+const YOUTUBE_WATCH_BASE = "https://www.youtube.com/watch?v=";
 const DEFAULT_MAX_VIDEOS = 5;
 const DEFAULT_MAX_COMMENTS_PER_VIDEO = 10;
 // YouTube API는 보통 1초 내 응답한다 — hang을 끊기 위한 상한
@@ -16,9 +17,12 @@ export interface YoutubeVideo {
 
 export interface YoutubeComment {
   videoId: string;
+  commentId: string;
   text: string;
   authorName: string;
   likeCount: number;
+  /** 항상 댓글 퍼머링크. 인용의 출처는 그 댓글이지 영상 페이지가 아니다 */
+  url: string;
 }
 
 export interface YoutubeServiceOptions {
@@ -62,6 +66,7 @@ interface CommentThreadListBody {
   items?: {
     snippet?: {
       topLevelComment?: {
+        id?: string;
         snippet?: {
           textOriginal?: string;
           authorDisplayName?: string;
@@ -70,6 +75,18 @@ interface CommentThreadListBody {
       };
     };
   }[];
+}
+
+function videoUrl(videoId: string): string {
+  return `${YOUTUBE_WATCH_BASE}${videoId}`;
+}
+
+/**
+ * `lc`는 해당 댓글로 스크롤·하이라이트하는 YouTube 표준 파라미터다.
+ * URL/URLSearchParams로 조립하지 않는다 — 값이 인코딩되면 permalink가 깨진다.
+ */
+function commentUrl(videoId: string, commentId: string): string {
+  return `${videoUrl(videoId)}&lc=${commentId}`;
 }
 
 function buildApiErrorMessage(status: number, message: string, reason?: string): string {
@@ -117,13 +134,14 @@ export class YoutubeService {
         videoId,
         title: item.snippet?.title ?? "",
         channelTitle: item.snippet?.channelTitle ?? "",
-        url: `https://www.youtube.com/watch?v=${videoId}`,
+        url: videoUrl(videoId),
         description: item.snippet?.description ?? "",
       });
     }
     return videos.slice(0, this.maxVideos);
   }
 
+  /** part=snippet으로 충분하다 — topLevelComment(id 포함)가 그 안에 들어 있다 */
   async fetchComments(videoId: string): Promise<YoutubeComment[]> {
     const body = await this.request<CommentThreadListBody>("commentThreads", {
       part: "snippet",
@@ -134,15 +152,24 @@ export class YoutubeService {
 
     const comments: YoutubeComment[] = [];
     for (const item of body.items ?? []) {
-      const snippet = item.snippet?.topLevelComment?.snippet;
+      const topLevelComment = item.snippet?.topLevelComment;
+      const commentId = topLevelComment?.id;
+      const snippet = topLevelComment?.snippet;
+      // ID가 없으면 영상 URL로 폴백하지 않고 버린다. 폴백하면 "이 댓글이 출처다"라는
+      // 계약이 조용히 깨진 채 통과한다 — 없는 근거보다 잘못된 근거가 나쁘다
+      if (commentId === undefined || commentId === "") {
+        continue;
+      }
       if (snippet?.textOriginal === undefined) {
         continue;
       }
       comments.push({
         videoId,
+        commentId,
         text: snippet.textOriginal,
         authorName: snippet.authorDisplayName ?? "",
         likeCount: snippet.likeCount ?? 0,
+        url: commentUrl(videoId, commentId),
       });
     }
     return comments.slice(0, this.maxCommentsPerVideo);
