@@ -7,7 +7,7 @@
       "name": "design-docs",
       "status": "completed",
       "started_at": "2026-07-12T00:41:00+0900",
-      "completed_at": "2026-07-12T00:45:00+0900",
+      "completed_at": "2026-07-12T00:44:27+0900",
       "summary": "ADR-013(코드 주입 communityVoices·재시도 간 grounding 인용 누적·미검증 URL 링크 박탈·Citation kind 판별자) 추가 및 ARCHITECTURE.md에 research.json 산출물·context-hunter 데이터 흐름·'출처는 사실이다' 패턴 반영 — 코드 무변경"
     },
     {
