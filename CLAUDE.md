@@ -12,6 +12,7 @@
 - CRITICAL: 모든 에이전트 산출물은 zod 스키마 검증을 통과해야 다음 step으로 전달할 것. 검증 실패는 에러 피드백과 함께 재시도(최대 3회)
 - CRITICAL: 테스트에서 실제 외부 API를 호출하지 말 것. Gemini/YouTube는 반드시 mock으로 대체 (API 키 없이 `npm test`가 통과해야 함)
 - 파이프라인 상태는 `runs/{run-id}/state.json`이 단일 진실 공급원. resume 시 completed step은 건너뛴다
+- 모든 Gemini 호출의 토큰 사용량은 **재시도와 실패한 시도까지 포함해** `usage` 테이블에 기록한다 — 검증에 실패한 응답도 과금된다. `services/`는 DB를 모르므로 `onUsage` 콜백으로 흘려보내고, DB 기록은 `cli/`가 배선한다 (ADR-016)
 - 디렉토리 구조·데이터 흐름은 docs/ARCHITECTURE.md를, 기술 결정은 docs/ADR.md를 따를 것
 
 ## 개발 프로세스
