@@ -648,3 +648,183 @@ describe("extractCitations", () => {
     );
   });
 });
+
+describe("usage 계측 (onUsage — ADR-016)", () => {
+  const USAGE_METADATA = {
+    promptTokenCount: 12_000,
+    cachedContentTokenCount: 2_000,
+    candidatesTokenCount: 800,
+    thoughtsTokenCount: 3_500,
+    totalTokenCount: 16_300,
+  };
+
+  /** usageMetadata를 실은 응답 */
+  function metered(
+    text: string | undefined,
+    usageMetadata: unknown = USAGE_METADATA,
+  ): FakeResponse {
+    return { text, usageMetadata };
+  }
+
+  /** onUsage를 배선한 서비스와, 콜백이 받은 usage들을 함께 돌려준다 */
+  function metering(
+    client: GoogleGenAI,
+    overrides: { maxRetries?: number; groundedMaxRetries?: number } = {},
+    onUsage?: (usage: CallUsage) => void,
+  ): { svc: GeminiService; usages: CallUsage[] } {
+    const usages: CallUsage[] = [];
+    const svc = new GeminiService(
+      {
+        apiKey: "test-key",
+        maxRetries: overrides.maxRetries ?? 3,
+        groundedMaxRetries: overrides.groundedMaxRetries ?? 2,
+        onUsage:
+          onUsage ??
+          ((usage) => {
+            usages.push(usage);
+          }),
+      },
+      client,
+    );
+    return { svc, usages };
+  }
+
+  it("응답의 usageMetadata를 CallUsage로 옮겨 흘려보낸다", async () => {
+    const { client } = fakeClient(metered(VALID_JSON));
+    const { svc, usages } = metering(client);
+
+    await svc.generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "thesis",
+    });
+
+    expect(usages).toEqual([
+      {
+        label: "thesis",
+        model: DEFAULT_GEMINI_MODEL,
+        grounded: false,
+        attempt: 1,
+        promptTokens: 12_000,
+        cachedTokens: 2_000,
+        outputTokens: 800,
+        thoughtsTokens: 3_500,
+        totalTokens: 16_300,
+      },
+    ]);
+  });
+
+  it("★ 재시도한 시도마다 usage가 기록된다 (검증에 실패한 응답도 과금된다)", async () => {
+    // 이 계약이 없으면 재시도 비용이 장부에서 통째로 사라진다. 재시도야말로 프롬프트
+    // 전문을 다시 전송하는 가장 비싼 경로이고, 그것을 못 세면 "재시도를 줄이는 것이
+    // 이득인가"라는 질문에 영영 답할 수 없다. 형식이 실패한 것이지 청구가 실패한 게 아니다.
+    const invalid = JSON.stringify({ title: "아이디어", score: "높음" });
+    const { client } = fakeClient(
+      metered(invalid, { ...USAGE_METADATA, candidatesTokenCount: 500 }),
+      metered(VALID_JSON),
+    );
+    const { svc, usages } = metering(client);
+
+    const result = await svc.generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "coldCritic",
+    });
+
+    expect(result).toEqual({ title: "아이디어", score: 42 });
+    expect(usages).toHaveLength(2);
+    // 1차는 zod 검증에 실패한 시도다 — 그래도 과금됐으므로 장부에 남는다
+    expect(usages[0]).toMatchObject({ attempt: 1, outputTokens: 500 });
+    expect(usages[1]).toMatchObject({ attempt: 2, outputTokens: 800 });
+    expect(usages.every((usage) => usage.label === "coldCritic")).toBe(true);
+  });
+
+  it("모든 시도가 실패해 throw할 때도 시도별 usage가 남는다", async () => {
+    const { client } = fakeClient(
+      metered("invalid-1"),
+      metered("invalid-2"),
+      metered("invalid-3"),
+    );
+    const { svc, usages } = metering(client, { maxRetries: 3 });
+
+    await expect(
+      svc.generateStructured({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "verdict",
+      }),
+    ).rejects.toThrow();
+
+    // 실패로 끝난 step도 3회분이 청구된다 — throw 경로에서 usage가 새면 안 된다
+    expect(usages.map((usage) => usage.attempt)).toEqual([1, 2, 3]);
+  });
+
+  it("usageMetadata가 없는 응답에서도 throw하지 않는다", async () => {
+    // 계측 실패가 파이프라인을 죽이면 안 된다
+    const { client } = fakeClient(VALID_JSON);
+    const { svc, usages } = metering(client);
+
+    const result = await svc.generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "thesis",
+    });
+
+    expect(result).toEqual({ title: "아이디어", score: 42 });
+    expect(usages).toEqual([]);
+  });
+
+  it("onUsage가 throw해도 generateStructured는 정상적으로 값을 반환한다", async () => {
+    // 계측은 부수적 관심사다. DB 쓰기 실패가 컨설팅 실행을 중단시키는 것은
+    // 꼬리가 개를 흔드는 것이다.
+    const { client } = fakeClient(metered(VALID_JSON));
+    const { svc } = metering(client, {}, () => {
+      throw new Error("DB 쓰기 실패");
+    });
+
+    await expect(
+      svc.generateStructured({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "thesis",
+      }),
+    ).resolves.toEqual({ title: "아이디어", score: 42 });
+  });
+
+  it("generateGrounded의 usage는 grounded: true다 (요청당 정액이 붙는다)", async () => {
+    const { client } = fakeClient(metered(VALID_JSON));
+    const { svc, usages } = metering(client);
+
+    await svc.generateGrounded({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "contextHunter",
+    });
+
+    expect(usages).toHaveLength(1);
+    expect(usages[0]).toMatchObject({
+      label: "contextHunter",
+      grounded: true,
+      attempt: 1,
+    });
+  });
+
+  it("onUsage를 주지 않아도 호출은 정상 동작한다", async () => {
+    const { client } = fakeClient(metered(VALID_JSON));
+
+    await expect(
+      service(client).generateStructured({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "thesis",
+      }),
+    ).resolves.toEqual({ title: "아이디어", score: 42 });
+  });
+});
