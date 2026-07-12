@@ -13,7 +13,10 @@
     {
       "step": 1,
       "name": "db-schema",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-12T17:40:30+0900",
+      "summary": "src/lib/db.ts 신규: openDb(dbPath: string): DatabaseSync — 상위 디렉토리 mkdir -p(:memory: 제외), PRAGMA 3종(journal_mode=WAL·busy_timeout=5000·foreign_keys=ON), DDL을 CREATE TABLE IF NOT EXISTS로 실행(runs·steps·artifacts·schema_version + idx_runs_created_at), schema_version에 1을 최초 1회만 seed. getDefaultDbPath(): string — ANVIL_DB_PATH ?? path.resolve(process.cwd(), 'data', 'anvil.db'). ArtifactKind와 ARTIFACT_KINDS(9개 값: questions|answers|research|context|thesis|criticism|solution|verdict|report)도 src/lib/db.ts에서 export한다 — step 2·4·5는 문자열 리터럴 대신 이것을 import할 것. 마이그레이션 러너 없음(버전 기록만). src/lib/db.test.ts 18개 테스트: 테이블·인덱스·schema_version, PRAGMA 3종 실측, 멱등 재오픈, FK 위반 INSERT 실패, CASCADE 삭제, rerun_of ON DELETE SET NULL, 파일 DB 2커넥션 동시 읽기/쓰기(WAL). package.json(build·test·lint·consult)과 web/package.json(dev·build·start)에 NODE_OPTIONS=--disable-warning=ExperimentalWarning 추가, .gitignore에 /data/ 추가. 새 npm 의존성 0개(node:sqlite 내장). runStore.ts·pipeline·web 소스는 무변경.",
+      "completed_at": "2026-07-12T17:45:10+0900"
     },
     {
       "step": 2,

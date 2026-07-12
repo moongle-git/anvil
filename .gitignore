@@ -18,6 +18,9 @@ web/next-env.d.ts
 # pipeline run outputs (루트만 — web/src/app/api/runs/ 같은 소스 경로는 무시하지 않는다)
 /runs/
 
+# SQLite DB (WAL 모드라 -wal/-shm 파일이 함께 생긴다) — ADR-014
+/data/
+
 # test coverage
 coverage/
 

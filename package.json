@@ -8,11 +8,11 @@
     "web"
   ],
   "scripts": {
-    "build": "tsc && npm run build -w web",
-    "test": "vitest run && npm run test -w web",
-    "lint": "eslint src && npm run lint -w web",
+    "build": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsc && npm run build -w web",
+    "test": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run && npm run test -w web",
+    "lint": "NODE_OPTIONS=--disable-warning=ExperimentalWarning eslint src && npm run lint -w web",
     "web": "npm run dev -w web",
-    "consult": "tsx src/cli/index.ts"
+    "consult": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx src/cli/index.ts"
   },
   "repository": {
     "type": "git",

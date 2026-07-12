@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "next build --webpack",
-    "start": "next start",
+    "dev": "NODE_OPTIONS=--disable-warning=ExperimentalWarning next dev --webpack",
+    "build": "NODE_OPTIONS=--disable-warning=ExperimentalWarning next build --webpack",
+    "start": "NODE_OPTIONS=--disable-warning=ExperimentalWarning next start",
     "lint": "eslint",
     "test": "vitest run"
   },
