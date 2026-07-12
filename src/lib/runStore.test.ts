@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { DatabaseSync } from "node:sqlite";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   CriticismSchema,
@@ -10,12 +11,20 @@ import {
   RunStateSchema,
   SolutionSchema,
   type Criticism,
+  type InterviewAnswers,
+  type InterviewQuestions,
   type MarketContext,
   type ResearchEvidence,
   type RunState,
   type Solution,
 } from "../types/index.js";
-import { RunStore, STEP_OUTPUT_FILES, deriveRunStatus } from "./runStore.js";
+import { openDb } from "./db.js";
+import {
+  RunNotFoundError,
+  RunStore,
+  STEP_ARTIFACT_KINDS,
+  deriveRunStatus,
+} from "./runStore.js";
 
 const validMarketContext: MarketContext = {
   ideaTitle: "AI 반려식물 관리 서비스",
@@ -80,33 +89,95 @@ const validSolution: Solution = {
   revisedConcept: "제로 UI 식물 집사",
 };
 
+const questions: InterviewQuestions = {
+  questions: [
+    { id: "q1", question: "핵심 타깃은 누구인가?", why: "UX가 달라진다" },
+  ],
+};
+const answers: InterviewAnswers = {
+  answers: [{ questionId: "q1", answer: "초보 식집사" }],
+};
+
+const evidence: ResearchEvidence = {
+  voices: [
+    {
+      source: "youtube",
+      title: "식물 키우기 실패담",
+      url: "https://youtube.com/watch?v=abc",
+      text: "물주기 타이밍을 늘 놓쳐요",
+      authorName: "초보집사",
+      score: 12,
+    },
+  ],
+  coverage: [
+    { source: "youtube", status: "collected", count: 1 },
+    { source: "hackernews", status: "collected", count: 0 },
+    { source: "naver", status: "unconfigured", count: 0 },
+  ],
+};
+
 describe("RunStore", () => {
-  let baseDir: string;
+  let tmpDir: string;
+  let dbPath: string;
   let store: RunStore;
+  /** 저장소 바깥에서 DB를 들여다보거나 데이터를 손상시키는 용도 (CLI와 웹이 그러하듯 별도 커넥션이다) */
+  let raw: DatabaseSync;
 
   beforeEach(() => {
-    baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "anvil-runstore-"));
-    store = new RunStore(baseDir);
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "anvil-runstore-"));
+    dbPath = path.join(tmpDir, "anvil.db");
+    store = new RunStore(dbPath);
+    raw = openDb(dbPath);
   });
 
   afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true });
+    vi.useRealTimers();
+    store.close();
+    if (raw.isOpen) {
+      raw.close();
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  function artifactKinds(runId: string): string[] {
+    const rows = raw
+      .prepare("SELECT kind FROM artifacts WHERE run_id = ? ORDER BY kind")
+      .all(runId) as { kind: string }[];
+    return rows.map((row) => row.kind);
+  }
+
+  function artifactContent(runId: string, kind: string): string | undefined {
+    const row = raw
+      .prepare("SELECT content FROM artifacts WHERE run_id = ? AND kind = ?")
+      .get(runId, kind) as { content: string } | undefined;
+    return row?.content;
+  }
+
+  function writeRawArtifact(runId: string, kind: string, content: string): void {
+    raw
+      .prepare(
+        `INSERT INTO artifacts (run_id, kind, content, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (run_id, kind) DO UPDATE SET content = excluded.content`,
+      )
+      .run(runId, kind, content, new Date().toISOString());
+  }
+
+  function countRows(table: string, runId: string): number {
+    const row = raw
+      .prepare(`SELECT count(*) AS n FROM ${table} WHERE run_id = ?`)
+      .get(runId) as { n: number };
+    return row.n;
+  }
+
   describe("createRun", () => {
-    it("creates runs/{id}/ with a valid initial state.json", () => {
+    it("runs 행과 초기 state를 만든다", () => {
       const state = store.createRun("AI 반려식물 관리 서비스");
 
       expect(RunStateSchema.parse(state)).toEqual(state);
       expect(state.idea).toBe("AI 반려식물 관리 서비스");
-
-      const statePath = path.join(baseDir, state.runId, "state.json");
-      expect(fs.existsSync(statePath)).toBe(true);
-
-      const onDisk = RunStateSchema.parse(
-        JSON.parse(fs.readFileSync(statePath, "utf-8")),
-      );
-      expect(onDisk).toEqual(state);
+      expect(countRows("runs", state.runId)).toBe(1);
+      expect(store.loadRun(state.runId)).toEqual(state);
     });
 
     it("CLI 기본(interview 미지정)은 interviewer를 제외한 스텝만 pending으로 seed한다", () => {
@@ -121,6 +192,7 @@ describe("RunStore", () => {
       ]);
       expect(state.steps.every((s) => s.status === "pending")).toBe(true);
       expect(state.interview).toBe(false);
+      expect(countRows("steps", state.runId)).toBe(5);
     });
 
     it("interview:true면 interviewer 스텝까지 seed하고 interview=true를 기록한다", () => {
@@ -129,6 +201,7 @@ describe("RunStore", () => {
       expect(state.steps.map((s) => s.name)).toEqual([...PIPELINE_STEPS]);
       expect(state.steps.every((s) => s.status === "pending")).toBe(true);
       expect(state.interview).toBe(true);
+      expect(store.loadRun(state.runId).interview).toBe(true);
     });
 
     it("generates unique runIds for repeated calls", () => {
@@ -146,14 +219,16 @@ describe("RunStore", () => {
       expect(store.loadRun(created.runId)).toEqual(created);
     });
 
-    it("throws a clear error when the run does not exist", () => {
+    it("throws RunNotFoundError when the run does not exist", () => {
+      expect(() => store.loadRun("no-such-run")).toThrow(RunNotFoundError);
       expect(() => store.loadRun("no-such-run")).toThrow(/no-such-run/);
     });
 
-    it("throws when state.json fails schema validation", () => {
+    it("throws when the stored rows fail schema validation", () => {
       const created = store.createRun("아이디어");
-      const statePath = path.join(baseDir, created.runId, "state.json");
-      fs.writeFileSync(statePath, JSON.stringify({ runId: created.runId }));
+      raw
+        .prepare("UPDATE steps SET status = 'bogus' WHERE run_id = ?")
+        .run(created.runId);
 
       expect(() => store.loadRun(created.runId)).toThrow();
     });
@@ -165,7 +240,14 @@ describe("RunStore", () => {
       const updated = {
         ...state,
         steps: state.steps.map((s, i) =>
-          i === 0 ? { ...s, status: "completed" as const } : s,
+          i === 0
+            ? {
+                ...s,
+                status: "completed" as const,
+                startedAt: "2026-07-12T00:00:00.000Z",
+                completedAt: "2026-07-12T00:01:00.000Z",
+              }
+            : s,
         ),
       };
 
@@ -181,66 +263,116 @@ describe("RunStore", () => {
       store.saveRun(state);
 
       expect(store.loadRun(state.runId)).toEqual(state);
+      expect(countRows("steps", state.runId)).toBe(state.steps.length);
     });
 
-    it("does not leave temp files behind (atomic write)", () => {
+    it("persists step 에러 메시지와 타임스탬프", () => {
       const state = store.createRun("아이디어");
-      store.saveRun(state);
+      const failed: RunState = {
+        ...state,
+        steps: state.steps.map((s, i) =>
+          i === 1
+            ? {
+                ...s,
+                status: "error" as const,
+                failedAt: "2026-07-12T00:02:00.000Z",
+                errorMessage: "boom",
+              }
+            : s,
+        ),
+      };
 
-      const files = fs.readdirSync(path.join(baseDir, state.runId));
-      expect(files).toEqual(["state.json"]);
+      store.saveRun(failed);
+
+      expect(store.loadRun(state.runId).steps[1]).toEqual({
+        name: "thesis",
+        status: "error",
+        failedAt: "2026-07-12T00:02:00.000Z",
+        errorMessage: "boom",
+      });
+    });
+
+    it("is UPDATE-only — 존재하지 않는 run에 대한 쓰기는 RunNotFoundError다 (ADR-014)", () => {
+      const ghost: RunState = {
+        runId: "never-created",
+        idea: "아이디어",
+        createdAt: "2026-07-12T00:00:00.000Z",
+        steps: [{ name: "thesis", status: "pending" }],
+        interview: false,
+      };
+
+      expect(() => store.saveRun(ghost)).toThrow(RunNotFoundError);
+      expect(countRows("runs", "never-created")).toBe(0);
+    });
+
+    it("삭제된 run을 되살리지 못한다 — 좀비 CLI 프로세스의 쓰기는 실패한다 (ADR-015)", () => {
+      const state = store.createRun("아이디어");
+      store.deleteRun(state.runId);
+
+      expect(() => store.saveRun(state)).toThrow(RunNotFoundError);
+      expect(countRows("runs", state.runId)).toBe(0);
+      expect(countRows("steps", state.runId)).toBe(0);
     });
   });
 
   describe("saveStepOutput / loadStepOutput", () => {
-    it("maps each step to its output filename", () => {
-      expect(STEP_OUTPUT_FILES).toEqual({
-        interviewer: "questions.json",
-        "context-hunter": "context.json",
-        thesis: "thesis.json",
-        "cold-critic": "criticism.json",
-        "solution-designer": "solution.json",
-        verdict: "verdict.json",
+    it("maps each step to its artifact kind", () => {
+      expect(STEP_ARTIFACT_KINDS).toEqual({
+        interviewer: "questions",
+        "context-hunter": "context",
+        thesis: "thesis",
+        "cold-critic": "criticism",
+        "solution-designer": "solution",
+        verdict: "verdict",
       });
     });
 
-    it("saves each step output under its mapped filename", () => {
+    it("saves each step output under its mapped kind", () => {
       const { runId } = store.createRun("아이디어");
 
       store.saveStepOutput(runId, "context-hunter", validMarketContext);
       store.saveStepOutput(runId, "cold-critic", validCriticism);
       store.saveStepOutput(runId, "solution-designer", validSolution);
 
-      const runDir = path.join(baseDir, runId);
-      expect(fs.existsSync(path.join(runDir, "context.json"))).toBe(true);
-      expect(fs.existsSync(path.join(runDir, "criticism.json"))).toBe(true);
-      expect(fs.existsSync(path.join(runDir, "solution.json"))).toBe(true);
+      expect(artifactKinds(runId)).toEqual([
+        "context",
+        "criticism",
+        "solution",
+      ]);
+    });
+
+    it("산출물을 컬럼으로 쪼개지 않고 JSON 문자열 한 덩어리로 저장한다 (ADR-014)", () => {
+      const { runId } = store.createRun("아이디어");
+
+      store.saveStepOutput(runId, "context-hunter", validMarketContext);
+
+      const content = artifactContent(runId, "context");
+      expect(typeof content).toBe("string");
+      expect(JSON.parse(content as string)).toEqual(validMarketContext);
     });
 
     it("round-trips a step output through schema validation", () => {
       const { runId } = store.createRun("아이디어");
       store.saveStepOutput(runId, "context-hunter", validMarketContext);
 
-      const loaded = store.loadStepOutput(
-        runId,
-        "context-hunter",
-        MarketContextSchema,
-      );
-      expect(loaded).toEqual(validMarketContext);
+      expect(
+        store.loadStepOutput(runId, "context-hunter", MarketContextSchema),
+      ).toEqual(validMarketContext);
     });
 
-    it("is idempotent — saving the same output twice yields the same file", () => {
+    it("is idempotent — saving the same output twice yields the same content", () => {
       const { runId } = store.createRun("아이디어");
 
       store.saveStepOutput(runId, "cold-critic", validCriticism);
       store.saveStepOutput(runId, "cold-critic", validCriticism);
 
-      expect(store.loadStepOutput(runId, "cold-critic", CriticismSchema)).toEqual(
-        validCriticism,
-      );
+      expect(
+        store.loadStepOutput(runId, "cold-critic", CriticismSchema),
+      ).toEqual(validCriticism);
+      expect(artifactKinds(runId)).toEqual(["criticism"]);
     });
 
-    it("returns null when the output file does not exist", () => {
+    it("returns null when the artifact does not exist", () => {
       const { runId } = store.createRun("아이디어");
 
       expect(
@@ -248,19 +380,20 @@ describe("RunStore", () => {
       ).toBeNull();
     });
 
-    it("returns null (not throw) when the file is corrupted JSON", () => {
+    it("returns null (not throw) when the content is corrupted JSON", () => {
       const { runId } = store.createRun("아이디어");
-      fs.writeFileSync(path.join(baseDir, runId, "context.json"), "{ not json");
+      writeRawArtifact(runId, "context", "{ not json");
 
       expect(
         store.loadStepOutput(runId, "context-hunter", MarketContextSchema),
       ).toBeNull();
     });
 
-    it("returns null (not throw) when the file fails schema validation", () => {
+    it("returns null (not throw) when the content fails schema validation", () => {
       const { runId } = store.createRun("아이디어");
-      fs.writeFileSync(
-        path.join(baseDir, runId, "criticism.json"),
+      writeRawArtifact(
+        runId,
+        "criticism",
         JSON.stringify({ verdict: "근거 없는 낙관" }),
       );
 
@@ -281,23 +414,12 @@ describe("RunStore", () => {
   });
 
   describe("interview questions / answers", () => {
-    const questions = {
-      questions: [
-        { id: "q1", question: "핵심 타깃은 누구인가?", why: "UX가 달라진다" },
-      ],
-    };
-    const answers = {
-      answers: [{ questionId: "q1", answer: "초보 식집사" }],
-    };
-
-    it("saveInterviewQuestions는 questions.json에 저장하고 왕복한다", () => {
+    it("saveInterviewQuestions는 questions 아티팩트에 저장하고 왕복한다", () => {
       const { runId } = store.createRun("아이디어", { interview: true });
 
       store.saveInterviewQuestions(runId, questions);
 
-      expect(fs.existsSync(path.join(baseDir, runId, "questions.json"))).toBe(
-        true,
-      );
+      expect(artifactKinds(runId)).toEqual(["questions"]);
       expect(store.loadInterviewQuestions(runId)).toEqual(questions);
     });
 
@@ -309,18 +431,20 @@ describe("RunStore", () => {
       expect(store.loadInterviewQuestions(runId)).toEqual({ questions: [] });
     });
 
-    it("saveInterviewAnswers는 answers.json에 저장하고 왕복한다", () => {
+    it("saveInterviewAnswers는 answers 아티팩트에 저장하고 왕복한다", () => {
       const { runId } = store.createRun("아이디어", { interview: true });
 
       store.saveInterviewAnswers(runId, answers);
 
-      expect(fs.existsSync(path.join(baseDir, runId, "answers.json"))).toBe(
-        true,
-      );
+      expect(artifactKinds(runId)).toEqual(["answers"]);
       expect(store.loadInterviewAnswers(runId)).toEqual(answers);
     });
 
-    it("loadInterviewAnswers는 파일이 없으면 null을 반환한다", () => {
+    it("answers는 step 산출물이 아니다 (STEP_ARTIFACT_KINDS에 없다)", () => {
+      expect(Object.values(STEP_ARTIFACT_KINDS)).not.toContain("answers");
+    });
+
+    it("loadInterviewAnswers는 아티팩트가 없으면 null을 반환한다", () => {
       const { runId } = store.createRun("아이디어", { interview: true });
 
       expect(store.loadInterviewAnswers(runId)).toBeNull();
@@ -328,51 +452,28 @@ describe("RunStore", () => {
 
     it("loadInterviewAnswers는 손상된 JSON이면 null을 반환한다", () => {
       const { runId } = store.createRun("아이디어", { interview: true });
-      fs.writeFileSync(
-        path.join(baseDir, runId, "answers.json"),
-        "{ not json",
-      );
+      writeRawArtifact(runId, "answers", "{ not json");
 
       expect(store.loadInterviewAnswers(runId)).toBeNull();
     });
   });
 
   describe("research evidence", () => {
-    const evidence: ResearchEvidence = {
-      voices: [
-        {
-          source: "youtube",
-          title: "식물 키우기 실패담",
-          url: "https://youtube.com/watch?v=abc",
-          text: "물주기 타이밍을 늘 놓쳐요",
-          authorName: "초보집사",
-          score: 12,
-        },
-      ],
-      coverage: [
-        { source: "youtube", status: "collected", count: 1 },
-        { source: "hackernews", status: "collected", count: 0 },
-        { source: "naver", status: "unconfigured", count: 0 },
-      ],
-    };
-
-    it("saveResearchEvidence는 research.json에 저장하고 왕복한다", () => {
+    it("saveResearchEvidence는 research 아티팩트에 저장하고 왕복한다", () => {
       const { runId } = store.createRun("아이디어");
 
       store.saveResearchEvidence(runId, evidence);
 
-      expect(fs.existsSync(path.join(baseDir, runId, "research.json"))).toBe(
-        true,
-      );
+      expect(artifactKinds(runId)).toEqual(["research"]);
       expect(store.loadResearchEvidence(runId)).toEqual(evidence);
     });
 
-    it("research.json은 step 산출물이 아니다 (STEP_OUTPUT_FILES에 없다)", () => {
+    it("research는 step 산출물이 아니다 (STEP_ARTIFACT_KINDS에 없다)", () => {
       // PipelineStepName과 1:1 대응하는 맵이다. 넣으면 resume 판정·웹 진행 뷰까지 파급된다
-      expect(Object.values(STEP_OUTPUT_FILES)).not.toContain("research.json");
+      expect(Object.values(STEP_ARTIFACT_KINDS)).not.toContain("research");
     });
 
-    it("loadResearchEvidence는 파일이 없으면 null을 반환한다 (구 run에는 없다)", () => {
+    it("loadResearchEvidence는 아티팩트가 없으면 null을 반환한다 (구 run에는 없다)", () => {
       const { runId } = store.createRun("아이디어");
 
       expect(store.loadResearchEvidence(runId)).toBeNull();
@@ -380,18 +481,16 @@ describe("RunStore", () => {
 
     it("loadResearchEvidence는 손상된 JSON이면 null을 반환한다", () => {
       const { runId } = store.createRun("아이디어");
-      fs.writeFileSync(
-        path.join(baseDir, runId, "research.json"),
-        "{ not json",
-      );
+      writeRawArtifact(runId, "research", "{ not json");
 
       expect(store.loadResearchEvidence(runId)).toBeNull();
     });
 
     it("loadResearchEvidence는 스키마 검증에 실패하면 null을 반환한다", () => {
       const { runId } = store.createRun("아이디어");
-      fs.writeFileSync(
-        path.join(baseDir, runId, "research.json"),
+      writeRawArtifact(
+        runId,
+        "research",
         JSON.stringify({
           voices: [],
           coverage: [{ source: "reddit", status: "collected", count: 1 }],
@@ -402,31 +501,119 @@ describe("RunStore", () => {
     });
   });
 
+  describe("saveReport / loadReport", () => {
+    it("리포트를 마크다운 원문 그대로 저장하고 왕복한다", () => {
+      const { runId } = store.createRun("아이디어");
+      const markdown = "# [컨설팅 리포트] 아이디어\n";
+
+      store.saveReport(runId, markdown);
+
+      expect(artifactContent(runId, "report")).toBe(markdown);
+      expect(store.loadReport(runId)).toBe(markdown);
+    });
+
+    it("is idempotent — saving the same report twice yields the same content", () => {
+      const { runId } = store.createRun("아이디어");
+      const markdown = "# 리포트\n";
+
+      store.saveReport(runId, markdown);
+      store.saveReport(runId, markdown);
+
+      expect(store.loadReport(runId)).toBe(markdown);
+      expect(artifactKinds(runId)).toEqual(["report"]);
+    });
+
+    it("report는 step 산출물이 아니다 (STEP_ARTIFACT_KINDS에 없다)", () => {
+      expect(Object.values(STEP_ARTIFACT_KINDS)).not.toContain("report");
+    });
+
+    it("loadReport는 리포트가 없으면 null을 반환한다", () => {
+      const { runId } = store.createRun("아이디어");
+
+      expect(store.loadReport(runId)).toBeNull();
+    });
+  });
+
+  describe("updated_at (stalled 판정의 유일한 근거 — ADR-014)", () => {
+    const T0 = "2026-07-12T00:00:00.000Z";
+    const T1 = "2026-07-12T00:05:00.000Z";
+
+    it("saveStepOutput이 runs.updated_at을 민다", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(T0));
+      const { runId } = store.createRun("아이디어");
+      expect(store.loadRunRecord(runId)?.updatedAtMs).toBe(Date.parse(T0));
+
+      vi.setSystemTime(new Date(T1));
+      store.saveStepOutput(runId, "context-hunter", validMarketContext);
+
+      expect(store.loadRunRecord(runId)?.updatedAtMs).toBe(Date.parse(T1));
+    });
+
+    it("saveRun·saveReport·saveResearchEvidence·인터뷰 쓰기도 updated_at을 민다", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(T0));
+      const state = store.createRun("아이디어", { interview: true });
+
+      const writes: Array<() => void> = [
+        () => store.saveRun(state),
+        () => store.saveReport(state.runId, "# 리포트"),
+        () => store.saveResearchEvidence(state.runId, evidence),
+        () => store.saveInterviewQuestions(state.runId, questions),
+        () => store.saveInterviewAnswers(state.runId, answers),
+      ];
+
+      for (const [i, write] of writes.entries()) {
+        const at = Date.parse(T0) + (i + 1) * 60_000;
+        vi.setSystemTime(new Date(at));
+        write();
+        expect(store.loadRunRecord(state.runId)?.updatedAtMs).toBe(at);
+      }
+    });
+  });
+
+  describe("loadRunRecord", () => {
+    it("state와 updated_at을 함께 돌려준다", () => {
+      const state = store.createRun("아이디어");
+
+      const record = store.loadRunRecord(state.runId);
+
+      expect(record?.state).toEqual(state);
+      expect(record?.updatedAtMs).toBeGreaterThan(0);
+    });
+
+    it("없는 run이면 null이다 (loadRun과 달리 throw하지 않는다 — 웹이 404를 낸다)", () => {
+      expect(store.loadRunRecord("no-such-run")).toBeNull();
+    });
+
+    it("손상된 run이면 null이다", () => {
+      const state = store.createRun("아이디어");
+      raw
+        .prepare("UPDATE steps SET status = 'bogus' WHERE run_id = ?")
+        .run(state.runId);
+
+      expect(store.loadRunRecord(state.runId)).toBeNull();
+    });
+  });
+
   describe("listRuns", () => {
     const MINUTE_MS = 60 * 1000;
 
-    it("returns an empty array when baseDir does not exist", () => {
-      const missing = new RunStore(path.join(baseDir, "does-not-exist"));
-
-      expect(missing.listRuns()).toEqual([]);
-    });
-
-    it("returns an empty array when baseDir has no runs", () => {
+    it("returns an empty array when there are no runs", () => {
       expect(store.listRuns()).toEqual([]);
     });
 
     it("summarizes a run with its runId, idea, createdAt and derived status", () => {
       const state = store.createRun("AI 반려식물 관리 서비스");
 
-      const runs = store.listRuns();
-
-      expect(runs).toEqual([
+      expect(store.listRuns()).toEqual([
         {
           runId: state.runId,
           idea: "AI 반려식물 관리 서비스",
           createdAt: state.createdAt,
           completedAt: undefined,
           status: "running",
+          rerunOf: undefined,
         },
       ]);
     });
@@ -454,16 +641,17 @@ describe("RunStore", () => {
       expect(store.listRuns()[0]?.status).toBe("error");
     });
 
-    it("derives stalled status when state.json mtime is older than 15 minutes", () => {
+    it("derives stalled status when updated_at is older than 15 minutes", () => {
       const state = store.createRun("아이디어");
-      const statePath = path.join(baseDir, state.runId, "state.json");
-      const old = new Date(Date.now() - 16 * MINUTE_MS);
-      fs.utimesSync(statePath, old, old);
+      const old = new Date(Date.now() - 16 * MINUTE_MS).toISOString();
+      raw
+        .prepare("UPDATE runs SET updated_at = ? WHERE run_id = ?")
+        .run(old, state.runId);
 
       expect(store.listRuns()[0]?.status).toBe("stalled");
     });
 
-    it("derives stalled via injected nowMs without touching the file", () => {
+    it("derives stalled via injected nowMs without touching the row", () => {
       store.createRun("아이디어");
 
       expect(store.listRuns(Date.now() + 16 * MINUTE_MS)[0]?.status).toBe(
@@ -471,44 +659,12 @@ describe("RunStore", () => {
       );
     });
 
-    it("skips directories without state.json instead of throwing", () => {
-      const state = store.createRun("아이디어");
-      fs.mkdirSync(path.join(baseDir, "not-a-run"));
-
-      const runs = store.listRuns();
-
-      expect(runs.map((r) => r.runId)).toEqual([state.runId]);
-    });
-
-    it("skips runs whose state.json is corrupted JSON", () => {
-      const state = store.createRun("아이디어");
-      const broken = store.createRun("깨진 run");
-      fs.writeFileSync(
-        path.join(baseDir, broken.runId, "state.json"),
-        "{ not json",
-      );
-
-      const runs = store.listRuns();
-
-      expect(runs.map((r) => r.runId)).toEqual([state.runId]);
-    });
-
-    it("skips runs whose state.json fails schema validation", () => {
+    it("skips runs whose rows fail schema validation", () => {
       const state = store.createRun("아이디어");
       const invalid = store.createRun("스키마 위반 run");
-      fs.writeFileSync(
-        path.join(baseDir, invalid.runId, "state.json"),
-        JSON.stringify({ runId: invalid.runId }),
-      );
-
-      const runs = store.listRuns();
-
-      expect(runs.map((r) => r.runId)).toEqual([state.runId]);
-    });
-
-    it("ignores plain files in baseDir", () => {
-      const state = store.createRun("아이디어");
-      fs.writeFileSync(path.join(baseDir, "stray.txt"), "noise");
+      raw
+        .prepare("UPDATE steps SET status = 'bogus' WHERE run_id = ?")
+        .run(invalid.runId);
 
       expect(store.listRuns().map((r) => r.runId)).toEqual([state.runId]);
     });
@@ -527,28 +683,173 @@ describe("RunStore", () => {
         a.runId,
       ]);
     });
+
+    it("재실행 run은 rerunOf로 원본을 가리킨다", () => {
+      const source = store.createRun("아이디어");
+      const fork = store.createRerun(source.runId);
+
+      const summary = store.listRuns().find((r) => r.runId === fork.runId);
+
+      expect(summary?.rerunOf).toBe(source.runId);
+    });
   });
 
-  describe("saveReport", () => {
-    it("writes report.md and returns its absolute path", () => {
+  describe("deleteRun", () => {
+    it("run·steps·artifacts를 CASCADE로 함께 지운다 (ADR-015)", () => {
       const { runId } = store.createRun("아이디어");
-      const markdown = "# [컨설팅 리포트] 아이디어\n";
+      store.saveStepOutput(runId, "context-hunter", validMarketContext);
+      store.saveResearchEvidence(runId, evidence);
+      store.saveReport(runId, "# 리포트");
 
-      const reportPath = store.saveReport(runId, markdown);
+      expect(store.deleteRun(runId)).toBe(true);
 
-      expect(path.isAbsolute(reportPath)).toBe(true);
-      expect(reportPath).toBe(path.resolve(baseDir, runId, "report.md"));
-      expect(fs.readFileSync(reportPath, "utf-8")).toBe(markdown);
+      expect(() => store.loadRun(runId)).toThrow(RunNotFoundError);
+      expect(
+        store.loadStepOutput(runId, "context-hunter", MarketContextSchema),
+      ).toBeNull();
+      expect(store.loadResearchEvidence(runId)).toBeNull();
+      expect(store.loadReport(runId)).toBeNull();
+      expect(countRows("runs", runId)).toBe(0);
+      expect(countRows("steps", runId)).toBe(0);
+      expect(countRows("artifacts", runId)).toBe(0);
     });
 
-    it("is idempotent — saving the same report twice yields the same content", () => {
-      const { runId } = store.createRun("아이디어");
-      const markdown = "# 리포트\n";
+    it("없는 run이면 false를 반환한다 (throw하지 않는다)", () => {
+      expect(store.deleteRun("no-such-run")).toBe(false);
+    });
 
-      store.saveReport(runId, markdown);
-      const reportPath = store.saveReport(runId, markdown);
+    it("다른 run은 건드리지 않는다", () => {
+      const kept = store.createRun("남길 run");
+      const doomed = store.createRun("지울 run");
 
-      expect(fs.readFileSync(reportPath, "utf-8")).toBe(markdown);
+      store.deleteRun(doomed.runId);
+
+      expect(store.listRuns().map((r) => r.runId)).toEqual([kept.runId]);
+    });
+
+    it("원본을 지워도 재실행 run은 살아남고 rerunOf만 끊긴다 (ON DELETE SET NULL)", () => {
+      const source = store.createRun("아이디어");
+      const fork = store.createRerun(source.runId);
+
+      expect(store.deleteRun(source.runId)).toBe(true);
+
+      expect(store.loadRun(fork.runId).runId).toBe(fork.runId);
+      expect(
+        store.listRuns().find((r) => r.runId === fork.runId)?.rerunOf,
+      ).toBeUndefined();
+    });
+  });
+
+  describe("createRerun (재실행은 포크다 — ADR-015)", () => {
+    /** 완료된 인터뷰 run 하나를 통째로 만든다 */
+    function completedInterviewRun(): RunState {
+      const state = store.createRun("AI 반려식물 관리 서비스", {
+        interview: true,
+      });
+      store.saveInterviewQuestions(state.runId, questions);
+      store.saveInterviewAnswers(state.runId, answers);
+      store.saveResearchEvidence(state.runId, evidence);
+      store.saveStepOutput(state.runId, "context-hunter", validMarketContext);
+      store.saveStepOutput(state.runId, "cold-critic", validCriticism);
+      store.saveStepOutput(state.runId, "solution-designer", validSolution);
+      store.saveReport(state.runId, "# 리포트");
+      const completed: RunState = {
+        ...state,
+        steps: state.steps.map((s) => ({ ...s, status: "completed" as const })),
+        completedAt: new Date().toISOString(),
+      };
+      store.saveRun(completed);
+      return completed;
+    }
+
+    it("원본이 없으면 RunNotFoundError다", () => {
+      expect(() => store.createRerun("no-such-run")).toThrow(RunNotFoundError);
+    });
+
+    it("새 run_id로 아이디어·interview를 복사하고 rerun_of에 계보를 남긴다", () => {
+      const source = completedInterviewRun();
+
+      const fork = store.createRerun(source.runId);
+
+      expect(fork.runId).not.toBe(source.runId);
+      expect(fork.idea).toBe(source.idea);
+      expect(fork.interview).toBe(true);
+      expect(fork.completedAt).toBeUndefined();
+      expect(
+        store.listRuns().find((r) => r.runId === fork.runId)?.rerunOf,
+      ).toBe(source.runId);
+    });
+
+    it("원본을 덮어쓰지 않는다 — 원본 리포트는 그대로 남는다", () => {
+      const source = completedInterviewRun();
+
+      store.createRerun(source.runId);
+
+      expect(store.loadRun(source.runId)).toEqual(source);
+      expect(store.loadReport(source.runId)).toBe("# 리포트");
+    });
+
+    it("questions·answers만 복사한다 — research·context·report는 복사하지 않는다", () => {
+      const source = completedInterviewRun();
+
+      const fork = store.createRerun(source.runId);
+
+      expect(store.loadInterviewQuestions(fork.runId)).toEqual(questions);
+      expect(store.loadInterviewAnswers(fork.runId)).toEqual(answers);
+      expect(artifactKinds(fork.runId)).toEqual(["answers", "questions"]);
+      expect(store.loadResearchEvidence(fork.runId)).toBeNull();
+      expect(
+        store.loadStepOutput(fork.runId, "context-hunter", MarketContextSchema),
+      ).toBeNull();
+      expect(
+        store.loadStepOutput(fork.runId, "cold-critic", CriticismSchema),
+      ).toBeNull();
+      expect(store.loadReport(fork.runId)).toBeNull();
+    });
+
+    it("interviewer는 completed로, 나머지 step은 pending으로 seed한다 (인터뷰를 다시 묻지 않는다)", () => {
+      const source = completedInterviewRun();
+
+      const fork = store.createRerun(source.runId);
+
+      expect(fork.steps.map((s) => [s.name, s.status])).toEqual([
+        ["interviewer", "completed"],
+        ["context-hunter", "pending"],
+        ["thesis", "pending"],
+        ["cold-critic", "pending"],
+        ["solution-designer", "pending"],
+        ["verdict", "pending"],
+      ]);
+      expect(
+        fork.steps.find((s) => s.name === "interviewer")?.completedAt,
+      ).toBeDefined();
+      expect(store.loadRun(fork.runId)).toEqual(fork);
+    });
+
+    it("원본에 questions가 없으면 interviewer는 pending이다 (답변 없이 진행하면 안 된다)", () => {
+      const source = store.createRun("아이디어", { interview: true });
+
+      const fork = store.createRerun(source.runId);
+
+      expect(
+        fork.steps.find((s) => s.name === "interviewer")?.status,
+      ).toBe("pending");
+    });
+
+    it("CLI run(interview=false)은 interviewer 없이 포크된다", () => {
+      const source = store.createRun("아이디어");
+
+      const fork = store.createRerun(source.runId);
+
+      expect(fork.interview).toBe(false);
+      expect(fork.steps.map((s) => s.name)).toEqual([
+        "context-hunter",
+        "thesis",
+        "cold-critic",
+        "solution-designer",
+        "verdict",
+      ]);
+      expect(fork.steps.every((s) => s.status === "pending")).toBe(true);
     });
   });
 });
@@ -571,7 +872,7 @@ describe("deriveRunStatus", () => {
     };
   }
 
-  it("returns completed when completedAt is set, regardless of mtime", () => {
+  it("returns completed when completedAt is set, regardless of updated_at", () => {
     const state = makeState({ completedAt: "2026-07-06T01:00:00.000Z" });
 
     expect(deriveRunStatus(state, NOW_MS - 60 * MINUTE_MS, NOW_MS)).toBe(
@@ -593,7 +894,7 @@ describe("deriveRunStatus", () => {
     );
   });
 
-  it("returns error when any step has status error, regardless of mtime", () => {
+  it("returns error when any step has status error, regardless of updated_at", () => {
     const state = makeState({
       steps: PIPELINE_STEPS.map((name, i) => ({
         name,
@@ -607,7 +908,7 @@ describe("deriveRunStatus", () => {
     );
   });
 
-  it("returns waiting when a step is waiting, even if mtime is old (stalled 오판 방지)", () => {
+  it("returns waiting when a step is waiting, even if updated_at is old (stalled 오판 방지)", () => {
     const state = makeState({
       steps: [{ name: "interviewer", status: "waiting" as const }],
     });
@@ -628,14 +929,14 @@ describe("deriveRunStatus", () => {
     expect(deriveRunStatus(state, NOW_MS, NOW_MS)).toBe("error");
   });
 
-  it("returns running when mtime is within 15 minutes of now", () => {
+  it("returns running when updated_at is within 15 minutes of now", () => {
     expect(deriveRunStatus(makeState(), NOW_MS - 9 * MINUTE_MS, NOW_MS)).toBe(
       "running",
     );
   });
 
   // context-hunter는 grounding·urlContext 왕복으로 최악 6분이 걸리고, executeStep은 실행 중
-  // state.json을 건드리지 않는다. 임계값이 10분이면 정상 실행 중인 run이 stalled로 오탐된다 (ADR-012).
+  // updated_at을 건드리지 않는다. 임계값이 10분이면 정상 실행 중인 run이 stalled로 오탐된다 (ADR-012).
   it("treats a 12-minute-old run as still running (10분 임계값이면 오탐한다)", () => {
     expect(deriveRunStatus(makeState(), NOW_MS - 12 * MINUTE_MS, NOW_MS)).toBe(
       "running",
@@ -648,7 +949,7 @@ describe("deriveRunStatus", () => {
     );
   });
 
-  it("returns stalled when mtime is older than 15 minutes", () => {
+  it("returns stalled when updated_at is older than 15 minutes", () => {
     expect(
       deriveRunStatus(makeState(), NOW_MS - 15 * MINUTE_MS - 1, NOW_MS),
     ).toBe("stalled");
