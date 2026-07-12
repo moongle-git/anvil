@@ -11,6 +11,8 @@ export { DeleteRunButton } from "./DeleteRunButton";
 export { EmptyState } from "./EmptyState";
 export { ErrorState } from "./ErrorState";
 export { PageShell } from "./PageShell";
+export { RerunButton } from "./RerunButton";
+export { RunLineage } from "./RunLineage";
 export { RUN_STATUS_LABELS, RunStatusBadge } from "./RunStatusBadge";
 export { SectionHeading } from "./SectionHeading";
 export { SEVERITY_LABELS, SeverityBadge } from "./SeverityBadge";

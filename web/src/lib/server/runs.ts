@@ -53,11 +53,21 @@ export function withRunStore<T>(fn: (store: RunStore) => T): T {
   }
 }
 
+/** 계보 표시에 필요한 원본 run의 최소 정보 (UI_GUIDE "계보 표시") */
+export interface RunOrigin {
+  runId: string;
+  idea: string;
+  /** 비교 바로가기는 원본과 이번 run이 둘 다 completed일 때만 뜬다 — 아니면 죽은 링크다 */
+  status: RunDisplayStatus;
+}
+
 export interface RunDetail {
   state: RunState;
   status: RunDisplayStatus;
   /** 재실행으로 생긴 run이면 원본 run_id. 원본이 삭제되면 끊긴다 (ADR-015) */
   rerunOf?: string;
+  /** rerunOf가 가리키는 원본을 조회한 결과. 계보 UI는 이것만 보면 된다 */
+  origin?: RunOrigin;
   questions?: InterviewQuestions;
   context?: MarketContext;
   thesis?: Thesis;
@@ -65,6 +75,24 @@ export interface RunDetail {
   solution?: Solution;
   verdict?: Verdict;
   hasReport: boolean;
+}
+
+/**
+ * 원본 run을 계보 표시용으로 조회한다. 같은 커넥션 안에서 처리한다 (요청당 커넥션 1개).
+ *
+ * FK가 살아 있으면 원본 행도 살아 있지만(ON DELETE SET NULL), 원본의 상태 행이 손상돼
+ * 읽히지 않을 수는 있다. 그때는 계보를 그리지 않는다 — 죽은 링크보다 없는 편이 낫다.
+ */
+function loadOrigin(store: RunStore, rerunOf: string): RunOrigin | null {
+  const record = store.loadRunRecord(rerunOf);
+  if (record === null) {
+    return null;
+  }
+  return {
+    runId: rerunOf,
+    idea: record.state.idea,
+    status: deriveRunStatus(record.state, record.updatedAtMs),
+  };
 }
 
 export function getRunDetail(runId: string): RunDetail | null {
@@ -85,10 +113,13 @@ export function getRunDetail(runId: string): RunDetail | null {
     const solution = store.loadStepOutput(runId, "solution-designer", SolutionSchema);
     const verdict = store.loadStepOutput(runId, "verdict", VerdictSchema);
 
+    const origin = rerunOf !== undefined ? loadOrigin(store, rerunOf) : null;
+
     return {
       state,
       status: deriveRunStatus(state, updatedAtMs),
       ...(rerunOf !== undefined ? { rerunOf } : {}),
+      ...(origin !== null ? { origin } : {}),
       ...(questions !== null ? { questions } : {}),
       ...(context !== null ? { context } : {}),
       ...(thesis !== null ? { thesis } : {}),

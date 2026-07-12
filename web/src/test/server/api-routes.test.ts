@@ -9,7 +9,9 @@ import {
 } from "@/app/api/runs/[id]/route";
 import { POST as postAnswers } from "@/app/api/runs/[id]/answers/route";
 import { GET as getReport } from "@/app/api/runs/[id]/report/route";
+import { POST as postRerun } from "@/app/api/runs/[id]/rerun/route";
 import { POST as postResume } from "@/app/api/runs/[id]/resume/route";
+import { MarketContextSchema } from "@anvil/types";
 import { withRunStore } from "@/lib/server/runs";
 import { spawnConsult } from "@/lib/server/spawnConsult";
 import {
@@ -336,6 +338,141 @@ describe("POST /api/runs/[id]/resume", () => {
 
     expect(res.status).toBe(409);
     expect(spawnConsult).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/runs/[id]/rerun", () => {
+  function rerun(id: string): Promise<Response> {
+    return postRerun(
+      new Request(`http://localhost/api/runs/${id}/rerun`, { method: "POST" }),
+      params(id),
+    );
+  }
+
+  const QUESTIONS = {
+    questions: [
+      { id: "q1", question: "핵심 타깃은 누구인가?", why: "검증 방향이 갈린다" },
+    ],
+  };
+  const ANSWERS = {
+    answers: [{ questionId: "q1", answer: "주 2회 이상 회의하는 팀" }],
+  };
+
+  /** 포크가 인터뷰 산출물을 복사하는지 보려면 원본에 그것이 있어야 한다 (fixture는 CLI run이라 없다) */
+  function seedCompletedWithInterview(): void {
+    seedFixtureRun(COMPLETED_RUN_ID);
+    withRunStore((store) => {
+      store.saveInterviewQuestions(COMPLETED_RUN_ID, QUESTIONS);
+      store.saveInterviewAnswers(COMPLETED_RUN_ID, ANSWERS);
+    });
+  }
+
+  it("completed run을 포크해 새 runId로 spawn하고 201을 응답한다", async () => {
+    seedCompletedWithInterview();
+    let forkExistedWhenSpawned = false;
+    vi.mocked(spawnConsult).mockImplementation((spawnedId: string) => {
+      forkExistedWhenSpawned = withRunStore(
+        (store) => store.loadRunRecord(spawnedId) !== null,
+      );
+    });
+
+    const res = await rerun(COMPLETED_RUN_ID);
+
+    expect(res.status).toBe(201);
+    const { runId } = await res.json();
+    expect(runId).not.toBe(COMPLETED_RUN_ID);
+    expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(runId);
+    // ADR-007 순서: 포크를 DB에 먼저 써야 CLI의 --resume {newRunId}가 찾는다
+    expect(forkExistedWhenSpawned).toBe(true);
+    // 계보가 남는다 (ADR-015)
+    expect(withRunStore((store) => store.loadRunRecord(runId))?.rerunOf).toBe(
+      COMPLETED_RUN_ID,
+    );
+  });
+
+  it("포크는 idea·questions·answers만 복사하고 자료조사 이후는 복사하지 않는다", async () => {
+    seedCompletedWithInterview();
+
+    const { runId } = await (await rerun(COMPLETED_RUN_ID)).json();
+
+    withRunStore((store) => {
+      expect(store.loadRun(runId).idea).toBe(
+        store.loadRun(COMPLETED_RUN_ID).idea,
+      );
+      // 인터뷰를 다시 묻지 않는다 (PRD Phase 6)
+      expect(store.loadInterviewQuestions(runId)).toEqual(QUESTIONS);
+      expect(store.loadInterviewAnswers(runId)).toEqual(ANSWERS);
+      // 원본에는 있고 포크에는 없다 — 자료조사부터 다시 도는 것이 재실행의 정의다 (ADR-015)
+      expect(
+        store.loadStepOutput(COMPLETED_RUN_ID, "context-hunter", MarketContextSchema),
+      ).not.toBeNull();
+      expect(
+        store.loadStepOutput(runId, "context-hunter", MarketContextSchema),
+      ).toBeNull();
+      expect(store.hasReport(runId)).toBe(false);
+    });
+  });
+
+  it("원본은 덮어쓰지 않는다 — 리포트가 그대로 남는다", async () => {
+    seedCompletedWithInterview();
+    const before = withRunStore((store) => store.loadReport(COMPLETED_RUN_ID));
+
+    await rerun(COMPLETED_RUN_ID);
+
+    const after = withRunStore((store) => ({
+      report: store.loadReport(COMPLETED_RUN_ID),
+      status: store.listRuns().find((r) => r.runId === COMPLETED_RUN_ID)?.status,
+    }));
+    expect(after.report).toBe(before);
+    expect(after.status).toBe("completed");
+  });
+
+  it("error run도 재실행할 수 있다", async () => {
+    seedFixtureRun(ERROR_RUN_ID);
+
+    const res = await rerun(ERROR_RUN_ID);
+
+    expect(res.status).toBe(201);
+    const { runId } = await res.json();
+    expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(runId);
+  });
+
+  it("stalled run도 재실행할 수 있다", async () => {
+    seedFixtureRun(RUNNING_RUN_ID);
+    touchUpdatedAt(
+      RUNNING_RUN_ID,
+      new Date(Date.now() - SIXTEEN_MINUTES_MS).toISOString(),
+    );
+
+    expect((await rerun(RUNNING_RUN_ID)).status).toBe(201);
+  });
+
+  it("running run은 409이고 새 run이 생기지 않는다", async () => {
+    seedFixtureRun(RUNNING_RUN_ID);
+
+    const res = await rerun(RUNNING_RUN_ID);
+
+    expect(res.status).toBe(409);
+    expect(spawnConsult).not.toHaveBeenCalled();
+    expect(withRunStore((store) => store.listRuns())).toHaveLength(1);
+  });
+
+  it("waiting run은 409이고 새 run이 생기지 않는다", async () => {
+    seedFixtureRun(WAITING_RUN_ID);
+
+    const res = await rerun(WAITING_RUN_ID);
+
+    expect(res.status).toBe(409);
+    expect(spawnConsult).not.toHaveBeenCalled();
+    expect(withRunStore((store) => store.listRuns())).toHaveLength(1);
+  });
+
+  it("없는 run은 404이고 spawn하지 않는다", async () => {
+    const res = await rerun("nope");
+
+    expect(res.status).toBe(404);
+    expect(spawnConsult).not.toHaveBeenCalled();
+    expect(withRunStore((store) => store.listRuns())).toEqual([]);
   });
 });
 

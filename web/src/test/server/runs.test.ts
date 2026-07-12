@@ -248,6 +248,31 @@ describe("getRunDetail", () => {
     expect(getRunDetail(fork.runId)?.rerunOf).toBe(COMPLETED_RUN_ID);
   });
 
+  it("재실행 run은 원본의 아이디어·상태를 origin으로 함께 싣는다 (계보 표시용)", () => {
+    seedFixtureRun(COMPLETED_RUN_ID);
+    const source = withRunStore((store) => store.loadRun(COMPLETED_RUN_ID));
+    const fork = withRunStore((store) => store.createRerun(COMPLETED_RUN_ID));
+
+    expect(getRunDetail(fork.runId)?.origin).toEqual({
+      runId: COMPLETED_RUN_ID,
+      idea: source.idea,
+      status: "completed",
+    });
+  });
+
+  it("원본이 삭제되면 계보가 끊겨 rerunOf·origin이 모두 없다 (ON DELETE SET NULL)", () => {
+    seedFixtureRun(COMPLETED_RUN_ID);
+    const fork = withRunStore((store) => store.createRerun(COMPLETED_RUN_ID));
+    withRunStore((store) => store.deleteRun(COMPLETED_RUN_ID));
+
+    const detail = getRunDetail(fork.runId);
+
+    // 포크는 살아남는다 — 끊기는 것은 계보뿐이다
+    expect(detail?.state.runId).toBe(fork.runId);
+    expect(detail && "rerunOf" in detail).toBe(false);
+    expect(detail && "origin" in detail).toBe(false);
+  });
+
   it("존재하지 않는 run은 null", () => {
     expect(getRunDetail("no-such-run")).toBeNull();
   });

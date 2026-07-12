@@ -10,6 +10,10 @@ import { VerdictSection } from "./VerdictSection";
 
 interface ReportViewProps {
   detail: RunDetail;
+  /** 상세 헤더 메타 줄에 놓이는 계보 (RunDetailClient가 소유한다) */
+  lineage?: ReactNode;
+  /** 상세 헤더에 놓이는 재실행 컨트롤 (RunDetailClient가 소유한다) */
+  rerunControl?: ReactNode;
   /** 상세 헤더에 놓이는 삭제 컨트롤 (RunDetailClient가 소유한다) */
   deleteControl?: ReactNode;
 }
@@ -19,7 +23,12 @@ const LEGACY_ACCENT: CardAccent = { side: "left", tone: "strong" };
 // 리포트 뷰(완료 run). 5단계 순차 논증 서사 (ADR-008 결론 후치):
 // 시장 맥락 → 正 → 反 → 合 → 최종 판정. 결론(verdict·생존 점수·severity 집계)을 상단에 두지
 // 않는다 — 사용자는 끝까지 읽어야 판정을 본다. 결론 선노출은 正/反 대립을 장식으로 만든다.
-export function ReportView({ detail, deleteControl }: ReportViewProps) {
+export function ReportView({
+  detail,
+  lineage,
+  rerunControl,
+  deleteControl,
+}: ReportViewProps) {
   const { state, context, thesis, criticism, solution, verdict } = detail;
 
   // 완료됐지만 새 스키마 산출물이 없는 구버전 run. 결론 스포일러가 아니라 데이터 상태 안내이므로
@@ -33,6 +42,8 @@ export function ReportView({ detail, deleteControl }: ReportViewProps) {
         idea={state.idea}
         createdAt={state.createdAt}
         hasReport={detail.hasReport}
+        lineage={lineage}
+        rerunControl={rerunControl}
         deleteControl={deleteControl}
       />
 

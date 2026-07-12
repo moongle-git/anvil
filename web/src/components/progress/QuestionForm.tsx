@@ -8,6 +8,8 @@ interface QuestionFormProps {
   runId: string;
   questions: InterviewQuestion[];
   onSubmitted?: () => void;
+  /** 상세 헤더 메타 줄에 놓이는 계보 (RunDetailClient가 소유한다) */
+  lineage?: ReactNode;
   /** 상세 헤더에 놓이는 삭제 컨트롤 (RunDetailClient가 소유한다) */
   deleteControl?: ReactNode;
 }
@@ -23,6 +25,7 @@ export function QuestionForm({
   runId,
   questions,
   onSubmitted,
+  lineage,
   deleteControl,
 }: QuestionFormProps) {
   const [values, setValues] = useState<Record<string, string>>({});
@@ -91,6 +94,7 @@ export function QuestionForm({
           <p className="text-sm leading-relaxed text-neutral-500">
             아이디어를 더 정확히 검증하기 위한 질문입니다. 답변은 건너뛸 수 있어요.
           </p>
+          {lineage}
         </div>
         {deleteControl}
       </header>

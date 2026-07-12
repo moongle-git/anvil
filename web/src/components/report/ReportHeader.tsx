@@ -6,6 +6,10 @@ interface ReportHeaderProps {
   idea: string;
   createdAt: string;
   hasReport: boolean;
+  /** 제목 아래 메타 줄에 놓이는 계보 (UI_GUIDE "계보 표시" — 배너가 아니다) */
+  lineage?: ReactNode;
+  /** 재실행 진입 — 완료된 run의 주 진입점이다 (RunDetailClient가 소유한다) */
+  rerunControl?: ReactNode;
   /** 삭제 진입 + 인라인 확인 (RunDetailClient가 소유한다) */
   deleteControl?: ReactNode;
 }
@@ -19,6 +23,8 @@ export function ReportHeader({
   idea,
   createdAt,
   hasReport,
+  lineage,
+  rerunControl,
   deleteControl,
 }: ReportHeaderProps) {
   return (
@@ -30,6 +36,7 @@ export function ReportHeader({
         <p className="text-xs tabular-nums text-neutral-500">
           {formatDateTime(createdAt)}
         </p>
+        {lineage}
       </div>
       <div className="flex flex-wrap items-center justify-end gap-3">
         {hasReport ? (
@@ -37,6 +44,7 @@ export function ReportHeader({
             report.md 다운로드
           </a>
         ) : null}
+        {rerunControl}
         {deleteControl}
       </div>
     </header>

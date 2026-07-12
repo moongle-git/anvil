@@ -41,6 +41,8 @@ function stepElapsedMs(step: StepState, nowMs: number): number | null {
 interface ProgressViewProps {
   detail: RunDetail;
   onResume: () => void;
+  /** 상세 헤더 메타 줄에 놓이는 계보 (RunDetailClient가 소유한다) */
+  lineage?: ReactNode;
   /** 상세 헤더에 놓이는 삭제 컨트롤 (RunDetailClient가 소유한다) */
   deleteControl?: ReactNode;
 }
@@ -48,6 +50,7 @@ interface ProgressViewProps {
 export function ProgressView({
   detail,
   onResume,
+  lineage,
   deleteControl,
 }: ProgressViewProps) {
   const { state } = detail;
@@ -65,6 +68,7 @@ export function ProgressView({
           <p className="text-xs tabular-nums text-neutral-500">
             시작 {formatDateTime(state.createdAt)}
           </p>
+          {lineage}
         </div>
         {deleteControl}
       </header>

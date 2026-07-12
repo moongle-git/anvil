@@ -123,6 +123,17 @@ const completedDetail: RunDetail = {
   hasReport: true,
 };
 
+// 재실행으로 생긴 포크: 원본(o1)을 가리킨다. origin은 getRunDetail이 실어 보낸다 (계보 표시용)
+const forkOfCompletedDetail: RunDetail = {
+  ...completedDetail,
+  rerunOf: "o1",
+  origin: {
+    runId: "o1",
+    idea: "반려식물 케어 구독 서비스",
+    status: "completed",
+  },
+};
+
 const waitingDetail: RunDetail = {
   state: {
     runId: "r1",
@@ -434,6 +445,130 @@ describe("RunDetailClient (분기)", () => {
     }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.title).toContain("실행 중");
+  });
+
+  it("완료된 run은 '재실행'으로 새 run을 만들고 그 상세로 이동한다", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/rerun")) {
+        return jsonResponse({ runId: "r2" }, 201);
+      }
+      return jsonResponse(completedDetail);
+    });
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "재실행" })).toBeDefined(),
+    );
+    // resume("이어서 실행")과 다른 버튼이다 — 완료 run에는 resume이 없다
+    expect(screen.queryByRole("button", { name: "이어서 실행" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "재실행" }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/r2"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r1/rerun",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("재실행 요청 중에는 버튼이 비활성이다 (더블클릭으로 run이 두 개 생기지 않게)", async () => {
+    let releaseRerun: (() => void) | null = null;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/rerun")) {
+        await new Promise<void>((resolve) => {
+          releaseRerun = resolve;
+        });
+        return jsonResponse({ runId: "r2" }, 201);
+      }
+      return jsonResponse(completedDetail);
+    });
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "재실행" })).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "재실행" }));
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: /재실행/ }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true),
+    );
+    releaseRerun?.();
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/runs/r2"));
+    // 실제 재실행 요청은 한 번뿐이다
+    expect(
+      fetchMock.mock.calls.filter(([url]: [string]) => url.includes("/rerun")),
+    ).toHaveLength(1);
+  });
+
+  it("재실행이 409로 거절되면 이유를 보여주고 이동하지 않는다", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("/rerun")) {
+        return jsonResponse({ error: "running 상태의 run은 재실행할 수 없다" }, 409);
+      }
+      return jsonResponse(completedDetail);
+    });
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "재실행" })).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "재실행" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("재실행할 수 없습니다"),
+    );
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("포크된 run은 원본 링크를 보여주고, 둘 다 완료면 비교 바로가기도 보여준다", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(forkOfCompletedDetail));
+    render(<RunDetailClient runId="r1" />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: forkOfCompletedDetail.origin!.idea }),
+      ).toBeDefined(),
+    );
+    expect(
+      screen
+        .getByRole("link", { name: forkOfCompletedDetail.origin!.idea })
+        .getAttribute("href"),
+    ).toBe("/runs/o1");
+    expect(
+      screen.getByRole("link", { name: "비교하기" }).getAttribute("href"),
+    ).toBe("/compare?a=o1&b=r1");
+  });
+
+  it("포크가 아직 완료되지 않았으면 원본 링크만 있고 비교 바로가기는 없다", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...runningDetail,
+        rerunOf: "o1",
+        origin: {
+          runId: "o1",
+          idea: "반려식물 케어 구독 서비스",
+          status: "completed",
+        },
+      }),
+    );
+    render(<RunDetailClient runId="r1" />);
+
+    await waitFor(() => expect(screen.getByText("시장 조사")).toBeDefined());
+    expect(document.querySelector("[data-run-lineage]")).not.toBeNull();
+    // 미완료 run이 섞이면 비교 뷰가 차단되므로 죽은 링크를 걸지 않는다
+    expect(screen.queryByRole("link", { name: "비교하기" })).toBeNull();
+  });
+
+  it("원본이 삭제된(origin 없는) run에는 계보 안내가 뜨지 않는다", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(completedDetail));
+    render(<RunDetailClient runId="r1" />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "재실행" })).toBeDefined(),
+    );
+    expect(document.querySelector("[data-run-lineage]")).toBeNull();
   });
 
   it("삭제가 409로 거절되면 이유를 보여주고 이동하지 않는다", async () => {

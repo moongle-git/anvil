@@ -3,7 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DeleteRunButton, ErrorState } from "@/components/ui";
+import {
+  DeleteRunButton,
+  ErrorState,
+  RerunButton,
+  RunLineage,
+} from "@/components/ui";
 import { ReportView } from "@/components/report/ReportView";
 import { ProgressView } from "./ProgressView";
 import { QuestionForm } from "./QuestionForm";
@@ -13,7 +18,7 @@ import { useRunDetail } from "./useRunDetail";
 export function RunDetailClient({ runId }: { runId: string }) {
   const { detail, notFound, error, restart } = useRunDetail(runId);
   const router = useRouter();
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function handleResume() {
     try {
@@ -26,17 +31,39 @@ export function RunDetailClient({ runId }: { runId: string }) {
     }
   }
 
+  // 재실행은 원본을 덮어쓰지 않고 새 run으로 포크한다 (ADR-015) — 그래서 원본에 머무르지 않고
+  // 새 run의 상세(진행 뷰)로 이동한다. 원본 리포트는 그대로 남는다.
+  async function handleRerun() {
+    let res: Response;
+    try {
+      res = await fetch(`/api/runs/${runId}/rerun`, { method: "POST" });
+    } catch {
+      setActionError("재실행에 실패했습니다.");
+      return;
+    }
+    if (!res.ok) {
+      setActionError(
+        res.status === 409
+          ? "아직 결과가 없는 run은 재실행할 수 없습니다."
+          : "재실행에 실패했습니다.",
+      );
+      return;
+    }
+    const { runId: newRunId } = (await res.json()) as { runId: string };
+    router.push(`/runs/${newRunId}`);
+  }
+
   async function handleDelete() {
     let res: Response;
     try {
       res = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
     } catch {
-      setDeleteError("삭제에 실패했습니다.");
+      setActionError("삭제에 실패했습니다.");
       return;
     }
     if (!res.ok) {
       // UI는 running에서 버튼을 비활성으로 두지만 그건 2선 방어다 — API의 409를 그대로 알린다
-      setDeleteError(
+      setActionError(
         res.status === 409
           ? "실행 중에는 삭제할 수 없습니다."
           : "삭제에 실패했습니다.",
@@ -86,28 +113,45 @@ export function RunDetailClient({ runId }: { runId: string }) {
     />
   );
 
+  // 원본이 삭제되면 rerun_of가 끊겨 origin이 없다 — 그때는 계보 줄 자체를 그리지 않는다 (UI_GUIDE)
+  const lineage = detail.origin ? (
+    <RunLineage
+      runId={detail.state.runId}
+      status={detail.status}
+      origin={detail.origin}
+    />
+  ) : undefined;
+
   return (
     <div className="flex flex-col gap-4">
-      {deleteError ? (
+      {actionError ? (
         <p role="alert" className="text-sm text-red-600">
-          {deleteError}
+          {actionError}
         </p>
       ) : null}
 
       {detail.status === "completed" ? (
-        <ReportView detail={detail} deleteControl={deleteControl} />
+        // 재실행은 완료된 run에서만 뜬다 — resume(error·stalled)과 한 화면에 같이 놓이지 않는다
+        <ReportView
+          detail={detail}
+          lineage={lineage}
+          rerunControl={<RerunButton onRerun={handleRerun} />}
+          deleteControl={deleteControl}
+        />
       ) : detail.status === "waiting" ? (
         // 답변 대기: 인터뷰 질문 폼을 보여주고, 제출하면 폴링이 진행 뷰로 전환한다
         <QuestionForm
           runId={runId}
           questions={detail.questions?.questions ?? []}
           onSubmitted={restart}
+          lineage={lineage}
           deleteControl={deleteControl}
         />
       ) : (
         <ProgressView
           detail={detail}
           onResume={handleResume}
+          lineage={lineage}
           deleteControl={deleteControl}
         />
       )}
