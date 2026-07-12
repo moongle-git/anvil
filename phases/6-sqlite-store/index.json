@@ -1,0 +1,54 @@
+{
+  "project": "anvil",
+  "phase": "6-sqlite-store",
+  "steps": [
+    {
+      "step": 0,
+      "name": "design-docs",
+      "status": "completed",
+      "started_at": "2026-07-12T17:34:03+0900",
+      "summary": "ADR-014(SQLite 전환, ADR-002 폐기·ADR-004 유지, 3테이블 DDL·PRAGMA·UPDATE-only saveRun)와 ADR-015(삭제=CASCADE·running 불가, 재실행=포크)를 추가하고 ADR-002에 폐기 상태·ADR-007에 updated_at(15분) 정정을 달았다. ARCHITECTURE는 runs/ 파일 블록을 DB 스키마+artifacts.kind 매핑표로 교체하고 데이터 흐름·상태 관리·요청당 커넥션 규칙을 갱신, PRD는 Phase 6 섹션을 신설하고 상태 파생 규칙을 runs.updated_at으로 정정, UI_GUIDE에 삭제(무채색 진입+인라인 Danger 확인)·재실행(Secondary, resume과 구분)·계보 표시 규격을 추가했다. 코드 무변경."
+    },
+    {
+      "step": 1,
+      "name": "db-schema",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "run-store-sqlite",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "pipeline-cli-wiring",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "runs-migration",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "web-data-layer",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "delete-run",
+      "status": "pending"
+    },
+    {
+      "step": 7,
+      "name": "rerun",
+      "status": "pending"
+    },
+    {
+      "step": 8,
+      "name": "final-verify",
+      "status": "pending"
+    }
+  ],
+  "created_at": "2026-07-12T17:34:03+0900"
+}

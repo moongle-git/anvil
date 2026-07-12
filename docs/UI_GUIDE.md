@@ -92,7 +92,53 @@ rounded-md border border-neutral-200 bg-white p-6
 Primary:   rounded-md bg-neutral-900 text-white hover:bg-neutral-700 px-4 py-2 text-sm font-medium
 Secondary: rounded-md bg-white text-neutral-700 border border-neutral-300 hover:bg-neutral-50
 Text:      text-neutral-500 hover:text-neutral-900 underline-offset-4 hover:underline
+Danger:    rounded-md bg-red-600 text-white hover:bg-red-700 px-4 py-2 text-sm font-medium
 ```
+`Danger`는 **확인 단계에서만** 쓴다 — 아래 "삭제 버튼" 참조.
+
+### 삭제 버튼 (Phase 6)
+run 삭제는 되돌릴 수 없다. run의 상태·산출물·리포트가 CASCADE로 함께 사라진다(ADR-015).
+
+**진입 버튼은 무채색이다.** 목록 행과 상세 헤더의 "삭제"는 `Text` 버튼을 쓴다(`text-neutral-500 hover:text-neutral-900`).
+빨강을 진입 버튼에 쓰지 않는 이유는 원칙 3이다 — red-600은 이미 `severity: fatal` / `run 실패`라는 **데이터의 의미**를 갖는다. 아직 아무것도 파괴하지 않은 버튼에 그 색을 쓰면 목록에서 "실패한 run"과 "삭제 가능한 run"이 같은 빨강으로 섞인다. 빨강은 **파괴가 실제로 임박한 순간**, 즉 확인 단계에서만 등장한다.
+
+**확인은 인라인이다.** 모달을 만들지 마라 — 포커스 트랩·스크롤 잠금·오버레이 골격이 통째로 필요한데, 이 프로젝트에는 모달이 하나도 없고 문서 톤에도 맞지 않는다. "삭제"를 누르면 **그 자리에서** 버튼이 확인 줄로 바뀐다.
+
+```
+[삭제]  →  되돌릴 수 없습니다. 리포트와 수집 증거가 모두 삭제됩니다.  [삭제] [취소]
+           └ text-sm text-neutral-700                                  └ Danger  └ Secondary
+```
+- 확인 줄은 콜아웃이 아니라 액션 줄이다 — `Card`로 감싸지 않는다.
+- 기본 포커스는 **[취소]** 에 둔다. Esc는 취소와 같다.
+- 삭제 진행 중에는 두 버튼을 disabled로 두고 [삭제]의 라벨을 "삭제 중…"으로 바꾼다.
+
+**실행 중(running)인 run은 삭제할 수 없다.** 버튼을 숨기지 말고 **비활성**으로 둔다(`text-neutral-400` + `cursor-not-allowed`, `disabled`) — 사라지는 버튼은 기능이 없는 것처럼 보인다. 사유("실행 중에는 삭제할 수 없습니다")를 `title`과 접근성 레이블로 남긴다.
+
+### 재실행 버튼 (Phase 6)
+재실행(rerun)은 **완료된 run**에서만 뜨고, resume("이어서 실행")은 **error·stalled**에서만 뜬다. 한 화면에 동시에 나타나지는 않지만, 사용자가 둘을 같은 것으로 오해하면 안 된다.
+
+| 액션 | 라벨 | 부제 | 버튼 | 어디서 |
+|---|---|---|---|---|
+| resume | **이어서 실행** | (없음) | `Primary` | error·stalled run |
+| rerun | **재실행** | 자료조사부터 다시 | `Secondary` | completed run 상세 |
+
+- 라벨은 **"재실행"으로 통일**한다. "다시 실행"·"새로 실행"처럼 섞어 쓰지 마라.
+- 부제 "자료조사부터 다시"는 버튼 아래(또는 옆) `text-xs text-neutral-500`으로 분리 노출하고, `title`에도 같은 문구를 넣는다. 뱃지 안에 문구를 밀어 넣지 않는다(`RiskScoreBadge`와 같은 규율).
+- resume이 `Primary`인 이유: 중단된 run에서 사용자가 원하는 유일한 다음 행동이다. rerun이 `Secondary`인 이유: 완료된 run의 주인공은 리포트이고, 재실행은 부차적 행동이다.
+- **확인 단계를 두지 않는다.** rerun은 파괴적이지 않다 — 원본을 보존하고 새 run을 만든다. 실수로 눌렀다면 새 run을 삭제하면 된다.
+
+### 계보 표시 (Phase 6)
+재실행으로 생긴 run은 원본으로 되돌아가는 길을 항상 갖는다.
+
+- 위치는 **상세 헤더의 제목 아래 메타 줄**이다(실행 일시와 같은 줄 계열). 상단 배너·콜아웃을 만들지 마라 — 리포트 상단 배너 금지(원칙 2, ADR-008)와 충돌한다. 계보는 요약이 아니라 **메타데이터**다.
+- 규격: `text-xs text-neutral-500`, 원본 run 링크만 링크 색(blue-700)을 쓴다.
+
+```
+재실행 — 원본: {원본 아이디어 제목}          · 비교하기
+         └ blue-700, /runs/{원본 id}로 이동    └ Text 버튼, 둘 다 완료일 때만
+```
+- **비교 바로가기는 원본과 이번 run이 둘 다 완료일 때만** 표시한다(`/compare?a={원본}&b={이번}`). 미완료면 비교 뷰가 차단되므로 죽은 링크가 된다.
+- 원본이 삭제됐으면(`rerun_of`가 끊긴다) 계보 줄 전체를 그리지 않는다.
 
 ### 입력 필드
 ```
