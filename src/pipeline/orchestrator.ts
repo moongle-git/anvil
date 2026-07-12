@@ -40,7 +40,8 @@ export interface PipelineResult {
   state: RunState;
   // waiting: 인터뷰 답변을 기다리며 일시 중지됨. completed: 리포트까지 생성 완료.
   status: "completed" | "waiting";
-  reportPath?: string;
+  // 리포트는 파일이 아니라 artifacts(kind='report')에 있다 (ADR-014) — 경로 대신 원문을 돌려준다
+  report?: string;
 }
 
 /** 답변을 질문 텍스트와 짝지어 Context Hunter 프롬프트에 넣을 문자열로 만든다. 유효한 답변이 없으면 "" */
@@ -95,7 +96,7 @@ export async function runPipeline(
   const { runId, idea } = state;
 
   // 하네스 패턴 (ADR-004): 순차 실행 + 전이마다 saveRun으로 즉시 persist.
-  // 프로세스가 죽어도 state.json이 남아야 resume이 성립한다.
+  // 프로세스가 죽어도 runs·steps 행이 남아야 resume이 성립한다 (ADR-014).
   async function executeStep<T>(
     name: PipelineStepName,
     schema: ZodType<T>,
@@ -138,7 +139,7 @@ export async function runPipeline(
   }
 
   // ── 인터뷰 단계 (웹에서 생성된 run만; state.interview로 구동) ──
-  // detached CLI에는 stdin이 없으므로 questions.json/answers.json 파일로 pause/resume한다.
+  // detached CLI에는 stdin이 없으므로 questions·answers 아티팩트로 pause/resume한다.
   let clarifications = "";
   if (state.interview) {
     const step = getStepState(state, "interviewer");
@@ -197,9 +198,9 @@ export async function runPipeline(
   }
 
   // executeStep은 반환값을 그대로 step 산출물로 저장하므로, 수집 증거는 여기서 벗겨내
-  // research.json으로 따로 영속화한다 — research.json은 step 산출물이 아니다 (ADR-013).
-  // resume 시 context-hunter가 completed면 run()이 호출되지 않아 research.json은 재생성되지
-  // 않는다. 이미 파일이 있으므로 정상이다.
+  // research 아티팩트로 따로 영속화한다 — research는 step 산출물이 아니다 (ADR-013).
+  // resume 시 context-hunter가 completed면 run()이 호출되지 않아 research는 재생성되지
+  // 않는다. 이미 저장돼 있으므로 정상이다.
   const context = await executeStep(
     "context-hunter",
     MarketContextSchema,
@@ -227,15 +228,13 @@ export async function runPipeline(
     runVerdict({ gemini: deps.gemini }, idea, context, thesis, criticism, solution),
   );
 
-  const reportPath = deps.store.saveReport(
-    runId,
-    renderReport(idea, context, thesis, criticism, solution, verdict),
-  );
+  const report = renderReport(idea, context, thesis, criticism, solution, verdict);
+  deps.store.saveReport(runId, report);
   if (state.completedAt === undefined) {
     state.completedAt = new Date().toISOString();
   }
   deps.store.saveRun(state);
-  log(`[pipeline] 리포트 생성 완료: ${reportPath}`);
+  log(`[pipeline] 리포트 생성 완료: run ${runId}`);
 
-  return { runId, reportPath, state, status: "completed" };
+  return { runId, report, state, status: "completed" };
 }

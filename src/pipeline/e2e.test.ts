@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoogleGenAI } from "@google/genai";
+import { openDb } from "../lib/db.js";
 import { RunStore } from "../lib/runStore.js";
 import { hackerNewsSource, naverSource, youtubeSource } from "../research/sources.js";
 import type { ResearchSource } from "../research/types.js";
@@ -361,12 +362,29 @@ function deps(client: GoogleGenAI, fetchFn: typeof fetch): PipelineDeps {
   };
 }
 
+/** 저장된 바이트를 그대로 읽는다 — RunStore의 zod 검증을 우회해야 default([])와 실제 값을 구별한다 */
+function rawArtifact(runId: string, kind: string): string {
+  const db = openDb(path.join(tmpDir, "anvil.db"));
+  try {
+    const row = db
+      .prepare("SELECT content FROM artifacts WHERE run_id = ? AND kind = ?")
+      .get(runId, kind) as { content: string } | undefined;
+    if (row === undefined) {
+      throw new Error(`artifact 없음: ${runId}/${kind}`);
+    }
+    return row.content;
+  } finally {
+    db.close();
+  }
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "anvil-e2e-"));
-  store = new RunStore(tmpDir);
+  store = new RunStore(path.join(tmpDir, "anvil.db"));
 });
 
 afterEach(() => {
+  store.close();
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -390,9 +408,9 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     // planner는 pipeline step이 아니라 context-hunter 내부 호출이라 ALL_STEPS에 없다 (ADR-012).
     expect(generateContent).toHaveBeenCalledTimes(ALL_STEPS.length + 1);
 
-    // 리포트가 디스크에 실제로 있고, 5개 섹션과 원문 댓글을 담고 있다
-    expect(result.reportPath).toBeDefined();
-    const report = fs.readFileSync(result.reportPath as string, "utf8");
+    // 리포트가 저장소에 실제로 있고, 5개 섹션과 원문 댓글을 담고 있다
+    const report = store.loadReport(result.runId);
+    expect(report).not.toBeNull();
     expect(report).toContain("# [컨설팅 리포트] AI 반려식물 관리 서비스");
     expect(report).toContain("## 1. 시장 맥락 (Context)");
     expect(report).toContain("## 2. 낙관적 가설 (正 / Thesis)");
@@ -400,12 +418,8 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     expect(report).toContain("## 4. 인사이트 및 재설계 (合 / Synthesis)");
     expect(report).toContain(COMMENT_TEXT);
 
-    // state.json이 단일 진실 공급원 — 전 step이 completed고 run이 종료됐다
-    const state = RunStateSchema.parse(
-      JSON.parse(
-        fs.readFileSync(path.join(tmpDir, result.runId, "state.json"), "utf8"),
-      ),
-    );
+    // runs·steps가 단일 진실 공급원 — 전 step이 completed고 run이 종료됐다 (ADR-014)
+    const state = RunStateSchema.parse(store.loadRun(result.runId));
     expect(state.completedAt).toBeDefined();
     expect(
       ALL_STEPS.map((name) => state.steps.find((s) => s.name === name)?.status),
@@ -497,7 +511,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     );
   });
 
-  it("grounding 응답의 인용이 코드 추출을 거쳐 디스크의 context.json에 남는다", async () => {
+  it("grounding 응답의 인용이 코드 추출을 거쳐 저장된 context 산출물에 남는다", async () => {
     const { client } = fakeGenAI(
       PLANNER_TEXT,
       CONTEXT_RESPONSE,
@@ -509,11 +523,11 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
 
     const result = await runPipeline(deps(client, researchFetch()), { idea: IDEA });
 
-    // 파일에 실제로 쓰인 원문을 본다 — 스키마 default([])가 빈 배열을 채워 통과하는 것과 구별하기 위해
-    const raw: unknown = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, result.runId, "context.json"), "utf8"),
+    // 저장소에 실제로 쓰인 원문(artifacts.content)을 본다 —
+    // 스키마 default([])가 빈 배열을 채워 통과하는 것과 구별하기 위해 별도 커넥션으로 바이트를 읽는다
+    const context = MarketContextSchema.parse(
+      JSON.parse(rawArtifact(result.runId, "context")),
     );
-    const context = MarketContextSchema.parse(raw);
 
     // uri 없는 chunk는 드롭되므로 2개 chunk 중 1건만 남는다.
     // 검색 chunk가 실어온 uri는 만료되는 리다이렉트다 — kind가 그 사실을 남긴다 (ADR-013)
@@ -596,9 +610,9 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
 
     expect(result.status).toBe("completed");
     expect(
-      fs.existsSync(path.join(tmpDir, result.runId, "context.json")),
-    ).toBe(true);
-    expect(fs.existsSync(result.reportPath as string)).toBe(true);
+      store.loadStepOutput(result.runId, "context-hunter", MarketContextSchema),
+    ).not.toBeNull();
+    expect(store.loadReport(result.runId)).not.toBeNull();
   });
 
   it("모든 소스가 실패해도 웹검색만으로 완주한다", async () => {
@@ -626,7 +640,7 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
     );
 
     expect(result.status).toBe("completed");
-    expect(fs.existsSync(result.reportPath as string)).toBe(true);
+    expect(store.loadReport(result.runId)).not.toBeNull();
   });
 });
 
@@ -651,7 +665,7 @@ describe("E2E: 웹 인터뷰 흐름 (waiting → 답변 → resume)", () => {
 
     const paused = await runPipeline(d, { idea: IDEA, resumeRunId: runId });
     expect(paused.status).toBe("waiting");
-    expect(paused.reportPath).toBeUndefined();
+    expect(paused.report).toBeUndefined();
     // 답변 대기는 에러가 아니다
     expect(
       paused.state.steps.find((s) => s.name === "interviewer")?.status,
@@ -665,7 +679,7 @@ describe("E2E: 웹 인터뷰 흐름 (waiting → 답변 → resume)", () => {
 
     expect(resumed.status).toBe("completed");
     expect(resumed.runId).toBe(runId);
-    expect(fs.existsSync(resumed.reportPath as string)).toBe(true);
+    expect(store.loadReport(runId)).not.toBeNull();
   });
 });
 
@@ -700,7 +714,7 @@ describe("E2E: 장애 내성", () => {
     expect(stepError.step).toBe("context-hunter");
     expect(stepError.message).toMatch(/시간 초과/);
 
-    // state.json에 error로 기록돼야 resume이 성립한다 (pending 고착 = 재개 불가)
+    // steps에 error로 기록돼야 resume이 성립한다 (pending 고착 = 재개 불가)
     const state = store.loadRun(stepError.runId);
     const step = state.steps.find((s) => s.name === "context-hunter");
     expect(step?.status).toBe("error");

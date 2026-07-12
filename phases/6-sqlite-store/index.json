@@ -29,7 +29,10 @@
     {
       "step": 3,
       "name": "pipeline-cli-wiring",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-12T17:53:00+0900",
+      "summary": "orchestrator·CLI를 SQLite RunStore에 배선했다. PipelineResult.reportPath?: string → report?: string (마크다운 원문) — 리포트는 더 이상 파일이 아니라 artifacts(kind='report')다. orchestrator는 renderReport 결과를 saveReport(runId, markdown)로 저장하고 원문을 결과에 실어 돌려준다. CLI(src/cli/index.ts): new RunStore(getDefaultDbPath())로 DB를 열고 finally에서 store.close(), 성공 시 리포트 원문을 stdout으로(리다이렉트 가능) 안내 문구는 stderr로 분리해 출력한다. orchestrator.test.ts·e2e.test.ts를 DB 백엔드로 이식(tmp DB 파일 + store API로 검증, 손상 산출물은 스키마 위반 값 저장 또는 별도 커넥션의 raw artifacts 읽기로 대체). web/package.json의 @types/node를 ^20 → ^26.1.0으로 올렸다 — ^20에는 node:sqlite 타입이 없어 next build의 타입체크가 db.ts에서 실패한다. 루트 npm run build 통과, 루트 vitest 32파일 669케이스 전부 통과. ★ 아직 web 서버 레이어 테스트 2파일(34케이스: src/test/server/runs.test.ts, api-routes.test.ts)이 실패한다 — web/src/lib/server/runs.ts가 여전히 getRunsDir()·state.json mtime·report.md 파일 전제이고 fixture가 runs/ 디렉토리다. step 5(web-data-layer)에서 해소한다.",
+      "completed_at": "2026-07-12T17:58:00+0900"
     },
     {
       "step": 4,

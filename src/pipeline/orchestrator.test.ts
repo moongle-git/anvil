@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RunStore, STEP_OUTPUT_FILES } from "../lib/runStore.js";
+import { RunStore, STEP_ARTIFACT_KINDS } from "../lib/runStore.js";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
 import {
@@ -239,16 +239,17 @@ function calledSchemas(generateStructured: ReturnType<typeof vi.fn>): unknown[] 
 }
 
 describe("runPipeline", () => {
-  let baseDir: string;
+  let tmpDir: string;
   let store: RunStore;
 
   beforeEach(() => {
-    baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "anvil-pipeline-"));
-    store = new RunStore(baseDir);
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "anvil-pipeline-"));
+    store = new RunStore(path.join(tmpDir, "anvil.db"));
   });
 
   afterEach(() => {
-    fs.rmSync(baseDir, { recursive: true, force: true });
+    store.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
@@ -292,29 +293,18 @@ describe("runPipeline", () => {
     }
     expect(saved.completedAt).toBeDefined();
 
-    // 산출물 파일 persist
-    const runDir = path.join(baseDir, result.runId);
+    // 산출물 persist — 각 step은 매핑된 artifacts.kind로 저장된다 (ADR-014)
+    expect(STEP_ARTIFACT_KINDS.verdict).toBe("verdict");
     expect(
-      JSON.parse(
-        fs.readFileSync(
-          path.join(runDir, STEP_OUTPUT_FILES["context-hunter"]),
-          "utf-8",
-        ),
-      ),
+      store.loadStepOutput(result.runId, "context-hunter", MarketContextSchema),
     ).toEqual(marketContext);
-    expect(STEP_OUTPUT_FILES.verdict).toBe("verdict.json");
-    expect(
-      JSON.parse(
-        fs.readFileSync(path.join(runDir, STEP_OUTPUT_FILES.verdict), "utf-8"),
-      ),
-    ).toEqual(verdict);
-
-    // 리포트 생성
-    expect(result.reportPath).toBe(path.join(runDir, "report.md"));
-    const report = fs.readFileSync(
-      result.reportPath ?? "",
-      "utf-8",
+    expect(store.loadStepOutput(result.runId, "verdict", VerdictSchema)).toEqual(
+      verdict,
     );
+
+    // 리포트 생성 — 파일이 아니라 artifacts(kind='report')에 남는다
+    const report = store.loadReport(result.runId);
+    expect(result.report).toBe(report);
     expect(report).toContain("# [컨설팅 리포트]");
     expect(report).toContain(solution.revisedConcept);
     expect(report).toContain(verdict.headline);
@@ -340,12 +330,10 @@ describe("runPipeline", () => {
     expect(saved.steps[4].failedAt).toBeDefined();
     // 판정 없이 완료로 표시되면 안 된다 — 리포트의 결론이 비어 버린다
     expect(saved.completedAt).toBeUndefined();
-    expect(fs.existsSync(path.join(baseDir, error.runId, "report.md"))).toBe(
-      false,
-    );
+    expect(store.loadReport(error.runId)).toBeNull();
   });
 
-  it("resume: completed인 verdict step은 저장된 verdict.json을 재사용하고 재실행하지 않는다", async () => {
+  it("resume: completed인 verdict 산출물은 재사용하고 재실행하지 않는다", async () => {
     const first = fakeGemini();
     const { runId } = await runPipeline(makeDeps(first.gemini), { idea: IDEA });
 
@@ -362,16 +350,15 @@ describe("runPipeline", () => {
     );
   });
 
-  it("verdict.json이 손상되면 completed 상태여도 verdict step만 재실행한다", async () => {
+  it("verdict 산출물이 손상되면 completed 상태여도 verdict step만 재실행한다", async () => {
     const first = fakeGemini();
     const { runId } = await runPipeline(makeDeps(first.gemini), { idea: IDEA });
 
     // 스키마 검증에 실패하는 산출물 (survivalScore가 recommendation 밴드와 모순)
-    fs.writeFileSync(
-      path.join(baseDir, runId, STEP_OUTPUT_FILES.verdict),
-      JSON.stringify({ ...verdict, survivalScore: 5 }),
-      "utf-8",
-    );
+    store.saveStepOutput(runId, "verdict", {
+      ...verdict,
+      survivalScore: 5,
+    });
 
     const second = fakeGemini();
     await runPipeline(makeDeps(second.gemini), {
@@ -445,20 +432,18 @@ describe("runPipeline", () => {
     expect(saved.steps[2].errorMessage).toBeUndefined();
 
     // 리포트는 1차 실행에서 저장된 context 산출물을 재사용해 렌더링된다
-    const report = fs.readFileSync(result.reportPath ?? "", "utf-8");
-    expect(report).toContain(marketContext.ideaTitle);
+    expect(store.loadReport(result.runId)).toContain(marketContext.ideaTitle);
   });
 
-  it("산출물 파일이 손상된 completed step은 재실행한다", async () => {
+  it("산출물이 손상된 completed step은 재실행한다", async () => {
     const first = fakeGemini();
     const { runId } = await runPipeline(makeDeps(first.gemini), { idea: IDEA });
 
-    // context.json을 손상시킨다 (state.json상 status는 여전히 completed)
-    fs.writeFileSync(
-      path.join(baseDir, runId, STEP_OUTPUT_FILES["context-hunter"]),
-      "깨진 JSON{{{",
-      "utf-8",
-    );
+    // context 산출물을 손상시킨다 (steps상 status는 여전히 completed)
+    store.saveStepOutput(runId, "context-hunter", {
+      ...marketContext,
+      competitors: "배열이 아니다",
+    });
 
     const second = fakeGemini();
     await runPipeline(makeDeps(second.gemini), {
@@ -476,19 +461,14 @@ describe("runPipeline", () => {
 
     // 재실행으로 산출물이 복구된다
     expect(
-      JSON.parse(
-        fs.readFileSync(
-          path.join(baseDir, runId, STEP_OUTPUT_FILES["context-hunter"]),
-          "utf-8",
-        ),
-      ),
+      store.loadStepOutput(runId, "context-hunter", MarketContextSchema),
     ).toEqual(marketContext);
   });
 
-  // ADR-013: research.json은 step 산출물이 아니라 context-hunter의 부산물이다.
-  // executeStep의 반환값은 context.json에만 저장되므로, 수집 증거는 별도로 영속화한다.
-  describe("research.json 영속화", () => {
-    it("★ context-hunter 실행 시 수집 증거를 research.json으로 저장한다", async () => {
+  // ADR-013: research는 step 산출물이 아니라 context-hunter의 부산물이다.
+  // executeStep의 반환값은 context 아티팩트에만 저장되므로, 수집 증거는 별도로 영속화한다.
+  describe("research 증거 영속화", () => {
+    it("★ context-hunter 실행 시 수집 증거를 research 아티팩트로 저장한다", async () => {
       const { gemini } = fakeGemini();
       const save = vi.spyOn(store, "saveResearchEvidence");
 
@@ -497,18 +477,18 @@ describe("runPipeline", () => {
       expect(save).toHaveBeenCalledTimes(1);
       expect(save.mock.calls[0][0]).toBe(runId);
 
-      // 파일로도 남아야 한다 — 리포트 인용을 수집물과 대조할 원본이다
+      // 저장소에도 남아야 한다 — 리포트 인용을 수집물과 대조할 원본이다
       const evidence = store.loadResearchEvidence(runId);
       expect(evidence).not.toBeNull();
       expect(evidence?.coverage).toEqual(marketContext.researchCoverage);
     });
 
-    it("research.json은 step 산출물 파일이 아니다", () => {
-      // PIPELINE_STEPS·resume 판정·웹 진행 뷰까지 파급되므로 STEP_OUTPUT_FILES에 넣지 않는다
-      expect(Object.values(STEP_OUTPUT_FILES)).not.toContain("research.json");
+    it("research는 step 산출물이 아니다", () => {
+      // PIPELINE_STEPS·resume 판정·웹 진행 뷰까지 파급되므로 STEP_ARTIFACT_KINDS에 넣지 않는다
+      expect(Object.values(STEP_ARTIFACT_KINDS)).not.toContain("research");
     });
 
-    it("★ resume: context-hunter가 completed면 research.json을 재생성하지 않는다", async () => {
+    it("★ resume: context-hunter가 completed면 research를 재생성하지 않는다", async () => {
       // 1차 실행 — cold-critic에서 실패시켜 context-hunter만 completed로 남긴다
       const first = fakeGemini({ failOn: CriticismSchema });
       const error = (await runPipeline(makeDeps(first.gemini), {
@@ -523,7 +503,7 @@ describe("runPipeline", () => {
         resumeRunId: error.runId,
       });
 
-      // skip된 step은 run()이 호출되지 않는다 — 이미 파일이 있으므로 정상이다
+      // skip된 step은 run()이 호출되지 않는다 — 이미 저장돼 있으므로 정상이다
       expect(save).not.toHaveBeenCalled();
       expect(store.loadResearchEvidence(error.runId)).not.toBeNull();
     });
@@ -548,7 +528,8 @@ describe("runPipeline", () => {
       });
 
       expect(result.status).toBe("waiting");
-      expect(result.reportPath).toBeUndefined();
+      expect(result.report).toBeUndefined();
+      expect(store.loadReport(runId)).toBeNull();
 
       // 질문만 생성되고 하류 에이전트는 호출되지 않는다
       expect(calledSchemas(generateStructured)).toEqual([

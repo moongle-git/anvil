@@ -1,7 +1,7 @@
 import "dotenv/config";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { getDefaultDbPath } from "../lib/db.js";
 import { RunStore } from "../lib/runStore.js";
 import { PipelineStepError, runPipeline } from "../pipeline/orchestrator.js";
 import { hackerNewsSource, naverSource, youtubeSource } from "../research/sources.js";
@@ -87,8 +87,9 @@ async function main(): Promise<void> {
     return;
   }
 
+  const store = new RunStore(getDefaultDbPath());
   const deps = {
-    store: new RunStore(path.resolve(process.cwd(), "runs")),
+    store,
     gemini: new GeminiService({ apiKey: geminiKey }),
     sources: buildResearchSources(process.env),
   };
@@ -102,7 +103,10 @@ async function main(): Promise<void> {
       );
       return;
     }
-    console.log(result.reportPath);
+    // 리포트는 더 이상 파일이 아니다 (ADR-014). 원문을 stdout으로 흘려 리다이렉트할 수 있게 하고,
+    // 사람이 읽는 안내는 stderr로 분리한다.
+    console.log(result.report);
+    console.error(`리포트 저장 완료 — run: ${result.runId}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`파이프라인 실행이 실패했다: ${message}`);
@@ -112,6 +116,8 @@ async function main(): Promise<void> {
       );
     }
     process.exitCode = 1;
+  } finally {
+    store.close();
   }
 }
 
