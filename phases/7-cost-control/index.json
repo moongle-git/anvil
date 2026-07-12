@@ -16,7 +16,7 @@
       "status": "completed",
       "started_at": "2026-07-12T21:45:44+0900",
       "summary": "토큰 사용량 포착 계층 완성 (DB 저장은 step 2, 배선은 step 3). (1) src/lib/cost.ts 신규 — CallUsage 인터페이스 {label, model, grounded, attempt, promptTokens, cachedTokens, outputTokens, thoughtsTokens, totalTokens} + estimateCostUsd(usage: CallUsage): number. 단가표는 gemini-2.5-flash/flash-lite/pro 하드코딩(2026-07-12 확인), grounding $0.035/req. 계산식: (promptTokens - cachedTokens)×입력 + cachedTokens×캐시 + (outputTokens + thoughtsTokens)×출력 + grounded×0.035 — promptTokens가 cachedTokens를 이미 포함하므로 빼고, thoughtsTokens는 candidatesTokenCount에 없으므로 더하되 출력 단가로 곱한다. 모르는 모델은 throw 없이 0. (2) src/services/gemini.ts — GeminiServiceOptions.onUsage?: (usage: CallUsage) => void (생성자에서 this.onUsage로 보관), GenerateStructuredParams/GenerateGroundedParams에 usageLabel: string 필수 추가. private reportUsage()가 generateValidated 재시도 루프의 responses.push(response) 바로 옆에서 매 시도마다 호출된다 — 검증 실패·throw 경로 포함. usageMetadata 부재와 onUsage throw는 삼킨다(계측이 파이프라인을 죽이지 않는다). grounded는 extractJson과 별개 플래그(structured=false, grounded=true). GeminiService는 DB를 import하지 않는다. (3) 에이전트 7곳에 ADR-016 표준 라벨 배선: researchPlanner·interviewer·contextHunter·thesis·coldCritic·solutionDesigner·verdict. 테스트: cost.test.ts 9개(캐시 이중 과금 방지·thinking=출력 단가·grounding 정액·모르는 모델 0), gemini.test.ts usage 계측 7개(재시도 시 attempt 1·2 각각 기록 ★, 전 시도 실패 throw 시에도 3행, usageMetadata 부재·onUsage throw 무해, grounded:true).",
-      "completed_at": "2026-07-12T21:52:00+0900"
+      "completed_at": "2026-07-12T21:55:27+0900"
     },
     {
       "step": 2,
