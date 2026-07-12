@@ -12,7 +12,8 @@
     "test": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run && npm run test -w web",
     "lint": "NODE_OPTIONS=--disable-warning=ExperimentalWarning eslint src && npm run lint -w web",
     "web": "npm run dev -w web",
-    "consult": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx src/cli/index.ts"
+    "consult": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx src/cli/index.ts",
+    "migrate:runs": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx scripts/migrateRuns.ts"
   },
   "repository": {
     "type": "git",
