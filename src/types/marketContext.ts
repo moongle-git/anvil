@@ -56,7 +56,7 @@ export const MarketContextDraftSchema = z.object({
   trends: z.array(z.string().min(1)),
   competitors: z.array(CompetitorServiceSchema),
   /**
-   * LLM이 선별한 목소리의 ID 참조("V1", "V2"…) — 원문·URL·작성자는 코드가 research.json에서
+   * LLM이 선별한 목소리의 ID 참조("V1", "V2"…) — 원문·URL·작성자는 코드가 research 증거에서
    * 복원한다 (ADR-013). 노이즈 제거는 LLM의 판단이지만, 그 목소리가 무엇인지는 사실이라 코드가 소유한다.
    * 전 소스가 실패하면 빈 배열이 정상이다.
    */
@@ -80,14 +80,14 @@ export const CODE_INJECTED_CONTEXT_KEYS = [
 /**
  * 저장·소비되는 최종 형태. `.shape` 접근이 필요한 계약 검증은 이 스키마를 쓴다.
  *
- * communityVoiceRefs는 산출물에 남기지 않는다 — research.json의 인덱스에 의존하는 내부 좌표라,
+ * communityVoiceRefs는 산출물에 남기지 않는다 — research 증거의 인덱스에 의존하는 내부 좌표라,
  * 해소된 communityVoices와 나란히 두면 같은 사실에 대한 두 개의 진실이 된다 (ADR-013).
  */
 export const MarketContextObjectSchema = MarketContextDraftSchema.omit({
   communityVoiceRefs: true,
 }).extend({
   /**
-   * 코드가 ID 참조를 research.json의 실제 목소리로 치환해 채운다 (ADR-013).
+   * 코드가 ID 참조를 research 증거의 실제 목소리로 치환해 채운다 (ADR-013).
    * LLM이 URL·원문을 다시 받아적을 자리가 없으므로 여기의 출처는 지어낼 수 없다.
    */
   communityVoices: z.array(CommunityVoiceSchema).default([]),

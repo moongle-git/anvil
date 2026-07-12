@@ -31,7 +31,7 @@ export function parseVoiceRef(ref: string): number | null {
  *
  * URL은 싣지 않는다 (ADR-013). 모델이 볼 수 없는 URL은 받아적을 수도 없다 —
  * 실제로 모델은 코드가 준 URL을 옮겨적다가 도메인 오타(cloud.google.google.com)를 냈다.
- * 선별은 [V*] ID로만 하고, 원문·출처·작성자는 코드가 research.json에서 복원한다.
+ * 선별은 [V*] ID로만 하고, 원문·출처·작성자는 코드가 research 증거에서 복원한다.
  */
 function voiceBlock(voice: CommunityVoice, index: number): string {
   const meta = [

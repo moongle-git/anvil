@@ -19,7 +19,7 @@ interface InterviewAnswerInput {
   answer: string;
 }
 
-// 인터뷰 답변 폼. 제출 시 POST /api/runs/{id}/answers → answers.json 기록 후 파이프라인 재개.
+// 인터뷰 답변 폼. 제출 시 POST /api/runs/{id}/answers → artifacts(kind='answers') 기록 후 파이프라인 재개.
 // 폴링(useRunDetail)이 waiting→running 전이를 잡아 진행 뷰로 자동 전환한다.
 export function QuestionForm({
   runId,

@@ -59,8 +59,8 @@ export const SourceCoverageSchema = z.object({
 export type SourceCoverage = z.infer<typeof SourceCoverageSchema>;
 
 /**
- * runs/{id}/research.json — LLM 이전의 사실 (ADR-013).
- * context.json의 communityVoices는 이 파일 voices[]의 부분집합이어야 한다.
+ * artifacts(kind='research') — LLM 이전의 사실 (ADR-013).
+ * context 산출물의 communityVoices는 이 증거 voices[]의 부분집합이어야 한다.
  */
 export const ResearchEvidenceSchema = z.object({
   voices: z.array(CommunityVoiceSchema),

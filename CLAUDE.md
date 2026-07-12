@@ -24,11 +24,13 @@ npm run test       # vitest 실행
 npm run lint       # ESLint
 npm run web        # 웹 UI 개발 서버 실행 (Next.js)
 npm run consult -- "아이디어 텍스트"   # 컨설팅 파이프라인 실행 (CLI)
+npm run migrate:runs                   # 구 runs/{run-id}/ 파일을 SQLite DB로 이송 (일회성, 멱등 — ADR-014)
 
 ## 환경변수 (.env — git 미추적)
 GEMINI_API_KEY       # Gemini API 키
 YOUTUBE_API_KEY      # YouTube Data API v3 키
 NAVER_CLIENT_ID      # 네이버 개발자센터 검색 API Client ID
 NAVER_CLIENT_SECRET  # 네이버 개발자센터 검색 API Client Secret
+ANVIL_DB_PATH        # (선택) SQLite DB 경로. 기본값 data/anvil.db
 
 `GEMINI_API_KEY`만 필수다. 나머지 키는 없으면 해당 자료조사 소스를 건너뛴다 (Hacker News는 키가 필요 없다).

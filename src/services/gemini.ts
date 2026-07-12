@@ -14,7 +14,7 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS = 120_000;
 // grounding에 urlContext(경쟁사 페이지 직접 read)를 얹으면 왕복이 더 늘어난다. 다만
 // `재시도 × 타임아웃`이 runStore의 STALLED_THRESHOLD_MS(15분)를 넘으면 웹 UI가 정상
-// 실행 중인 run을 "중단됨"으로 오탐한다 — executeStep은 실행 중 state.json을 건드리지
+// 실행 중인 run을 "중단됨"으로 오탐한다 — executeStep은 실행 중 runs.updated_at을 갱신하지
 // 않기 때문이다. 최악 2 × 180초 = 6분으로 묶는다. 타임아웃을 늘리려면 재시도를 줄여라.
 const DEFAULT_GROUNDED_TIMEOUT_MS = 180_000;
 // grounding 실패는 대개 JSON 형식이라 2회면 잡힌다. 3회째가 살리는 경우는 드물다.

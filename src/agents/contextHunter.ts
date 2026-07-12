@@ -76,9 +76,9 @@ export interface ContextHunterDeps {
 }
 
 export interface ContextHunterResult {
-  /** context.json으로 저장되는 step 산출물 */
+  /** artifacts(kind='context')로 저장되는 step 산출물 */
   context: MarketContext;
-  /** research.json으로 저장되는 수집 원본 — LLM 이전의 사실이다 (ADR-013) */
+  /** artifacts(kind='research')로 저장되는 수집 원본 — LLM 이전의 사실이다 (ADR-013) */
   evidence: ResearchEvidence;
 }
 
@@ -177,7 +177,7 @@ export async function runContextHunter(
   };
 
   // 판단(어느 목소리가 유의미한가)은 LLM이, 사실(그 목소리의 원문·출처·작성자)은 코드가 소유한다.
-  // ref는 research.json의 내부 좌표라 산출물에 남기지 않는다 (ADR-013).
+  // ref는 research 증거의 내부 좌표라 산출물에 남기지 않는다 (ADR-013).
   const { communityVoiceRefs, ...draft } = data;
   const communityVoices = resolveVoiceRefs(
     communityVoiceRefs,

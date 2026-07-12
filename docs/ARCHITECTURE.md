@@ -36,6 +36,8 @@ steps(run_id REFERENCES runs ON DELETE CASCADE, name, ordinal, status,
 artifacts(run_id REFERENCES runs ON DELETE CASCADE, kind, content TEXT, updated_at,
           PRIMARY KEY(run_id, kind))
 ```
+도메인 테이블은 이 3개가 전부다. 그 밖에 `schema_version(version)`(현재 1 — 기록만 하고 **마이그레이션 러너는 두지 않는다**)과 목록 정렬용 인덱스 `idx_runs_created_at ON runs(created_at DESC)`가 있다. DDL은 전부 `IF NOT EXISTS`라 커넥션을 여러 번 열어도 안전하다(`src/lib/db.ts`의 `openDb`).
+
 연결 시 PRAGMA: `journal_mode = WAL`(CLI 쓰기 + Next 서버 읽기의 동시 접근), `busy_timeout = 5000`(잠금 경합 시 대기), `foreign_keys = ON`(**꺼져 있으면 CASCADE 삭제가 조용히 동작하지 않는다** — SQLite 기본값은 OFF).
 
 `runs` + `steps`가 구 `state.json`을 대체한다. `artifacts.content`는 JSON 직렬화 문자열이며(`kind='report'`만 마크다운 원문), 구 파일과 다음과 같이 대응한다:
