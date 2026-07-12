@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { formatDateTime } from "@/lib/format";
 
 interface ReportHeaderProps {
@@ -5,6 +6,8 @@ interface ReportHeaderProps {
   idea: string;
   createdAt: string;
   hasReport: boolean;
+  /** 삭제 진입 + 인라인 확인 (RunDetailClient가 소유한다) */
+  deleteControl?: ReactNode;
 }
 
 // 다운로드는 파일 응답이라 <button>이 아닌 <a>로 두되 Secondary 버튼 스타일을 재사용한다.
@@ -16,6 +19,7 @@ export function ReportHeader({
   idea,
   createdAt,
   hasReport,
+  deleteControl,
 }: ReportHeaderProps) {
   return (
     <header className="flex items-start justify-between gap-4 border-b border-neutral-200 pb-6">
@@ -27,11 +31,14 @@ export function ReportHeader({
           {formatDateTime(createdAt)}
         </p>
       </div>
-      {hasReport ? (
-        <a href={`/api/runs/${runId}/report`} className={DOWNLOAD_CLASS}>
-          report.md 다운로드
-        </a>
-      ) : null}
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {hasReport ? (
+          <a href={`/api/runs/${runId}/report`} className={DOWNLOAD_CLASS}>
+            report.md 다운로드
+          </a>
+        ) : null}
+        {deleteControl}
+      </div>
     </header>
   );
 }

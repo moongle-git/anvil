@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { RunDisplayStatus, RunSummary } from "@anvil/runStore";
 import {
   Button,
+  DeleteRunButton,
   EmptyState,
   ErrorState,
   RUN_STATUS_LABELS,
@@ -107,6 +108,31 @@ export function RunList({ onPickExample }: RunListProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "이어서 실행에 실패했습니다.");
     }
+  }
+
+  async function handleDelete(runId: string) {
+    let res: Response;
+    try {
+      res = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
+    } catch {
+      setError("삭제에 실패했습니다.");
+      return;
+    }
+    if (!res.ok) {
+      // 목록이 뜬 뒤 실행이 시작됐을 수 있다 — API의 409를 조용히 삼키지 않는다
+      setError(
+        res.status === 409
+          ? "실행 중에는 삭제할 수 없습니다."
+          : "삭제에 실패했습니다.",
+      );
+      return;
+    }
+    setError(null);
+    setRuns((prev) =>
+      prev === null ? prev : prev.filter((run) => run.runId !== runId),
+    );
+    // 선택에 남겨두면 존재하지 않는 run으로 /compare에 갈 수 있다
+    setSelected((prev) => prev.filter((id) => id !== runId));
   }
 
   const hasFilter = debouncedQuery.trim() !== "" || status !== "";
@@ -211,7 +237,11 @@ export function RunList({ onPickExample }: RunListProps) {
           {loadedRuns.map((run) => {
             const resumable = run.status === "error" || run.status === "stalled";
             return (
-              <li key={run.runId} className="flex items-center gap-4 py-4">
+              <li
+                key={run.runId}
+                data-run-row={run.runId}
+                className="flex flex-wrap items-center gap-4 py-4"
+              >
                 {run.status === "completed" ? (
                   <input
                     type="checkbox"
@@ -243,6 +273,12 @@ export function RunList({ onPickExample }: RunListProps) {
                     이어서 실행
                   </Button>
                 ) : null}
+                <DeleteRunButton
+                  onConfirm={() => handleDelete(run.runId)}
+                  {...(run.status === "running"
+                    ? { disabledReason: "실행 중에는 삭제할 수 없습니다" }
+                    : {})}
+                />
               </li>
             );
           })}

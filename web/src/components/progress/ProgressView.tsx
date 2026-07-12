@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { PipelineStepName, StepState } from "@anvil/types";
 import type { RunDetail } from "@/lib/server/runs";
 import { Button, Card } from "@/components/ui";
@@ -40,9 +41,15 @@ function stepElapsedMs(step: StepState, nowMs: number): number | null {
 interface ProgressViewProps {
   detail: RunDetail;
   onResume: () => void;
+  /** 상세 헤더에 놓이는 삭제 컨트롤 (RunDetailClient가 소유한다) */
+  deleteControl?: ReactNode;
 }
 
-export function ProgressView({ detail, onResume }: ProgressViewProps) {
+export function ProgressView({
+  detail,
+  onResume,
+  deleteControl,
+}: ProgressViewProps) {
   const { state } = detail;
   const hasRunning = state.steps.some((step) => stepVisual(step) === "running");
   // 진행중 step이 있을 때만 1초 간격으로 경과 시간을 갱신한다
@@ -50,13 +57,16 @@ export function ProgressView({ detail, onResume }: ProgressViewProps) {
 
   return (
     <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
-          {state.idea}
-        </h1>
-        <p className="text-xs tabular-nums text-neutral-500">
-          시작 {formatDateTime(state.createdAt)}
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h1 className="text-3xl font-semibold tracking-tight text-neutral-900">
+            {state.idea}
+          </h1>
+          <p className="text-xs tabular-nums text-neutral-500">
+            시작 {formatDateTime(state.createdAt)}
+          </p>
+        </div>
+        {deleteControl}
       </header>
 
       {detail.status === "stalled" ? (

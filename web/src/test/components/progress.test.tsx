@@ -14,6 +14,13 @@ import { ProgressView } from "@/components/progress/ProgressView";
 import { RunDetailClient } from "@/components/progress/RunDetailClient";
 import { useRunDetail } from "@/components/progress/useRunDetail";
 
+// useRouter는 App Router 컨텍스트가 없으면 throw한다 (삭제 후 홈 이동에 쓴다).
+const { push } = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return { ...actual, useRouter: () => ({ push }) };
+});
+
 const fetchMock = vi.fn();
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -26,6 +33,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  push.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -389,5 +397,63 @@ describe("RunDetailClient (분기)", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+  });
+
+  it("삭제를 확인하면 DELETE 후 홈으로 이동한다", async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return jsonResponse(null, 204);
+      }
+      return jsonResponse(completedDetail);
+    });
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "삭제" })).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    expect(screen.getByText(/되돌릴 수 없습니다/)).toBeDefined();
+    expect(push).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("실행 중인 run의 삭제 버튼은 사유와 함께 비활성이다", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(runningDetail));
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() => expect(screen.getByText("시장 조사")).toBeDefined());
+
+    const button = screen.getByRole("button", {
+      name: /삭제/,
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain("실행 중");
+  });
+
+  it("삭제가 409로 거절되면 이유를 보여주고 이동하지 않는다", async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return jsonResponse({ error: "실행 중인 run은 삭제할 수 없다" }, 409);
+      }
+      return jsonResponse(errorDetail);
+    });
+    render(<RunDetailClient runId="r1" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "삭제" })).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+    fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("실행 중"),
+    );
+    expect(push).not.toHaveBeenCalled();
   });
 });

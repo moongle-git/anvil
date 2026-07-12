@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getRuns, POST as postRun } from "@/app/api/runs/route";
-import { GET as getRunById } from "@/app/api/runs/[id]/route";
+import {
+  DELETE as deleteRunById,
+  GET as getRunById,
+} from "@/app/api/runs/[id]/route";
 import { POST as postAnswers } from "@/app/api/runs/[id]/answers/route";
 import { GET as getReport } from "@/app/api/runs/[id]/report/route";
 import { POST as postResume } from "@/app/api/runs/[id]/resume/route";
@@ -17,6 +20,7 @@ import {
   RUNNING_RUN_ID,
   WAITING_RUN_ID,
   cleanupTempDb,
+  countRunRows,
   makeTempDb,
   seedFixtureRun,
   touchUpdatedAt,
@@ -165,6 +169,74 @@ describe("GET /api/runs/[id]", () => {
       new Request("http://localhost/api/runs/nope"),
       params("nope"),
     );
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("DELETE /api/runs/[id]", () => {
+  function del(id: string): Promise<Response> {
+    return deleteRunById(
+      new Request(`http://localhost/api/runs/${id}`, { method: "DELETE" }),
+      params(id),
+    );
+  }
+
+  it("completed run을 지우면 204이고 steps·artifacts까지 CASCADE로 사라진다", async () => {
+    seedFixtureRun(COMPLETED_RUN_ID);
+    expect(countRunRows(COMPLETED_RUN_ID).artifacts).toBeGreaterThan(0);
+
+    const res = await del(COMPLETED_RUN_ID);
+
+    expect(res.status).toBe(204);
+    expect(countRunRows(COMPLETED_RUN_ID)).toEqual({
+      runs: 0,
+      steps: 0,
+      artifacts: 0,
+    });
+    expect(withRunStore((store) => store.loadRunRecord(COMPLETED_RUN_ID))).toBe(
+      null,
+    );
+  });
+
+  it("error run도 지울 수 있다", async () => {
+    seedFixtureRun(ERROR_RUN_ID);
+
+    expect((await del(ERROR_RUN_ID)).status).toBe(204);
+    expect(countRunRows(ERROR_RUN_ID).runs).toBe(0);
+  });
+
+  it("waiting run도 지울 수 있다 (프로세스가 정상 종료해 살아 있는 writer가 없다)", async () => {
+    seedFixtureRun(WAITING_RUN_ID);
+
+    expect((await del(WAITING_RUN_ID)).status).toBe(204);
+    expect(countRunRows(WAITING_RUN_ID).runs).toBe(0);
+  });
+
+  it("stalled run도 지울 수 있다 (좀비의 쓰기는 UPDATE-only saveRun이 막는다)", async () => {
+    seedFixtureRun(RUNNING_RUN_ID);
+    touchUpdatedAt(
+      RUNNING_RUN_ID,
+      new Date(Date.now() - SIXTEEN_MINUTES_MS).toISOString(),
+    );
+
+    expect((await del(RUNNING_RUN_ID)).status).toBe(204);
+    expect(countRunRows(RUNNING_RUN_ID).runs).toBe(0);
+  });
+
+  it("running run은 409이고 DB에 그대로 남는다", async () => {
+    seedFixtureRun(RUNNING_RUN_ID);
+    const before = countRunRows(RUNNING_RUN_ID);
+
+    const res = await del(RUNNING_RUN_ID);
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBeTruthy();
+    expect(countRunRows(RUNNING_RUN_ID)).toEqual(before);
+  });
+
+  it("없는 run은 404", async () => {
+    const res = await del("nope");
 
     expect(res.status).toBe(404);
   });

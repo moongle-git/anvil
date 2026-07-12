@@ -7,6 +7,7 @@ export {
   type CardAccent,
 } from "./Card";
 export { Collapsible } from "./Collapsible";
+export { DeleteRunButton } from "./DeleteRunButton";
 export { EmptyState } from "./EmptyState";
 export { ErrorState } from "./ErrorState";
 export { PageShell } from "./PageShell";

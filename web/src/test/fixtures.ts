@@ -119,6 +119,27 @@ export function deleteArtifact(runId: string, kind: string): void {
   );
 }
 
+/** run의 3테이블 행 수 — 삭제가 FK CASCADE로 steps·artifacts까지 지웠는지 확인한다 (ADR-015) */
+export function countRunRows(runId: string): {
+  runs: number;
+  steps: number;
+  artifacts: number;
+} {
+  return withRawDb((db) => {
+    const count = (table: string): number => {
+      const row = db
+        .prepare(`SELECT count(*) AS n FROM ${table} WHERE run_id = ?`)
+        .get(runId) as { n: number };
+      return Number(row.n);
+    };
+    return {
+      runs: count("runs"),
+      steps: count("steps"),
+      artifacts: count("artifacts"),
+    };
+  });
+}
+
 /** 상태 행을 스키마 위반으로 만든다 (구 state.json 손상을 대체한다 — 상세 조회가 null이어야 한다) */
 export function corruptRunState(runId: string): void {
   withRawDb((db) =>

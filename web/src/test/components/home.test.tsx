@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunSummary } from "@anvil/runStore";
@@ -282,6 +283,121 @@ describe("RunList", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /비교하기/ }));
     expect(push).toHaveBeenCalledWith("/compare?a=c2&b=c3");
+  });
+});
+
+describe("RunList 삭제", () => {
+  // 행은 data-run-row 훅으로 잡는다 — 같은 이름("삭제")의 버튼이 행마다 있다
+  function runRow(runId: string): HTMLElement {
+    const row = document.querySelector(`[data-run-row="${runId}"]`);
+    if (!(row instanceof HTMLElement)) {
+      throw new Error(`run 행을 찾을 수 없다: ${runId}`);
+    }
+    return row;
+  }
+
+  function deleteCalls(): unknown[] {
+    return fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === "DELETE",
+    );
+  }
+
+  function mockList(deleteResponse: Response): void {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return deleteResponse;
+      }
+      return jsonResponse({ runs: RUNS });
+    });
+  }
+
+  async function renderList(): Promise<void> {
+    render(<RunList onPickExample={() => { }} />);
+    await waitFor(() =>
+      expect(screen.getByText("회의록 요약 서비스")).toBeDefined(),
+    );
+  }
+
+  it("확인 단계를 거쳐야 DELETE가 나가고 목록에서 사라진다", async () => {
+    mockList(jsonResponse(null, 204));
+    await renderList();
+
+    const row = runRow("r-completed");
+    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+
+    // 진입 버튼만으로는 아무것도 지우지 않는다 — 확인 문구가 뜬다
+    expect(screen.getByText(/되돌릴 수 없습니다/)).toBeDefined();
+    expect(deleteCalls()).toHaveLength(0);
+
+    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("회의록 요약 서비스")).toBeNull(),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r-completed",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("확인을 취소하면 요청이 나가지 않고 run이 남는다", async () => {
+    mockList(jsonResponse(null, 204));
+    await renderList();
+
+    const row = runRow("r-completed");
+    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+    fireEvent.click(within(row).getByRole("button", { name: "취소" }));
+
+    expect(deleteCalls()).toHaveLength(0);
+    expect(screen.getByText("회의록 요약 서비스")).toBeDefined();
+    // 확인 줄이 닫히고 진입 버튼으로 돌아온다
+    expect(within(row).getByRole("button", { name: "삭제" })).toBeDefined();
+    expect(screen.queryByText(/되돌릴 수 없습니다/)).toBeNull();
+  });
+
+  it("409면 실행 중이라 지울 수 없다는 이유를 보여주고 목록에 남긴다", async () => {
+    mockList(jsonResponse({ error: "실행 중인 run은 삭제할 수 없다" }, 409));
+    await renderList();
+
+    const row = runRow("r-error");
+    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("실행 중"),
+    );
+    expect(screen.getByText("점심 메뉴 추천")).toBeDefined();
+  });
+
+  it("실행 중인 run의 삭제 버튼은 사유와 함께 비활성이다", async () => {
+    mockList(jsonResponse(null, 204));
+    await renderList();
+
+    const button = within(runRow("r-running")).getByRole("button", {
+      name: /삭제/,
+    }) as HTMLButtonElement;
+
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain("실행 중");
+  });
+
+  it("삭제된 run은 비교 선택에서도 빠진다", async () => {
+    mockList(jsonResponse(null, 204));
+    await renderList();
+
+    fireEvent.click(screen.getByLabelText("회의록 요약 서비스 비교 선택"));
+    fireEvent.click(screen.getByLabelText("반려식물 관리 앱 비교 선택"));
+    const compareBtn = screen.getByRole("button", {
+      name: /비교하기/,
+    }) as HTMLButtonElement;
+    expect(compareBtn.disabled).toBe(false);
+
+    const row = runRow("r-completed");
+    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+
+    // 사라진 run이 선택에 남으면 존재하지 않는 run으로 /compare에 갈 수 있다
+    await waitFor(() => expect(compareBtn.disabled).toBe(true));
   });
 });
 

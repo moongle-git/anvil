@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { InterviewQuestion } from "@anvil/types";
 import { Button, Card, TextAreaField } from "@/components/ui";
 
@@ -8,6 +8,8 @@ interface QuestionFormProps {
   runId: string;
   questions: InterviewQuestion[];
   onSubmitted?: () => void;
+  /** 상세 헤더에 놓이는 삭제 컨트롤 (RunDetailClient가 소유한다) */
+  deleteControl?: ReactNode;
 }
 
 interface InterviewAnswerInput {
@@ -21,6 +23,7 @@ export function QuestionForm({
   runId,
   questions,
   onSubmitted,
+  deleteControl,
 }: QuestionFormProps) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -80,13 +83,16 @@ export function QuestionForm({
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">
-          몇 가지만 확인할게요
-        </h1>
-        <p className="text-sm leading-relaxed text-neutral-500">
-          아이디어를 더 정확히 검증하기 위한 질문입니다. 답변은 건너뛸 수 있어요.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">
+            몇 가지만 확인할게요
+          </h1>
+          <p className="text-sm leading-relaxed text-neutral-500">
+            아이디어를 더 정확히 검증하기 위한 질문입니다. 답변은 건너뛸 수 있어요.
+          </p>
+        </div>
+        {deleteControl}
       </header>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
