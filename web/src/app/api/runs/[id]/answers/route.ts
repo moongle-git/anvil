@@ -1,8 +1,8 @@
 import { InterviewAnswersSchema } from "@anvil/types";
-import { getRunDetail, getRunStore } from "@/lib/server/runs";
+import { getRunDetail, withRunStore } from "@/lib/server/runs";
 import { spawnConsult } from "@/lib/server/spawnConsult";
 
-// 인터뷰 답변 제출 → answers.json 기록 후 CLI를 resume spawn한다 (ADR-007, 파일 기반 재개).
+// 인터뷰 답변 제출 → artifacts(kind='answers') 기록 후 CLI를 resume spawn한다 (ADR-007).
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -36,7 +36,7 @@ export async function POST(
     );
   }
 
-  getRunStore().saveInterviewAnswers(id, parsed.data);
+  withRunStore((store) => store.saveInterviewAnswers(id, parsed.data));
   spawnConsult(id);
   return Response.json({ runId: id }, { status: 202 });
 }

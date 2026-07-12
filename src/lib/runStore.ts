@@ -65,6 +65,18 @@ export interface RunSummary {
   rerunOf?: string;
 }
 
+export interface ListRunsOptions {
+  /** idea 키워드. 빈 문자열·공백은 필터가 없는 것과 같다 */
+  q?: string;
+  /** stalled 판정의 기준 시각 (테스트 주입용) */
+  nowMs?: number;
+}
+
+/** LIKE의 와일드카드(%·_)를 리터럴로 만든다 — 사용자가 친 "100%"가 "아무거나"가 되면 안 된다 */
+function likePattern(q: string): string {
+  return `%${q.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+}
+
 /**
  * run의 표시 상태를 파생한다. 상태 판정의 유일한 권위다 —
  * SQL WHERE 절로 복제하지 마라. 두 곳에 있으면 반드시 갈라진다.
@@ -415,10 +427,13 @@ export class RunStore {
     return RunStateSchema.parse(toRawState(row, this.stepRows(runId)));
   }
 
-  /** loadRun과 달리 없거나 손상됐으면 null이다 — 웹의 상세 조회가 404를 내야 하기 때문이다 */
+  /**
+   * loadRun과 달리 없거나 손상됐으면 null이다 — 웹의 상세 조회가 404를 내야 하기 때문이다.
+   * updatedAtMs는 stalled 판정에, rerunOf는 계보 표시에 쓰인다 (둘 다 RunState에는 없는 run 메타다).
+   */
   loadRunRecord(
     runId: string,
-  ): { state: RunState; updatedAtMs: number } | null {
+  ): { state: RunState; updatedAtMs: number; rerunOf?: string } | null {
     const row = this.runRow(runId);
     if (row === null) {
       return null;
@@ -429,7 +444,11 @@ export class RunStore {
     if (!result.success) {
       return null;
     }
-    return { state: result.data, updatedAtMs: Date.parse(row.updated_at) };
+    return {
+      state: result.data,
+      updatedAtMs: Date.parse(row.updated_at),
+      ...(row.rerun_of !== null ? { rerunOf: row.rerun_of } : {}),
+    };
   }
 
   /**
@@ -521,17 +540,31 @@ export class RunStore {
     return this.readArtifact(runId, REPORT_KIND);
   }
 
+  /** 리포트 유무만 묻는다 — 상세 조회는 2초마다 폴링되므로 본문(수만 자)을 읽어 버리지 않는다 */
+  hasReport(runId: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM artifacts WHERE run_id = ? AND kind = ?")
+      .get(runId, REPORT_KIND);
+    return row !== undefined;
+  }
+
   /**
-   * 정렬은 SQL이, 상태 파생은 deriveRunStatus가 한다.
-   * 판정 규칙을 WHERE 절로 복제하면 두 개의 진실이 생긴다.
+   * 정렬과 키워드 검색은 SQL이, 상태 파생은 deriveRunStatus가 한다.
+   * 상태는 updated_at과 현재 시각의 비교로 파생되는 값이라, 판정 규칙을 WHERE 절로
+   * 복제하면 두 개의 진실이 생겨 반드시 갈라진다. 상태 필터는 호출부가 메모리에서 건다.
    */
-  listRuns(nowMs?: number): RunSummary[] {
+  listRuns(opts?: ListRunsOptions): RunSummary[] {
+    const q = opts?.q?.trim();
+    const filterByIdea = q !== undefined && q !== "";
+
     const rows = this.db
       .prepare(
         `SELECT run_id, idea, created_at, updated_at, completed_at, interview, rerun_of
-         FROM runs ORDER BY created_at DESC`,
+         FROM runs
+         ${filterByIdea ? "WHERE idea LIKE ? ESCAPE '\\'" : ""}
+         ORDER BY created_at DESC`,
       )
-      .all() as unknown as RunRow[];
+      .all(...(filterByIdea ? [likePattern(q)] : [])) as unknown as RunRow[];
 
     const summaries: RunSummary[] = [];
     for (const row of rows) {
@@ -548,7 +581,7 @@ export class RunStore {
         idea: state.idea,
         createdAt: state.createdAt,
         completedAt: state.completedAt,
-        status: deriveRunStatus(state, Date.parse(row.updated_at), nowMs),
+        status: deriveRunStatus(state, Date.parse(row.updated_at), opts?.nowMs),
         rerunOf: row.rerun_of ?? undefined,
       });
     }

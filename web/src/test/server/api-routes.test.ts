@@ -2,12 +2,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RunStateSchema } from "@anvil/types";
 import { GET as getRuns, POST as postRun } from "@/app/api/runs/route";
 import { GET as getRunById } from "@/app/api/runs/[id]/route";
 import { POST as postAnswers } from "@/app/api/runs/[id]/answers/route";
 import { GET as getReport } from "@/app/api/runs/[id]/report/route";
 import { POST as postResume } from "@/app/api/runs/[id]/resume/route";
+import { withRunStore } from "@/lib/server/runs";
 import { spawnConsult } from "@/lib/server/spawnConsult";
 import {
   ALL_RUN_IDS,
@@ -16,10 +16,10 @@ import {
   FIXTURES_DIR,
   RUNNING_RUN_ID,
   WAITING_RUN_ID,
-  ageStateFile,
-  cleanupTempRunsDir,
-  copyFixtureRun,
-  makeTempRunsDir,
+  cleanupTempDb,
+  makeTempDb,
+  seedFixtureRun,
+  touchUpdatedAt,
 } from "@/test/fixtures";
 
 // 실제 child process spawn 금지 — 모듈 mock으로 대체한다
@@ -34,21 +34,21 @@ function params(id: string): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id }) };
 }
 
-let runsDir: string;
+let dbPath: string;
 
 beforeEach(() => {
-  runsDir = makeTempRunsDir();
+  dbPath = makeTempDb();
 });
 
 afterEach(() => {
-  cleanupTempRunsDir(runsDir);
+  cleanupTempDb(dbPath);
   vi.clearAllMocks();
 });
 
 describe("GET /api/runs", () => {
   it("전체 run 목록을 { runs }로 반환한다", async () => {
     for (const runId of ALL_RUN_IDS) {
-      copyFixtureRun(runsDir, runId);
+      seedFixtureRun(runId);
     }
 
     const res = getRuns(new Request("http://localhost/api/runs"));
@@ -64,7 +64,7 @@ describe("GET /api/runs", () => {
 
   it("q·status 쿼리로 필터한다", async () => {
     for (const runId of ALL_RUN_IDS) {
-      copyFixtureRun(runsDir, runId);
+      seedFixtureRun(runId);
     }
 
     const res = getRuns(
@@ -96,10 +96,10 @@ describe("POST /api/runs", () => {
   }
 
   it("createRun 후 spawnConsult 순서로 실행하고 201 { runId }를 응답한다", async () => {
-    let stateExistedWhenSpawned = false;
+    let runExistedWhenSpawned = false;
     vi.mocked(spawnConsult).mockImplementation((runId: string) => {
-      stateExistedWhenSpawned = fs.existsSync(
-        path.join(runsDir, runId, "state.json"),
+      runExistedWhenSpawned = withRunStore(
+        (store) => store.loadRunRecord(runId) !== null,
       );
     });
 
@@ -108,17 +108,15 @@ describe("POST /api/runs", () => {
     expect(res.status).toBe(201);
     const { runId } = await res.json();
     expect(runId).toBeTruthy();
-    // ADR-007 핵심 순서: runId 선생성(state.json 존재) 후 spawn
+    // ADR-007 핵심 순서: runId 선생성(DB에 run 행이 이미 있다) 후 spawn
     expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(runId);
-    expect(stateExistedWhenSpawned).toBe(true);
+    expect(runExistedWhenSpawned).toBe(true);
 
-    const onDisk = RunStateSchema.parse(
-      JSON.parse(fs.readFileSync(path.join(runsDir, runId, "state.json"), "utf-8")),
-    );
-    expect(onDisk.idea).toBe("AI 이력서 첨삭 서비스");
+    const stored = withRunStore((store) => store.loadRun(runId));
+    expect(stored.idea).toBe("AI 이력서 첨삭 서비스");
     // 웹 생성 run은 인터뷰가 활성화된다
-    expect(onDisk.interview).toBe(true);
-    expect(onDisk.steps[0]?.name).toBe("interviewer");
+    expect(stored.interview).toBe(true);
+    expect(stored.steps[0]?.name).toBe("interviewer");
   });
 
   it("idea가 공백뿐이면 400이고 spawn하지 않는다", async () => {
@@ -126,7 +124,7 @@ describe("POST /api/runs", () => {
 
     expect(res.status).toBe(400);
     expect(spawnConsult).not.toHaveBeenCalled();
-    expect(fs.readdirSync(runsDir)).toEqual([]);
+    expect(withRunStore((store) => store.listRuns())).toEqual([]);
   });
 
   it("idea가 문자열이 아니면 400", async () => {
@@ -147,7 +145,7 @@ describe("POST /api/runs", () => {
 
 describe("GET /api/runs/[id]", () => {
   it("RunDetail을 반환한다", async () => {
-    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+    seedFixtureRun(COMPLETED_RUN_ID);
 
     const res = await getRunById(
       new Request(`http://localhost/api/runs/${COMPLETED_RUN_ID}`),
@@ -173,8 +171,8 @@ describe("GET /api/runs/[id]", () => {
 });
 
 describe("GET /api/runs/[id]/report", () => {
-  it("report.md를 다운로드 헤더와 함께 반환한다", async () => {
-    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+  it("리포트 원문을 다운로드 헤더와 함께 반환한다", async () => {
+    seedFixtureRun(COMPLETED_RUN_ID);
 
     const res = await getReport(
       new Request(`http://localhost/api/runs/${COMPLETED_RUN_ID}/report`),
@@ -184,6 +182,7 @@ describe("GET /api/runs/[id]/report", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
     expect(res.headers.get("content-disposition")).toContain("attachment");
+    // DB에 든 바이트가 원본 report.md와 한 글자도 다르지 않아야 한다
     const expected = fs.readFileSync(
       path.join(FIXTURES_DIR, COMPLETED_RUN_ID, "report.md"),
       "utf-8",
@@ -191,8 +190,8 @@ describe("GET /api/runs/[id]/report", () => {
     expect(await res.text()).toBe(expected);
   });
 
-  it("report.md가 없는 run은 404", async () => {
-    copyFixtureRun(runsDir, RUNNING_RUN_ID);
+  it("리포트가 없는 run은 404", async () => {
+    seedFixtureRun(RUNNING_RUN_ID);
 
     const res = await getReport(
       new Request(`http://localhost/api/runs/${RUNNING_RUN_ID}/report`),
@@ -228,7 +227,7 @@ describe("POST /api/runs/[id]/resume", () => {
   });
 
   it("error run은 spawn 후 202", async () => {
-    copyFixtureRun(runsDir, ERROR_RUN_ID);
+    seedFixtureRun(ERROR_RUN_ID);
 
     const res = await resume(ERROR_RUN_ID);
 
@@ -237,8 +236,11 @@ describe("POST /api/runs/[id]/resume", () => {
   });
 
   it("stalled run은 spawn 후 202", async () => {
-    copyFixtureRun(runsDir, RUNNING_RUN_ID);
-    ageStateFile(runsDir, RUNNING_RUN_ID, SIXTEEN_MINUTES_MS);
+    seedFixtureRun(RUNNING_RUN_ID);
+    touchUpdatedAt(
+      RUNNING_RUN_ID,
+      new Date(Date.now() - SIXTEEN_MINUTES_MS).toISOString(),
+    );
 
     const res = await resume(RUNNING_RUN_ID);
 
@@ -247,7 +249,7 @@ describe("POST /api/runs/[id]/resume", () => {
   });
 
   it("running run은 409이고 spawn하지 않는다", async () => {
-    copyFixtureRun(runsDir, RUNNING_RUN_ID);
+    seedFixtureRun(RUNNING_RUN_ID);
 
     const res = await resume(RUNNING_RUN_ID);
 
@@ -256,7 +258,7 @@ describe("POST /api/runs/[id]/resume", () => {
   });
 
   it("completed run은 409이고 spawn하지 않는다", async () => {
-    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+    seedFixtureRun(COMPLETED_RUN_ID);
 
     const res = await resume(COMPLETED_RUN_ID);
 
@@ -279,24 +281,21 @@ describe("POST /api/runs/[id]/answers", () => {
     );
   }
 
-  it("waiting run은 answers.json을 기록하고 spawn 후 202", async () => {
-    copyFixtureRun(runsDir, WAITING_RUN_ID);
+  it("waiting run은 답변을 기록하고 spawn 후 202", async () => {
+    seedFixtureRun(WAITING_RUN_ID);
 
     const res = await answers(WAITING_RUN_ID, validBody);
 
     expect(res.status).toBe(202);
     expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(WAITING_RUN_ID);
-    const onDisk = JSON.parse(
-      fs.readFileSync(
-        path.join(runsDir, WAITING_RUN_ID, "answers.json"),
-        "utf-8",
-      ),
+    const stored = withRunStore((store) =>
+      store.loadInterviewAnswers(WAITING_RUN_ID),
     );
-    expect(onDisk).toEqual(validBody);
+    expect(stored).toEqual(validBody);
   });
 
   it("빈 답변(전체 스킵)도 202로 재개한다", async () => {
-    copyFixtureRun(runsDir, WAITING_RUN_ID);
+    seedFixtureRun(WAITING_RUN_ID);
 
     const res = await answers(WAITING_RUN_ID, { answers: [] });
 
@@ -312,7 +311,7 @@ describe("POST /api/runs/[id]/answers", () => {
   });
 
   it("waiting이 아닌 run은 409이고 spawn하지 않는다", async () => {
-    copyFixtureRun(runsDir, COMPLETED_RUN_ID);
+    seedFixtureRun(COMPLETED_RUN_ID);
 
     const res = await answers(COMPLETED_RUN_ID, validBody);
 

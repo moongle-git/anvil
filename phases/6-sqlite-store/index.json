@@ -45,7 +45,10 @@
     {
       "step": 5,
       "name": "web-data-layer",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-12T18:03:49+0900",
+      "completed_at": "2026-07-12T09:14:12.399+0000",
+      "summary": "web 데이터 계층을 SQLite RunStore로 전환했다. web/src/lib/server/runs.ts: getRunsDir()→getDbPath()(ANVIL_DB_PATH ?? <cwd>/../data/anvil.db — 루트 getDefaultDbPath는 cwd 기준이 달라 재사용 불가), getRunStore()를 삭제하고 withRunStore<T>(fn: (store: RunStore) => T): T로 통일(요청마다 열고 finally에서 close — 모듈 싱글턴 없음, next dev HMR이 죽은 핸들을 재활용하는 것을 막는다), getRepoRoot()는 spawn cwd로 유지. getRunDetail은 loadRunRecord(state·updatedAtMs·rerunOf) + store.hasReport()로 조립하고 아티팩트 zod 실패 시 필드 생략(ADR-011 페일소프트) 유지. RunDetail에 rerunOf?: string 추가(step 7 계보 UI가 쓴다 — 데이터 계층은 다시 안 건드려도 된다). searchRuns(q, status)는 키워드만 SQL로 내리고(listRuns({q}) → WHERE idea LIKE ? ESCAPE) 상태는 deriveRunStatus 결과로 메모리 필터(권위 이중화 금지). 루트 RunStore 3개 추가: listRuns(opts?: {q?, nowMs?})(구 listRuns(nowMs) 대체 — LIKE 와일드카드 %·_는 이스케이프해 리터럴로 취급, ASCII 대소문자 무시), hasReport(runId): boolean(2초 폴링에서 수만 자 리포트를 읽지 않는다), loadRunRecord가 rerunOf도 반환. report route는 store.loadReport(id)로 바꾸고(null이면 404) 경로 트래버설 방어는 DB 키 조회가 되면서 불필요해져 주석과 함께 제거, content-disposition은 filename=\"report.md\" 고정 유지(한글 runId ByteString 제약). POST /api/runs의 createRun→spawn 순서(ADR-007)와 spawnConsult mock은 그대로. 테스트 픽스처(web/src/test/fixtures.ts) DB 기반 교체: makeTempDb()/cleanupTempDb(dbPath)(ANVIL_DB_PATH 주입), seedFixtureRun(runId)(픽스처 JSON은 그대로 두고 scripts/migrateRuns.ts 이송기를 재사용해 seed — 이송 경로가 곧 seed 경로), touchUpdatedAt(runId, iso)(구 ageStateFile 대체 — stalled 판정), writeArtifact/deleteArtifact/corruptRunState(raw 커넥션으로 손상 주입). AC: npm run build(루트 tsc + next build 타입체크) 통과, npm test 루트 33파일 693케이스 + web 17파일 295케이스 전부 통과, npm run lint 통과. 실제 구동 확인(npm run web, 이송된 10 runs): 목록·검색(회의록 3건, ai 4건 대소문자 무시)·status=error 필터·완료 run 상세(산출물 5종 + hasReport)·리포트 다운로드(44KB, text/markdown; charset=utf-8) 정상. Phase 2 스키마 드리프트 구 run도 상세 200 + 해당 필드만 생략 + 리포트 다운로드 정상(설계된 페일소프트). node:sqlite는 내장 모듈이라 webpack이 자동 externalize — serverExternalPackages 불필요."
     },
     {
       "step": 6,

@@ -1,5 +1,5 @@
 import type { RunDisplayStatus } from "@anvil/runStore";
-import { getRunStore, searchRuns } from "@/lib/server/runs";
+import { searchRuns, withRunStore } from "@/lib/server/runs";
 import { spawnConsult } from "@/lib/server/spawnConsult";
 
 const RUN_DISPLAY_STATUSES: readonly RunDisplayStatus[] = [
@@ -47,7 +47,9 @@ export async function POST(request: Request): Promise<Response> {
 
   // ADR-007 핵심 순서: createRun으로 runId를 먼저 확보한 뒤 spawn하고 즉시 응답한다.
   // 웹에서 생성한 run은 인터뷰(질문-답변)를 활성화한다.
-  const { runId } = getRunStore().createRun(idea.trim(), { interview: true });
+  const { runId } = withRunStore((store) =>
+    store.createRun(idea.trim(), { interview: true }),
+  );
   spawnConsult(runId);
   return Response.json({ runId }, { status: 201 });
 }

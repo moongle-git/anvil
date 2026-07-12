@@ -532,6 +532,19 @@ describe("RunStore", () => {
 
       expect(store.loadReport(runId)).toBeNull();
     });
+
+    it("hasReport는 본문을 읽지 않고 존재 여부만 답한다", () => {
+      const { runId } = store.createRun("아이디어");
+      expect(store.hasReport(runId)).toBe(false);
+
+      store.saveReport(runId, "# 리포트");
+
+      expect(store.hasReport(runId)).toBe(true);
+    });
+
+    it("hasReport는 없는 run이면 false다 (throw하지 않는다)", () => {
+      expect(store.hasReport("no-such-run")).toBe(false);
+    });
   });
 
   describe("updated_at (stalled 판정의 유일한 근거 — ADR-014)", () => {
@@ -580,6 +593,14 @@ describe("RunStore", () => {
 
       expect(record?.state).toEqual(state);
       expect(record?.updatedAtMs).toBeGreaterThan(0);
+    });
+
+    it("재실행 run이면 rerunOf로 원본을 가리킨다 (계보 표시용)", () => {
+      const source = store.createRun("아이디어");
+      const fork = store.createRerun(source.runId);
+
+      expect(store.loadRunRecord(fork.runId)?.rerunOf).toBe(source.runId);
+      expect(store.loadRunRecord(source.runId)?.rerunOf).toBeUndefined();
     });
 
     it("없는 run이면 null이다 (loadRun과 달리 throw하지 않는다 — 웹이 404를 낸다)", () => {
@@ -654,9 +675,9 @@ describe("RunStore", () => {
     it("derives stalled via injected nowMs without touching the row", () => {
       store.createRun("아이디어");
 
-      expect(store.listRuns(Date.now() + 16 * MINUTE_MS)[0]?.status).toBe(
-        "stalled",
-      );
+      expect(
+        store.listRuns({ nowMs: Date.now() + 16 * MINUTE_MS })[0]?.status,
+      ).toBe("stalled");
     });
 
     it("skips runs whose rows fail schema validation", () => {
@@ -691,6 +712,58 @@ describe("RunStore", () => {
       const summary = store.listRuns().find((r) => r.runId === fork.runId);
 
       expect(summary?.rerunOf).toBe(source.runId);
+    });
+  });
+
+  describe("listRuns의 q 필터 (키워드 검색은 SQL이 한다)", () => {
+    const MINUTE_MS = 60 * 1000;
+
+    beforeEach(() => {
+      store.createRun("AI 회의록 요약 서비스");
+      store.createRun("반려식물 케어 구독");
+    });
+
+    it("idea의 부분 문자열로 거른다", () => {
+      expect(store.listRuns({ q: "회의록" }).map((r) => r.idea)).toEqual([
+        "AI 회의록 요약 서비스",
+      ]);
+    });
+
+    it("대소문자를 무시한다 (SQLite LIKE의 ASCII 기본 동작)", () => {
+      expect(store.listRuns({ q: "ai" }).map((r) => r.idea)).toEqual([
+        "AI 회의록 요약 서비스",
+      ]);
+      expect(store.listRuns({ q: "AI" }).map((r) => r.idea)).toEqual([
+        "AI 회의록 요약 서비스",
+      ]);
+    });
+
+    it("매칭이 없으면 빈 배열이다", () => {
+      expect(store.listRuns({ q: "존재하지 않는 키워드" })).toEqual([]);
+    });
+
+    it("q가 없거나 공백뿐이면 거르지 않는다", () => {
+      expect(store.listRuns().length).toBe(2);
+      expect(store.listRuns({ q: "  " }).length).toBe(2);
+    });
+
+    it("LIKE 와일드카드(%·_)는 리터럴로 취급한다", () => {
+      store.createRun("전환율 100% 보장");
+
+      // 이스케이프하지 않으면 %가 "아무거나"가 되어 전체 run이 매칭된다
+      expect(store.listRuns({ q: "100%" }).map((r) => r.idea)).toEqual([
+        "전환율 100% 보장",
+      ]);
+      expect(store.listRuns({ q: "_" })).toEqual([]);
+    });
+
+    it("q와 nowMs를 함께 넘길 수 있다", () => {
+      const runs = store.listRuns({
+        q: "회의록",
+        nowMs: Date.now() + 16 * MINUTE_MS,
+      });
+
+      expect(runs.map((r) => r.status)).toEqual(["stalled"]);
     });
   });
 
