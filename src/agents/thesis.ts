@@ -64,6 +64,7 @@ export async function runThesis(
   return deps.gemini.generateStructured({
     systemInstruction: THESIS_SYSTEM_PROMPT,
     prompt,
+    usageLabel: "thesis",
     schema: ThesisSchema,
   });
 }

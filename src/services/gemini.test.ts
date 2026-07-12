@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { GenerateContentResponse, GoogleGenAI } from "@google/genai";
+import type { CallUsage } from "../lib/cost.js";
 import {
   DEFAULT_GEMINI_MODEL,
   GeminiService,
@@ -17,8 +18,11 @@ interface FakeClient {
   generateContent: ReturnType<typeof vi.fn>;
 }
 
-/** 응답 본문(text)만 주거나, grounding metadata까지 실은 raw 응답을 준다 */
-type FakeResponse = string | undefined | { text?: string; candidates?: unknown[] };
+/** 응답 본문(text)만 주거나, grounding metadata·usageMetadata까지 실은 raw 응답을 준다 */
+type FakeResponse =
+  | string
+  | undefined
+  | { text?: string; candidates?: unknown[]; usageMetadata?: unknown };
 
 function fakeClient(...responses: FakeResponse[]): FakeClient {
   const generateContent = vi.fn();
@@ -85,6 +89,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(result).toEqual({ title: "아이디어", score: 42 });
@@ -98,6 +103,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     const request = generateContent.mock.calls[0][0];
@@ -118,6 +124,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(generateContent.mock.calls[0][0].model).toBe("gemini-custom");
@@ -131,6 +138,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
       systemInstruction: "system",
       prompt: "원본 프롬프트",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(result).toEqual({ title: "아이디어", score: 42 });
@@ -149,6 +157,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(result).toEqual({ title: "아이디어", score: 42 });
@@ -167,6 +176,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
         systemInstruction: "system",
         prompt: "prompt",
         schema: TestSchema,
+        usageLabel: "test",
       }),
     ).rejects.toThrow(/3/);
     expect(generateContent).toHaveBeenCalledTimes(3);
@@ -179,6 +189,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(result).toEqual({ title: "아이디어", score: 42 });
@@ -204,6 +215,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema,
+      usageLabel: "test",
     });
 
     // null 키는 제거되어 undefined(=선택 부재)로 남는다
@@ -227,6 +239,7 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
         systemInstruction: "system",
         prompt: "prompt",
         schema: TestSchema,
+        usageLabel: "test",
       }),
     ).rejects.toThrow(/시간 초과/);
   });
@@ -247,6 +260,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     const request = generateContent.mock.calls[0][0];
@@ -268,6 +282,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
       useUrlContext: false,
     });
 
@@ -288,6 +303,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(result).toEqual({
@@ -330,6 +346,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(generateContent).toHaveBeenCalledTimes(2);
@@ -349,6 +366,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(webSearchQueries).toEqual(["회의록 요약", "AI 노트", "회의 자동화"]);
@@ -362,6 +380,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(data).toEqual({ title: "아이디어", score: 42 });
@@ -374,6 +393,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(data).toEqual({ title: "아이디어", score: 42 });
@@ -386,6 +406,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
       systemInstruction: "system",
       prompt: "prompt",
       schema: TestSchema,
+      usageLabel: "test",
     });
 
     expect(generateContent.mock.calls[0][0].config.abortSignal).toBeInstanceOf(
@@ -401,6 +422,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
         systemInstruction: "system",
         prompt: "prompt",
         schema: TestSchema,
+        usageLabel: "test",
       }),
     ).rejects.toThrow(/2/);
     // 3번째 응답(성공)까지 가지 않는다 — 최악 2 × 180초 = 6분 상한을 지키기 위한 계약
@@ -425,6 +447,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
         systemInstruction: "system",
         prompt: "prompt",
         schema: TestSchema,
+        usageLabel: "test",
       }),
     ).rejects.toThrow(/시간 초과/);
   });
@@ -446,6 +469,7 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
         systemInstruction: "system",
         prompt: "prompt",
         schema: TestSchema,
+        usageLabel: "test",
       }),
     ).rejects.toThrow(/시간 초과/);
   });

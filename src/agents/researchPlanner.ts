@@ -57,6 +57,7 @@ export async function planResearchQueries(
     return await deps.gemini.generateStructured({
       systemInstruction: RESEARCH_PLANNER_SYSTEM_PROMPT,
       prompt,
+      usageLabel: "researchPlanner",
       schema: SearchQueriesSchema,
     });
   } catch (error) {

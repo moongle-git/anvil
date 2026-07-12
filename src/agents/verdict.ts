@@ -94,6 +94,7 @@ export async function runVerdict(
   return deps.gemini.generateStructured({
     systemInstruction: VERDICT_SYSTEM_PROMPT,
     prompt,
+    usageLabel: "verdict",
     schema: VerdictSchema,
   });
 }

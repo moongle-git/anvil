@@ -5,6 +5,7 @@ import {
   type GenerateContentResponse,
 } from "@google/genai";
 import { z, type ZodType } from "zod";
+import type { CallUsage } from "../lib/cost.js";
 import { withTimeout } from "./withTimeout.js";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
@@ -27,18 +28,28 @@ export interface GeminiServiceOptions {
   timeoutMs?: number;
   groundedTimeoutMs?: number;
   groundedMaxRetries?: number;
+  /**
+   * 매 generateContent 응답마다(재시도·검증 실패 포함) 호출된다 (ADR-016).
+   * 서비스는 "얼마 썼다"를 알릴 뿐, 그것을 어디에 적을지는 배선하는 쪽(cli/)이 정한다 —
+   * services/는 DB를 모른다.
+   */
+  onUsage?: (usage: CallUsage) => void;
 }
 
 export interface GenerateStructuredParams<T> {
   systemInstruction: string;
   prompt: string;
   schema: ZodType<T>;
+  /** 어느 에이전트의 호출인가 (usage 집계용) */
+  usageLabel: string;
 }
 
 export interface GenerateGroundedParams<T> {
   systemInstruction: string;
   prompt: string;
   schema: ZodType<T>;
+  /** 어느 에이전트의 호출인가 (usage 집계용) */
+  usageLabel: string;
   /** 경쟁사 공식 페이지를 모델이 직접 읽게 한다 (ADR-012). 기본 true */
   useUrlContext?: boolean;
 }
@@ -181,6 +192,7 @@ export class GeminiService {
   private readonly timeoutMs: number;
   private readonly groundedMaxRetries: number;
   private readonly groundedTimeoutMs: number;
+  private readonly onUsage: ((usage: CallUsage) => void) | undefined;
 
   constructor(options: GeminiServiceOptions, client?: GoogleGenAI) {
     this.client = client ?? new GoogleGenAI({ apiKey: options.apiKey });
@@ -191,6 +203,43 @@ export class GeminiService {
       options.groundedMaxRetries ?? DEFAULT_GROUNDED_MAX_RETRIES;
     this.groundedTimeoutMs =
       options.groundedTimeoutMs ?? DEFAULT_GROUNDED_TIMEOUT_MS;
+    this.onUsage = options.onUsage;
+  }
+
+  /**
+   * 이 시도가 쓴 토큰을 밖으로 흘려보낸다 (ADR-016). 검증 성공 여부와 무관하다 —
+   * **형식이 실패한 것이지 청구가 실패한 게 아니다.** 재시도야말로 프롬프트 전문을 다시
+   * 전송하는 가장 비싼 경로라, 실패한 시도를 세지 않으면 재시도 비용이 장부에서 사라진다.
+   *
+   * 계측은 부수적 관심사다 — usageMetadata 부재도, 콜백의 throw도 삼킨다.
+   * 여기서 예외가 새면 DB 쓰기 실패가 컨설팅 실행을 중단시킨다(꼬리가 개를 흔든다).
+   */
+  private reportUsage(
+    response: GenerateContentResponse,
+    call: { usageLabel: string; grounded: boolean; attempt: number },
+  ): void {
+    const metadata = response.usageMetadata;
+    if (this.onUsage === undefined || metadata === undefined) {
+      return;
+    }
+
+    try {
+      this.onUsage({
+        label: call.usageLabel,
+        model: this.model,
+        grounded: call.grounded,
+        attempt: call.attempt,
+        promptTokens: metadata.promptTokenCount ?? 0,
+        // promptTokenCount에 이미 포함된 값이다 — 비용 계산에서 빼야 이중 과금이 없다
+        cachedTokens: metadata.cachedContentTokenCount ?? 0,
+        outputTokens: metadata.candidatesTokenCount ?? 0,
+        // candidatesTokenCount에 포함되지 않는다. 출력 요금으로 과금되므로 따로 본다
+        thoughtsTokens: metadata.thoughtsTokenCount ?? 0,
+        totalTokens: metadata.totalTokenCount ?? 0,
+      });
+    } catch {
+      // 계측 실패는 파이프라인을 죽일 이유가 아니다
+    }
   }
 
   /**
@@ -209,6 +258,14 @@ export class GeminiService {
     timeoutMs: number;
     /** grounding은 responseJsonSchema를 못 써 자유 텍스트에서 JSON을 긁어내야 한다 */
     extractJson: boolean;
+    /**
+     * Google Search를 켠 호출인가 (usage의 grounding 정액 요금). extractJson과 지금은 값이
+     * 같지만 의미가 다르다 — "JSON을 텍스트에서 긁어내는가" vs "검색 도구를 켰는가".
+     * 한 플래그로 합치면 하나가 바뀔 때 다른 하나가 조용히 틀린다.
+     */
+    grounded: boolean;
+    /** usage 집계용 에이전트 이름 */
+    usageLabel: string;
     label: string;
   }): Promise<{ data: T; responses: GenerateContentResponse[] }> {
     const { baseConfig, basePrompt, schema, maxRetries, timeoutMs } = params;
@@ -235,6 +292,12 @@ export class GeminiService {
 
       // 검증 결과와 무관하게 누적한다 — 이 시도의 검색은 이미 일어났다
       responses.push(response);
+      // 같은 이유로 usage도 검증 전에 흘려보낸다 — 이 시도는 이미 과금됐다 (ADR-016)
+      this.reportUsage(response, {
+        usageLabel: params.usageLabel,
+        grounded: params.grounded,
+        attempt,
+      });
 
       const text = response.text;
       if (text === undefined || text.trim() === "") {
@@ -263,7 +326,7 @@ export class GeminiService {
   }
 
   async generateStructured<T>(params: GenerateStructuredParams<T>): Promise<T> {
-    const { systemInstruction, prompt, schema } = params;
+    const { systemInstruction, prompt, schema, usageLabel } = params;
 
     const { data } = await this.generateValidated({
       baseConfig: {
@@ -276,6 +339,8 @@ export class GeminiService {
       maxRetries: this.maxRetries,
       timeoutMs: this.timeoutMs,
       extractJson: false,
+      grounded: false,
+      usageLabel,
       label: "구조화 출력",
     });
     return data;
@@ -288,7 +353,13 @@ export class GeminiService {
   async generateGrounded<T>(
     params: GenerateGroundedParams<T>,
   ): Promise<GroundedResult<T>> {
-    const { systemInstruction, prompt, schema, useUrlContext = true } = params;
+    const {
+      systemInstruction,
+      prompt,
+      schema,
+      usageLabel,
+      useUrlContext = true,
+    } = params;
 
     const tools = useUrlContext
       ? [{ googleSearch: {} }, { urlContext: {} }]
@@ -301,6 +372,8 @@ export class GeminiService {
       maxRetries: this.groundedMaxRetries,
       timeoutMs: this.groundedTimeoutMs,
       extractJson: true,
+      grounded: true,
+      usageLabel,
       label: "grounding 응답",
     });
 

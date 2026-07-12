@@ -89,6 +89,7 @@ export async function runColdCritic(
   return deps.gemini.generateStructured({
     systemInstruction: COLD_CRITIC_SYSTEM_PROMPT,
     prompt,
+    usageLabel: "coldCritic",
     schema: CriticismSchema,
   });
 }

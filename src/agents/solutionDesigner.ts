@@ -76,6 +76,7 @@ export async function runSolutionDesigner(
   return deps.gemini.generateStructured({
     systemInstruction: SOLUTION_DESIGNER_SYSTEM_PROMPT,
     prompt,
+    usageLabel: "solutionDesigner",
     schema: SolutionSchema,
   });
 }

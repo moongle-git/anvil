@@ -38,6 +38,7 @@ export async function runInterviewer(
   return deps.gemini.generateStructured({
     systemInstruction: INTERVIEWER_SYSTEM_PROMPT,
     prompt,
+    usageLabel: "interviewer",
     schema: InterviewQuestionsSchema,
   });
 }

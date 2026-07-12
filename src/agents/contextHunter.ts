@@ -159,6 +159,7 @@ export async function runContextHunter(
   const { data, citations, webSearchQueries } = await deps.gemini.generateGrounded({
     systemInstruction: CONTEXT_HUNTER_SYSTEM_PROMPT,
     prompt,
+    usageLabel: "contextHunter",
     schema: MarketContextDraftSchema,
   });
 
