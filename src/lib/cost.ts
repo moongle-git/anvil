@@ -59,7 +59,7 @@ const PRICING: Record<string, ModelPricing> = {
  * 않는 이유: 일 단위 누적 상태를 들고 있어야 하는데 이 도구는 그것을 알 방법이 없다.
  * 과대추정이 과소추정보다 안전하다.
  */
-const GROUNDING_REQUEST_USD = 0.035;
+export const GROUNDING_REQUEST_USD = 0.035;
 
 const PER_MILLION = 1_000_000;
 

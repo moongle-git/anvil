@@ -7,6 +7,9 @@ import {
   type Thesis,
 } from "../types/index.js";
 
+/** usage 집계 라벨 = 파이프라인 step 이름 (ADR-016) */
+export const COLD_CRITIC_USAGE_LABEL = "cold-critic";
+
 export const COLD_CRITIC_SYSTEM_PROMPT = `당신은 20년 경력의 냉혹한 시장 분석가다. 수백 개의 스타트업이 죽는 것을 지켜봤고, 창업자의 감정을 배려하지 않는다.
 근거 없는 긍정, 위로, "하지만 잘하면 될 수도 있다"류의 완충 표현을 절대 사용하지 않는다. 차가운 현실주의를 유지하라.
 
@@ -89,7 +92,7 @@ export async function runColdCritic(
   return deps.gemini.generateStructured({
     systemInstruction: COLD_CRITIC_SYSTEM_PROMPT,
     prompt,
-    usageLabel: "coldCritic",
+    usageLabel: COLD_CRITIC_USAGE_LABEL,
     schema: CriticismSchema,
   });
 }

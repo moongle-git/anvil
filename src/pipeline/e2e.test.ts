@@ -34,15 +34,25 @@ const IDEA = "AI 반려식물 관리 서비스";
 /** 본문(text)만 주거나, grounding metadata까지 실은 raw 응답을 준다 */
 type FakeResponse = string | { text: string; candidates: unknown[] };
 
+/** SDK는 응답마다 토큰 계측을 실어 보낸다. onUsage를 배선한 테스트만 이것을 읽는다 (ADR-016) */
+const USAGE_META = {
+  promptTokenCount: 1_000,
+  cachedContentTokenCount: 0,
+  candidatesTokenCount: 200,
+  thoughtsTokenCount: 300,
+  totalTokenCount: 1_500,
+};
+
 function fakeGenAI(...responses: FakeResponse[]): {
   client: GoogleGenAI;
   generateContent: ReturnType<typeof vi.fn>;
 } {
   const generateContent = vi.fn();
   for (const response of responses) {
-    generateContent.mockResolvedValueOnce(
-      typeof response === "string" ? { text: response } : response,
-    );
+    generateContent.mockResolvedValueOnce({
+      ...(typeof response === "string" ? { text: response } : response),
+      usageMetadata: USAGE_META,
+    });
   }
   return {
     client: { models: { generateContent } } as unknown as GoogleGenAI,
@@ -641,6 +651,89 @@ describe("E2E: 아이디어 → 리포트 (CLI 흐름)", () => {
 
     expect(result.status).toBe("completed");
     expect(store.loadReport(result.runId)).not.toBeNull();
+  });
+});
+
+describe("E2E: 비용 계측 (ADR-016)", () => {
+  /**
+   * usage를 적으려면 runId가 첫 Gemini 호출보다 먼저 확정돼야 한다 — CLI가 하는 것과
+   * 같은 순서다(createRun 선생성 → resume). GeminiService는 여전히 runId도 DB도 모른다.
+   */
+  function depsWithUsage(
+    client: GoogleGenAI,
+    fetchFn: typeof fetch,
+    runId: string,
+  ): PipelineDeps {
+    return {
+      store,
+      gemini: new GeminiService(
+        {
+          apiKey: "test-key",
+          onUsage: (usage) => store.saveUsage(runId, usage),
+        },
+        client,
+      ),
+      sources: researchSources(fetchFn),
+      log: () => undefined,
+    };
+  }
+
+  it("완주한 run의 usage에 gemini를 부른 에이전트 수만큼 label이 남는다", async () => {
+    const { client } = fakeGenAI(
+      PLANNER_TEXT,
+      CONTEXT_RESPONSE,
+      THESIS_TEXT,
+      CRITICISM_TEXT,
+      SOLUTION_TEXT,
+      VERDICT_TEXT,
+    );
+    const { runId } = store.createRun(IDEA);
+
+    const result = await runPipeline(depsWithUsage(client, researchFetch(), runId), {
+      idea: IDEA,
+      resumeRunId: runId,
+    });
+
+    expect(result.status).toBe("completed");
+
+    const usage = store.loadRunUsage(runId);
+    // step 5개 + research-planner 1개. planner는 step이 아니지만 gemini를 부르므로 장부에 남는다
+    expect(usage.byLabel.map((label) => label.label).sort()).toEqual([
+      "cold-critic",
+      "context-hunter",
+      "research-planner",
+      "solution-designer",
+      "thesis",
+      "verdict",
+    ]);
+    expect(usage.totalCalls).toBe(ALL_STEPS.length + 1);
+    expect(usage.retryCalls).toBe(0);
+    expect(usage.totalCostUsd).toBeGreaterThan(0);
+  });
+
+  it("★ step이 실패해도 그때까지의 usage가 남는다 — 실패한 run도 과금됐다", async () => {
+    // thesis가 3회 모두 형식을 어긴다 → thesis step 실패
+    const { client } = fakeGenAI(
+      PLANNER_TEXT,
+      CONTEXT_RESPONSE,
+      "형식이 틀렸다",
+      "형식이 틀렸다",
+      "형식이 틀렸다",
+    );
+    const { runId } = store.createRun(IDEA);
+
+    await expect(
+      runPipeline(depsWithUsage(client, researchFetch(), runId), {
+        idea: IDEA,
+        resumeRunId: runId,
+      }),
+    ).rejects.toThrow(PipelineStepError);
+
+    const usage = store.loadRunUsage(runId);
+    // 검증에 실패한 3회의 thesis 시도도 전부 과금됐다 — 세지 않으면 재시도 비용이 장부에서 사라진다
+    expect(usage.byLabel.find((label) => label.label === "thesis")?.calls).toBe(3);
+    expect(usage.totalCalls).toBe(5);
+    expect(usage.retryCalls).toBe(2);
   });
 });
 

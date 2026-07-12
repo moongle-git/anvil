@@ -10,6 +10,9 @@ import {
 } from "../types/index.js";
 import { planResearchQueries } from "./researchPlanner.js";
 
+/** usage 집계 라벨 = 파이프라인 step 이름 (ADR-016) */
+export const CONTEXT_HUNTER_USAGE_LABEL = "context-hunter";
+
 export const CONTEXT_HUNTER_SYSTEM_PROMPT = `당신은 신규 서비스 아이디어의 시장 맥락을 수집·정제하는 리서치 애널리스트다.
 웹검색으로 최신 트렌드와 유사/경쟁 서비스를 조사하고, 제공된 커뮤니티 수집 결과(YouTube 댓글·Hacker News 토론·네이버 블로그/카페/지식iN)에서 타겟 유저의 실제 목소리를 선별한다.
 
@@ -159,7 +162,7 @@ export async function runContextHunter(
   const { data, citations, webSearchQueries } = await deps.gemini.generateGrounded({
     systemInstruction: CONTEXT_HUNTER_SYSTEM_PROMPT,
     prompt,
-    usageLabel: "contextHunter",
+    usageLabel: CONTEXT_HUNTER_USAGE_LABEL,
     schema: MarketContextDraftSchema,
   });
 

@@ -8,6 +8,9 @@ import {
   type Thesis,
 } from "../types/index.js";
 
+/** usage 집계 라벨 = 파이프라인 step 이름 (ADR-016) */
+export const SOLUTION_DESIGNER_USAGE_LABEL = "solution-designer";
+
 export const SOLUTION_DESIGNER_SYSTEM_PROMPT = `당신은 AI 네이티브 서비스 설계 전문가이자 변증법적 종합가(synthesizer)다. 기존 아이디어를 화면·수동 입력 중심의 낡은 기획에서 벗어나, AI 시대에 생존 가능한 형태로 재설계한다.
 당신이 쓰는 섹션은 리포트에서 가장 중요한 부분이다. 독자는 앞선 대립(正/反)을 모두 읽은 뒤 여기서 "그래서 무엇을 만들어야 하는가"의 답을 찾는다.
 
@@ -76,7 +79,7 @@ export async function runSolutionDesigner(
   return deps.gemini.generateStructured({
     systemInstruction: SOLUTION_DESIGNER_SYSTEM_PROMPT,
     prompt,
-    usageLabel: "solutionDesigner",
+    usageLabel: SOLUTION_DESIGNER_USAGE_LABEL,
     schema: SolutionSchema,
   });
 }

@@ -11,6 +11,9 @@ import {
   type Verdict,
 } from "../types/index.js";
 
+/** usage 집계 라벨 = 파이프라인 step 이름 (ADR-016) */
+export const VERDICT_USAGE_LABEL = "verdict";
+
 /** 밴드는 스키마의 refine이 검증한다. 프롬프트가 같은 숫자를 말해야 재시도 루프가 돌지 않는다. */
 function band(recommendation: Recommendation): string {
   const { min, max } = RECOMMENDATION_SCORE_BANDS[recommendation];
@@ -94,7 +97,7 @@ export async function runVerdict(
   return deps.gemini.generateStructured({
     systemInstruction: VERDICT_SYSTEM_PROMPT,
     prompt,
-    usageLabel: "verdict",
+    usageLabel: VERDICT_USAGE_LABEL,
     schema: VerdictSchema,
   });
 }

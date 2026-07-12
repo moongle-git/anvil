@@ -1,6 +1,12 @@
 import type { GeminiService } from "../services/gemini.js";
 import { SearchQueriesSchema, type SearchQueries } from "../types/index.js";
 
+/**
+ * usage 집계 라벨. 이것만 파이프라인 step 이름이 아니다 — researchPlanner는 step이 아니라
+ * context-hunter 내부 호출이다 (ADR-012). 그래도 gemini를 부르므로 자기 이름으로 장부에 남는다.
+ */
+export const RESEARCH_PLANNER_USAGE_LABEL = "research-planner";
+
 export const RESEARCH_PLANNER_SYSTEM_PROMPT = `당신은 아이디어를 읽고 소스별 검색어를 설계하는 리서치 플래너다. 당신은 검색을 수행하지 않는다 — 다음 단계의 리서치 애널리스트가 실제로 던질 검색어만 만든다.
 
 ## 검색어 설계 원칙
@@ -57,7 +63,7 @@ export async function planResearchQueries(
     return await deps.gemini.generateStructured({
       systemInstruction: RESEARCH_PLANNER_SYSTEM_PROMPT,
       prompt,
-      usageLabel: "researchPlanner",
+      usageLabel: RESEARCH_PLANNER_USAGE_LABEL,
       schema: SearchQueriesSchema,
     });
   } catch (error) {

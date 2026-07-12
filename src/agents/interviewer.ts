@@ -4,6 +4,9 @@ import {
   type InterviewQuestions,
 } from "../types/index.js";
 
+/** usage 집계 라벨. 파이프라인 step 이름과 같아야 usage와 step 상태를 나란히 볼 수 있다 (ADR-016) */
+export const INTERVIEWER_USAGE_LABEL = "interviewer";
+
 export const INTERVIEWER_SYSTEM_PROMPT = `당신은 신규 서비스 아이디어를 검증하기 전에, 검증에 꼭 필요한 정보를 확보하는 날카로운 인터뷰어다.
 사용자가 입력한 아이디어에서 모호하거나 자료조사·인사이트 도출에 결정적인 공백을 찾아 질문한다.
 
@@ -38,7 +41,7 @@ export async function runInterviewer(
   return deps.gemini.generateStructured({
     systemInstruction: INTERVIEWER_SYSTEM_PROMPT,
     prompt,
-    usageLabel: "interviewer",
+    usageLabel: INTERVIEWER_USAGE_LABEL,
     schema: InterviewQuestionsSchema,
   });
 }
