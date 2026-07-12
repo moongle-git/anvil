@@ -184,30 +184,35 @@ artifacts(run_id REFERENCES runs ON DELETE CASCADE, kind, content TEXT, updated_
 
 ```sql
 CREATE TABLE IF NOT EXISTS usage (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id          TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-  agent           TEXT NOT NULL,              -- researchPlanner|interviewer|contextHunter|thesis|coldCritic|solutionDesigner|verdict
-  model           TEXT NOT NULL,              -- 단가표 조회 키. 모델을 바꿔도 과거 행의 의미가 보존된다
-  attempt         INTEGER NOT NULL,           -- 1-base. 자가 교정 재시도의 몇 번째 시도인가
-  ok              INTEGER NOT NULL,           -- 0|1 — 이 시도가 zod 검증을 통과했는가. 실패해도 과금된다
-  input_tokens    INTEGER NOT NULL,           -- promptTokenCount
-  output_tokens   INTEGER NOT NULL,           -- candidatesTokenCount (thinking 제외한 응답 본문)
-  thinking_tokens INTEGER NOT NULL,           -- thoughtsTokenCount. 출력 요금으로 과금되므로 별도로 본다
-  cached_tokens   INTEGER NOT NULL,           -- cachedContentTokenCount. implicit 캐시가 히트하는지의 유일한 증거
-  cost_usd        REAL NOT NULL,              -- 하드코딩 단가표의 추정치다. 청구서가 아니다
+  label           TEXT NOT NULL,             -- 에이전트 이름 (thesis, cold-critic, …)
+  model           TEXT NOT NULL,
+  grounded        INTEGER NOT NULL,          -- 0|1. 토큰과 별개로 요청당 정액 과금된다
+  attempt         INTEGER NOT NULL,          -- 1부터. 재시도한 시도도 과금되므로 행이 여러 개다
+  prompt_tokens   INTEGER NOT NULL,
+  cached_tokens   INTEGER NOT NULL,          -- prompt_tokens에 이미 포함된 값이다 (중복 아님)
+  output_tokens   INTEGER NOT NULL,
+  thoughts_tokens INTEGER NOT NULL,          -- thinking. 출력 요금으로 과금된다 (ADR-016)
+  total_tokens    INTEGER NOT NULL,
+  cost_usd        REAL NOT NULL,             -- 추정치다. 청구서가 아니다
   created_at      TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_run_id ON usage(run_id);
 ```
 
+**위 DDL은 `src/lib/db.ts`의 실제 DDL이다.** 이 ADR의 초안은 컬럼을 `agent`/`ok`/`input_tokens`/`thinking_tokens`로, PK를 `id INTEGER PRIMARY KEY AUTOINCREMENT`로 적었으나, 구현이 다음 세 가지를 바꿨다 — 문서를 코드에 맞춘다:
+- **컬럼명은 `src/lib/cost.ts`의 `CallUsage`와 1:1로 대응시킨다** (`label`·`prompt_tokens`·`thoughts_tokens`). 관측치가 서비스 → 콜백 → DB로 이름을 바꾸지 않고 흐른다. `label` 값은 kebab-case 파이프라인 step 이름(`context-hunter`, `cold-critic`, …)이라 `steps` 테이블과 나란히 조회된다. grounded 정액 요금을 계산하려면 행마다 `grounded`가 필요하다.
+- **`ok` 컬럼은 두지 않는다.** 실패한 시도를 기록한다는 **결정 2는 그대로 유효하다** — 다만 그것을 표현하는 데 컬럼이 필요 없다. 시도는 attempt 1부터 순서대로 쌓이고, 마지막 행이 아닌 모든 행이 실패한 시도다. 재시도 여부는 `COUNT(*) - COUNT(DISTINCT label)`로 나온다(`retryCalls`).
+- **PK를 두지 않는다.** 초안은 자연키 충돌을 피하려 대리키(`id`)를 붙였는데, 애초에 이 테이블에 PK가 필요한 질의가 없다 — usage 행은 개별로 지목·갱신되지 않고 오직 집계(SUM·GROUP BY)될 뿐이다. **행을 식별할 이유가 없으면 식별자도 필요 없다.** 아래 논거(자연키를 쓰면 안 되는 이유)는 그대로 유효하다.
+
 `artifacts`는 "에이전트 산출물"을 의미하며 PK가 `(run_id, kind)`다(ADR-014). usage는 산출물이 아니라 **관측 데이터**이고, 재시도 때문에 **한 step에 여러 행**이 생긴다. `kind='usage'`로 우겨넣으면 PK 제약과 의미론이 동시에 깨진다.
 
-PK를 `(run_id, agent, attempt)`로 두지 않고 대리키(`id`)를 쓰는 이유: **resume하면 실패했던 step이 처음부터 다시 실행되어 `attempt`가 1부터 재시작한다.** 자연키로 묶으면 그 순간 PK 충돌이 나고, 충돌을 UPSERT로 무마하면 **이미 청구된 이전 시도의 기록이 덮어써져 사라진다.** usage는 상태가 아니라 **추가만 되는 사건 로그**다.
+PK를 `(run_id, label, attempt)`로 두지 않는 이유: **resume하면 실패했던 step이 처음부터 다시 실행되어 `attempt`가 1부터 재시작한다.** 자연키로 묶으면 그 순간 PK 충돌이 나고, 충돌을 UPSERT로 무마하면 **이미 청구된 이전 시도의 기록이 덮어써져 사라진다.** usage는 상태가 아니라 **추가만 되는 사건 로그**다.
 
 ADR-014의 "DB는 바이트를 보관하고 의미는 zod가 소유한다"는 **에이전트 산출물**에 대한 규칙이다. 그 규칙의 근거는 "에이전트 스키마가 자주 바뀐다"(ADR-011의 criticism 평탄화, ADR-013의 코드 주입)인데, usage는 Gemini의 `usageMetadata`가 정하는 **고정된 숫자 관측치**다. 자주 바뀌지 않고, 집계(SUM·GROUP BY)가 존재 이유다. 따라서 컬럼으로 정규화하는 것이 옳다 — 이것은 **ADR-014의 예외가 아니라 적용 범위 밖이다.**
 
-**2. 실패한 시도의 usage도 반드시 기록한다** (`ok = 0` 행).
+**2. 실패한 시도의 usage도 반드시 기록한다** (검증에 실패한 시도도 자기 행을 갖는다 — 위 DDL 주석 참조).
 검증에 실패한 응답도 과금된다. ADR-013이 "**형식이 실패한 것이지 검색이 실패한 게 아니다**"라며 실패한 시도의 grounding 인용을 살린 것과 정확히 같은 논리다: **형식이 실패한 것이지 청구가 실패한 게 아니다.** 성공한 시도만 세면 재시도 비용이 장부에서 통째로 사라지는데, 재시도야말로 프롬프트 전문을 다시 전송하는 **가장 비싼 경로**다. 실패한 시도를 못 세면 "재시도를 줄이는 것이 이득인가"라는 질문에 영영 답할 수 없다.
 
 **3. `GeminiService`는 DB를 모른다.** usage는 `onUsage` 콜백으로 **밖으로 흘려보내고**, DB 기록은 `cli/`가 배선한다.
@@ -215,17 +220,21 @@ CLAUDE.md의 CRITICAL 규칙과 ARCHITECTURE의 "서비스 레이어 격리" 때
 
 **4. thinking은 끄지 않고 상한을 둔다.** 에이전트별 `thinkingBudget`:
 
+아래 표는 **구현된 최종 값**이다(`src/agents/*.ts`의 `*_THINKING_BUDGET` 상수). 초안의 값에서 세 줄이 실측으로 바뀌었다 — 바뀐 줄에 근거를 적는다.
+
 | 에이전트 | budget | 이유 |
 |---|---|---|
 | `researchPlanner` | **0** | 아이디어 → 소스별 검색어. 기계적 변환이다 |
 | `interviewer` | **0** | 아이디어 → 질문 목록. 기계적 변환이다 |
-| `contextHunter` | 2048 | 수집된 증거의 선별·요약. grounding 왕복이 일의 본체다 |
+| `contextHunter` | **8192** | *초안 2048 → 8192.* 4096에서 **상한에 붙었고**(4,279토큰) 그 run에서 YouTube 목소리 15건 중 **0건 선별**·**citations 0건**이 나왔다 — ADR-013의 핵심 불변식이 깨졌다. 8192는 이 모델의 dynamic thinking 최대치라 **평시에 물리지 않는 안전망**이지 throttle이 아니다 |
 | `thesis` | 2048 | 표적을 세우는 역할(PRD) — 反만큼의 깊이는 필요 없다 |
 | `coldCritic` | 4096 | 비판의 깊이가 이 도구의 존재 이유다 |
-| `solutionDesigner` | 4096 | 合은 리포트의 **가장 중요한 섹션**이다(PRD) |
-| `verdict` | 4096 | 판정 품질 때문에 별도 에이전트로 분리했다(ADR-010) |
+| `solutionDesigner` | **2048** | *초안 4096 → 2048.* 실측 사용량이 1,462~1,670토큰으로 4096에 한참 못 미쳐 상한이 아무것도 막지 않았다. 合 4개 서브섹션이 전부 유지됨을 확인하고 내렸다 |
+| `verdict` | **2048** | *초안 4096 → 2048.* 실측 사용량 1,538~1,746토큰. 판정 점수·residualRisks·conditions 개수가 유지됨을 확인하고 내렸다 |
 
 전부 0으로 끄지 않는 이유: coldCritic의 비판 깊이와 verdict의 판정 품질이 **이 도구의 존재 이유**다. ADR-010이 "合을 설계한 에이전트가 스스로 채점하면 낙관 편향이 들어간다"며 판정자를 제3의 에이전트로 분리한 것도 오직 판정 품질 때문이었다. 비용을 아끼자고 그 판정을 생각 없이 내리게 만들면, 아낀 돈보다 잃는 것이 크다. 없애는 것은 **무제한 dynamic thinking**이지 사고 자체가 아니다.
+
+**`thinkingBudget`은 하드 상한이 아니라 목표치다.** 실측에서 contextHunter가 budget 8192에 대해 **8,925토큰**을 쓴 run이 있다. 모델이 초과할 수 있으므로 budget으로 비용의 천장을 보장할 수는 없다 — 기대값을 낮출 뿐이다.
 
 **이유**: Gemini 비용이 예상보다 높은데 **코드에 `usageMetadata`를 읽는 줄이 하나도 없다**(레포 전체 grep 0건). 비용이 어디서 나는지 알 수단이 지금 존재하지 않는다. 코드와 `data/anvil.db`(run 9개)를 실측해 확인한 것:
 
@@ -235,9 +244,12 @@ CLAUDE.md의 CRITICAL 규칙과 ARCHITECTURE의 "서비스 레이어 격리" 때
 
 추정 비용 구조는 run당 **thinking ~58% / 출력 JSON ~17% / grounding ~15% / 입력 ~8%**다. **이 숫자들은 코드 실측이 아니라 추정이며, 이 phase의 계측이 붙어야 확정된다.** ADR에 굳이 적는 이유는 순서를 정당화하기 위해서다 — 통상 비용 최적화의 1순위로 꼽히는 **컨텍스트 캐싱은 저 8% 슬라이스만 건드린다.** 돈은 thinking에 있다. 그래서 이 phase의 순서는 **계측 → thinking 상한 → 페이로드 다이어트**이며, 계측이 맨 앞에 오는 이유는 **저 추정이 틀렸을 경우 뒤의 두 순서가 바뀌어야 하기 때문**이다.
 
+> ⚠️ **위 추정은 틀렸다.** 계측 결과 thinking은 58%가 아니라 **21.6%**였고, 최대 지출은 thinking이 아니라 **grounding 정액 요금(39.3%)** 이었다. 정정된 수치는 아래 **"실측 결과"** 절에 있다 — 그 절의 숫자를 근거로 삼아라. 이 문단은 *결정 당시의 추측*으로만 남긴다. (계측을 맨 앞에 둔 판단 자체는 옳았다. 추정이 틀렸음을 계측이 잡아냈기 때문이다.)
+
 **기각한 대안**:
 - **컨텍스트 캐싱(explicit `caches.create`) 도입** — 입력 토큰은 전체 비용의 8%뿐이라 최선의 경우에도 절감폭이 작다. 게다가 explicit 캐시는 **저장 요금($1.00/1M 토큰/시간)이 따로 붙는데** run 하나가 수 분이면 캐시 수명이 짧아, 절감액이 캐시 생성·만료 관리 비용을 넘지 못한다. 8% 슬라이스를 최적화하려고 새 실패 지점(만료된 캐시 핸들)을 들이는 거래다.
 - **implicit 캐싱을 노린 프롬프트 재배치** — Gemini 2.5는 implicit 캐싱이 기본 ON이고 공통 프리픽스가 2,048토큰을 넘으면 히트한다. 공통 `context`를 프롬프트 앞머리로 옮기면 히트율이 오를 **것 같다.** 그러나 (a) 절감 대상이 여전히 8% 슬라이스이고, (b) exact-prefix 매칭이 에이전트마다 다른 `systemInstruction` 때문에 깨지는지 **알 수 없다.** **계측이 붙으면 `cachedContentTokenCount`가 이 질문에 직접 답한다** — 그래서 `usage.cached_tokens`가 컬럼으로 있다. 추측으로 프롬프트를 재배치하지 말고, 데이터를 보고 다음 phase에서 결정한다. **이 phase의 계측은 그 데이터를 얻기 위한 것이기도 하다.** 이것이 이 ADR의 요지다: *측정하지 않고 최적화하지 않는다.*
+  > **답이 나왔다 (아래 "실측 결과" 참조): 하류 4개 에이전트의 `cached_tokens`는 20콜 207,139 입력토큰에 걸쳐 전부 0이다.** (b)의 우려가 사실로 확인됐다 — 공통 `context`를 4번 재전송하지만 `systemInstruction`과 프롬프트 도입부가 에이전트마다 달라 **공통 프리픽스가 성립하지 않는다.** 캐시가 히트한 유일한 지점은 `contextHunter`(같은 프롬프트를 그대로 다시 보내는 **재시도**, 그리고 같은 아이디어를 다시 돌린 run 사이)였다. 즉 implicit 캐싱 기능 자체는 살아서 동작하고 있고, **우리 프롬프트가 그 조건을 못 맞추고 있을 뿐이다.**
 - **모델을 `gemini-2.5-flash-lite`로 내리기** — 출력 단가가 6배 싸다(=$0.40/1M). 그러나 품질 회귀의 범위를 **지금은 알 수 없다.** thinking 상한만으로 목표에 도달하는지 먼저 본다. 계측이 붙으면 **에이전트별** 비용이 보이므로, 그때 "researchPlanner만 lite로" 같은 판단이 **근거를 갖고** 가능해진다. 그래서 `usage.model`이 행마다 저장된다 — 에이전트별로 모델이 갈라져도 장부가 성립한다.
 - **Batch API(50% 할인)** — 파이프라인은 대화형이고 step이 순차 의존한다(ADR-004). 배치의 지연(수 시간)은 "아이디어를 넣고 리포트를 받는" 이 도구의 UX와 양립하지 않는다.
 - **`sources[]`를 스키마에서 빼기** — ADR-013이 `sources`와 `citations`의 **상보성**(자기보고는 부정확하지만 만료되지 않고, 인용은 정확하지만 만료된다)을 근거로 공존을 결정했고, 리포트 렌더러가 `sources`를 쓴다. 이번에 바뀌는 것은 **하류 프롬프트에 넣지 않는다**는 것뿐이다 — **저장도 렌더링도 그대로다.** 논증에 쓰지 않는 4,449자를 4번 재전송하지 않는 것과, 출처를 산출물에서 지우는 것은 다른 일이다.
@@ -245,10 +257,43 @@ CLAUDE.md의 CRITICAL 규칙과 ARCHITECTURE의 "서비스 레이어 격리" 때
 **트레이드오프**:
 - `usage` 테이블이 run마다 **7~20행**씩 늘어난다(에이전트 7개 × 재시도). 관측의 대가다. 삭제 시 FK CASCADE로 함께 사라진다(ADR-015).
 - **단가표가 코드(`src/lib/cost.ts`)에 하드코딩된다.** Google이 가격을 바꾸면 그 파일을 고쳐야 한다. **`cost_usd`는 추정치이지 청구서가 아니다** — 이 문장을 코드 주석에도 남긴다. 진짜 청구서는 Google Cloud 콘솔에 있다.
-- **`cost_usd`는 토큰 요금만 센다.** grounding 요청 요금($35/1,000 requests)은 `usageMetadata`에 나오지 않아 포함되지 않는다. grounded 호출은 현재 `contextHunter` 하나뿐이므로 그 행 수로 따로 셀 수 있다. 즉 `cost_usd`는 **하한**이다.
+- **`cost_usd`는 토큰 요금 + grounding 정액 요금을 합한 값이다.** 초안은 "토큰 요금만 세므로 `cost_usd`는 하한"이라 적었으나, 구현은 `grounded` 행에 `GROUNDING_REQUEST_USD`($0.035 = $35/1,000 requests)를 **더한다**(`src/lib/cost.ts`의 `estimateCostUsd`) — 그래서 `usage.grounded` 컬럼이 있다. 오히려 **과대추정**일 수 있다: grounding은 **1,500건/일까지 무료**인데 그 한도를 모델링하지 않기 때문이다(일 단위 누적 상태를 이 도구는 알 방법이 없다. 과대추정이 과소추정보다 안전하다).
 - **thinking 상한이 품질을 떨어뜨릴 수 있다.** 검증은 저장된 기존 run과의 **수동 비교**로 한다 — 별도 eval 하네스를 만들지 않는다. 리포트 품질은 이 도구의 존재 이유지만, 그것을 자동 채점하겠다는 것은 이 phase보다 큰 일이다.
 
 **하위호환**:
 - `usage` 테이블은 `IF NOT EXISTS`로 추가되는 **순수 증분**이다. 기존 run은 usage 행이 없을 뿐이고, 조회하면 빈 요약이 나온다. 기존 아티팩트·스키마·산출물은 **하나도 바뀌지 않는다.**
-- `schema_version`은 **1 그대로 둔다.** 시딩 코드가 빈 DB에만 값을 쓰므로 상수를 2로 올리면 기존 DB는 1, 새 DB는 2가 되어 **같은 스키마에 두 버전 번호가 생긴다** — 이를 맞출 마이그레이션 러너는 없다(ADR-014). 증분 DDL에는 버전 번호가 필요 없다.
+- `schema_version`은 **2로 올렸다.** 초안은 "1 그대로 둔다 — 시딩이 빈 DB에만 값을 쓰므로 기존 DB는 1, 새 DB는 2가 되어 같은 스키마에 두 버전 번호가 생긴다"고 적었는데, 그 문제는 **시딩을 멱등으로 고치면 사라진다**: 행이 있으면 UPDATE, 없으면 INSERT(`src/lib/db.ts`). 그래서 기존 DB도 열리는 즉시 2가 되고 버전 번호가 갈라지지 않는다. 마이그레이션 러너는 여전히 없다 — `usage` 추가는 `IF NOT EXISTS` 증분이라 **변환할 기존 데이터가 없다.** 버전 번호는 러너를 위한 것이 아니라 "이 DB가 아는 스키마가 무엇인가"의 기록이다.
 - Step 5의 프롬프트 다이어트는 **하류 프롬프트만** 바꾸고 **저장되는 `context` 아티팩트는 그대로 둔다.** 리포트 렌더러와 웹 UI는 영향받지 않는다.
+
+---
+
+#### 실측 결과 (2026-07-12, phase 7 종료 시점) — 위 추정치를 정정한다
+
+같은 아이디어("직장인을 위한 AI 회의록 요약 서비스")를 `gemini-2.5-flash`·소스 3개 전부 활성으로 돌린 run들의 `usage` 집계다. **이 ADR 본문의 추정치가 아니라 이 숫자를 근거로 삼아라.**
+
+| | 총 USD | 입력 | 출력 | thinking | 콜 |
+|---|---|---|---|---|---|
+| **BEFORE** (무제한 dynamic thinking) | $0.1782 | 69,751 | 19,970 | 15,397 | 7 |
+| **+ thinking 상한** (결정 4) | $0.1204 | 54,587 | 14,558 | 13,372 | 6 |
+| **+ 프롬프트 다이어트** (2회 평균) | **$0.1302** | 37,997 | 11,977 | 14,556 | 6.5 |
+| **절감률** | **−26.9%** | −45.5% | −40.0% | −5.5% | |
+
+**추정이 어떻게 틀렸는가.** 실측 비용 분해(BEFORE): **grounding 정액 39.3% / 출력 본문 28.0% / thinking 21.6% / 입력 11.1%**. 추정(thinking 58% / 출력 17% / grounding 15% / 입력 8%)은 **thinking을 2.7배 과대평가**하고 grounding을 2.6배 과소평가했다. "돈은 thinking에 있다"는 본문의 단언은 **틀렸다** — 돈은 grounding과 출력 본문에 있었다. 그래서 결정 4(thinking 상한)의 순효과는 애초에 작을 수밖에 없었고, 실제로 **기준선 총액의 약 12%**(non-grounded 5개 에이전트의 thinking −55.6%)에 그쳤다.
+
+**thinking 비중은 오히려 올랐다.** 과금 출력 대비 43.5% → 54.4%. 입력(−45.5%)과 출력 본문(−40.0%)이 thinking(−5.5%)보다 훨씬 많이 줄었기 때문이다. 남은 토큰 요금의 **46.9%가 thinking**이고, 그 절반이 `contextHunter`(grounded, 5,340~8,925토큰)다.
+
+**implicit 캐싱: 하류는 0, contextHunter만 히트.**
+
+| label | cached | prompt | 히트율 |
+|---|---|---|---|
+| `context-hunter` | 10,360 | 44,684 | **23.2%** |
+| `thesis`·`cold-critic`·`solution-designer`·`verdict`·`research-planner` | **0** | 210,709 | **0%** |
+
+캐시가 히트한 3건은 전부 **grounded 재시도이거나 같은 아이디어의 다음 run** — 즉 프롬프트 프리픽스가 글자 그대로 반복된 경우다. 공통 `context`를 4번 재전송하는 하류 4개 에이전트는 **단 한 번도 히트하지 않았다.** 기능이 꺼진 게 아니라 우리 프롬프트가 조건을 못 맞춘다(에이전트마다 `systemInstruction`과 도입부가 다르다). **프롬프트 재배치는 이제 근거를 갖는다** — 다만 입력은 남은 토큰 요금의 14.7%뿐이라 상한은 여전히 작다.
+
+**남은 비용은 어디에 있는가 — `contextHunter` 하나가 run 비용의 65%다** ($0.0851 / $0.1302). 그 안에서:
+1. **grounded 정액 요금 $0.035/콜** — 최대 단일 항목. 단 **1,500건/일 무료 한도 안이면 실제 청구는 0**이므로 `cost_usd`는 이 부분을 과대추정한다.
+2. **grounded 형식 실패 재시도** — 6개 run 중 **3개**에서 attempt 1이 **출력 0토큰**을 내고 실패했다. 실패해도 입력과 grounding 정액은 과금된다. 이 재시도 복권이 run 총액을 지배한다 (다이어트 후 두 run이 $0.1171(재시도 0) vs $0.1433(재시도 1)로 갈렸다). **ADR-013이 서술한 grounded 형식 실패가 실재함을 계측이 확인했다** — 다음 phase의 1순위 레버는 thinking도 캐싱도 아니라 **이 실패율을 낮추는 것**이다.
+3. **contextHunter의 thinking** (7,132토큰 평균) — 남은 thinking의 절반. 상한 8192는 안전망이라 물리지 않는다(위 "하드 상한이 아니라 목표치다" 참조).
+
+**측정의 한계**: 각 조건이 1~2회 실행이라 **LLM 출력 편차(노이즈)를 포함한다.** 특히 grounded 재시도 유무가 총액을 $0.035씩 흔들어, 위 표의 −26.9%는 ±$0.035 수준의 불확실성을 안고 있다. 방향(입력·출력 감소, thinking 비중 증가, contextHunter 지배)은 모든 run에서 일관되지만, **소수점 두 자리를 신뢰하지 마라.**

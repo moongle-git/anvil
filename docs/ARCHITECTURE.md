@@ -39,13 +39,13 @@ artifacts(run_id REFERENCES runs ON DELETE CASCADE, kind, content TEXT, updated_
 ```
 **도메인 테이블은 이 3개가 전부다.** 여기에 **관측 테이블 1개**가 붙는다 (ADR-016):
 ```
-usage(id PK AUTOINCREMENT, run_id REFERENCES runs ON DELETE CASCADE, agent, model,
-      attempt, ok, input_tokens, output_tokens, thinking_tokens, cached_tokens,
-      cost_usd REAL, created_at)
+usage(run_id REFERENCES runs ON DELETE CASCADE, label, model, grounded, attempt,
+      prompt_tokens, cached_tokens, output_tokens, thoughts_tokens, total_tokens,
+      cost_usd REAL, created_at)          -- PK 없음
 ```
-`usage`는 **산출물이 아니라 사건 로그다.** Gemini 호출 1회 = 1행이며, 재시도한 시도도 실패한 시도도 각각 한 행이 된다(`ok = 0`). 그래서 자연키(`run_id, agent, attempt`)가 아니라 대리키를 쓴다 — resume하면 `attempt`가 1부터 재시작해 자연키가 충돌하고, 그것을 UPSERT로 무마하면 이미 청구된 기록이 덮어써진다. 산출물이 아니므로 ADR-014의 "정규화하지 않는다"(그 규칙의 대상은 **에이전트 산출물**이다)와 충돌하지 않는다. usage는 스키마가 고정된 숫자 관측치이고 집계가 존재 이유라 컬럼으로 정규화하는 것이 옳다.
+`usage`는 **산출물이 아니라 사건 로그다.** Gemini 호출 1회 = 1행이며, 재시도한 시도도 실패한 시도도 각각 한 행이 된다. **PK가 없다** — usage 행은 개별로 지목·갱신되지 않고 오직 집계(SUM·GROUP BY)될 뿐이라 식별할 이유가 없다. 자연키(`run_id, label, attempt`)는 특히 쓰면 안 된다: resume하면 `attempt`가 1부터 재시작해 충돌하고, 그것을 UPSERT로 무마하면 이미 청구된 기록이 덮어써진다. 컬럼명은 `src/lib/cost.ts`의 `CallUsage`와 1:1로 대응해 관측치가 서비스 → `onUsage` 콜백 → DB로 이름을 바꾸지 않고 흐른다. `label`은 kebab-case step 이름(`context-hunter`, `cold-critic`, …)이라 `steps`와 나란히 조회된다. 산출물이 아니므로 ADR-014의 "정규화하지 않는다"(그 규칙의 대상은 **에이전트 산출물**이다)와 충돌하지 않는다. usage는 스키마가 고정된 숫자 관측치이고 집계가 존재 이유라 컬럼으로 정규화하는 것이 옳다.
 
-그 밖에 `schema_version(version)`(현재 1 — 기록만 하고 **마이그레이션 러너는 두지 않는다**. `usage` 추가는 순수 증분이라 버전을 올리지 않는다)과 인덱스 2개(`idx_runs_created_at ON runs(created_at DESC)` — 목록 정렬용, `idx_usage_run_id ON usage(run_id)` — run별 비용 집계용)가 있다. DDL은 전부 `IF NOT EXISTS`라 커넥션을 여러 번 열어도 안전하다(`src/lib/db.ts`의 `openDb`).
+그 밖에 `schema_version(version)`(현재 **2** — 기록만 하고 **마이그레이션 러너는 두지 않는다**. `usage` 추가는 `IF NOT EXISTS` 증분이라 변환할 기존 데이터가 없다. 시딩이 멱등이라(행이 있으면 UPDATE, 없으면 INSERT) 기존 DB도 열리는 즉시 2가 된다)과 인덱스 2개(`idx_runs_created_at ON runs(created_at DESC)` — 목록 정렬용, `idx_usage_run_id ON usage(run_id)` — run별 비용 집계용)가 있다. DDL은 전부 `IF NOT EXISTS`라 커넥션을 여러 번 열어도 안전하다(`src/lib/db.ts`의 `openDb`).
 
 연결 시 PRAGMA: `journal_mode = WAL`(CLI 쓰기 + Next 서버 읽기의 동시 접근), `busy_timeout = 5000`(잠금 경합 시 대기), `foreign_keys = ON`(**꺼져 있으면 CASCADE 삭제가 조용히 동작하지 않는다** — SQLite 기본값은 OFF).
 
@@ -74,7 +74,7 @@ usage(id PK AUTOINCREMENT, run_id REFERENCES runs ON DELETE CASCADE, agent, mode
 - **출처는 사실이다** (ADR-013): 클릭 가능한 링크로 렌더되는 URL은 코드가 API 응답에서 주입한 것뿐이다(`citations`, `communityVoices`). LLM이 타이핑한 URL(`sources[]`, `competitors[].url`)은 텍스트로만 표시한다.
 - **저장소는 바이트를, zod는 의미를** (ADR-014): 에이전트 산출물은 artifacts 테이블에 JSON 문자열로 통째로 들어간다. 컬럼으로 정규화하지 않는다. 스키마의 권위는 zod 단독이다.
 - **삭제는 CASCADE, 재실행은 포크** (ADR-015): run 삭제는 FK `ON DELETE CASCADE`로 steps·artifacts를 함께 지운다(`running` run은 삭제 불가). 재실행은 원본을 덮어쓰지 않고 `idea`·`questions`·`answers`만 복사한 새 run을 만들어 자료조사부터 다시 돈다. 계보는 `runs.rerun_of`에 남는다.
-- **비용은 관측된다** (ADR-016): 모든 Gemini 호출은 **재시도까지 포함해** `usage` 테이블에 기록된다 — 검증에 실패한 시도도 과금되므로 `ok = 0` 행으로 남긴다(형식이 실패한 것이지 청구가 실패한 게 아니다). thinking 토큰은 출력 요금으로 과금되므로 `thinking_tokens` 컬럼으로 분리해 본다. thinking은 끄지 않고 에이전트별 `thinkingBudget`으로 상한만 둔다(기계적 에이전트 0, 추론 에이전트 2048~4096). `GeminiService`는 **DB를 모른다** — usage를 `onUsage` 콜백으로 흘려보내고, DB 기록은 `cli/`가 배선한다(서비스 레이어 격리).
+- **비용은 관측된다** (ADR-016): 모든 Gemini 호출은 **재시도까지 포함해** `usage` 테이블에 한 행씩 기록된다 — 검증에 실패한 시도도 과금되므로 자기 행을 남긴다(형식이 실패한 것이지 청구가 실패한 게 아니다). thinking 토큰은 출력 요금으로 과금되므로 `thoughts_tokens` 컬럼으로 분리해 본다. thinking은 끄지 않고 에이전트별 `thinkingBudget`으로 상한만 둔다(기계적 에이전트 0, 추론 에이전트 2048~8192). `GeminiService`는 **DB를 모른다** — usage를 `onUsage` 콜백으로 흘려보내고, DB 기록은 `cli/`가 배선한다(서비스 레이어 격리). 계측 결과 run 비용의 **65%가 `context-hunter`** 하나이고(grounding 정액 + 형식 실패 재시도), thinking은 예상(58%)보다 훨씬 작았다(실측 21.6%) — ADR-016 "실측 결과" 참조.
 
 ## 데이터 흐름
 ```
