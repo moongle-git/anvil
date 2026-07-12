@@ -205,18 +205,21 @@ describe("runSolutionDesigner", () => {
     // 아이디어 원문
     expect(prompt).toContain(IDEA);
 
-    // MarketContext·Thesis·Criticism 전체 JSON 직렬화 — 필드 하나도 유실되면 안 된다
-    expect(prompt).toContain(
+    // MarketContext·Thesis·Criticism 전체 JSON 직렬화 — 필드 하나도 유실되면 안 된다.
+    // minify다 — 들여쓰기 공백까지 입력 토큰으로 과금된다 (ADR-016)
+    expect(prompt).toContain(JSON.stringify(toPromptContext(MARKET_CONTEXT)));
+    expect(prompt).not.toContain(
       JSON.stringify(toPromptContext(MARKET_CONTEXT), null, 2),
     );
     // citations는 코드가 만든 출처 메타데이터라 하류 논증에 쓰이지 않는다 —
     // 4개 프롬프트에 같은 리다이렉트 URL 뭉치가 중복해 실리는 것을 막는다
     expect(prompt).not.toContain("citations");
     expect(prompt).not.toContain("grounding-api-redirect");
-    // sources(LLM 자기보고)는 남는다 — 하류에 맥락을 준다
-    expect(prompt).toContain(MARKET_CONTEXT.sources[0]);
-    expect(prompt).toContain(JSON.stringify(THESIS, null, 2));
-    expect(prompt).toContain(JSON.stringify(CRITICISM, null, 2));
+    // sources(LLM 자기보고 URL)도 뺀다 — 논증에 쓰이지 않으면서 4번 재전송된다 (ADR-016)
+    expect(prompt).not.toContain("sources");
+    expect(prompt).not.toContain(MARKET_CONTEXT.sources[0]);
+    expect(prompt).toContain(JSON.stringify(THESIS));
+    expect(prompt).toContain(JSON.stringify(CRITICISM));
 
     // 개별 데이터 포함 재확인 (비판 claim·evidence·verdict, 낙관 논지)
     expect(prompt).toContain("산책 대행 수요는 죄책감 해소용 일시 수요다");

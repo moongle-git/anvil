@@ -8,6 +8,7 @@ import {
   MarketContextObjectSchema,
   MarketContextSchema,
   toPromptContext,
+  type MarketContext,
 } from "./marketContext.js";
 
 describe("CompetitorServiceSchema", () => {
@@ -386,6 +387,67 @@ describe("MarketContextSchema", () => {
 
       expect(promptContext.researchCoverage).toEqual(coverage);
       expect(promptContext).not.toHaveProperty("citations");
+    });
+  });
+
+  // ADR-016: 하류 4개 프롬프트에 같은 context가 바이트 동일하게 재전송된다.
+  // 논증에 쓰이지 않는 필드를 빼는 것은 프롬프트 사본에서만 일어난다 — 저장 아티팩트는 그대로다.
+  describe("toPromptContext (하류 프롬프트 다이어트)", () => {
+    const context = MarketContextSchema.parse({
+      ...validContext,
+      sources: [
+        "https://example.com/pet-market",
+        "https://example.com/dogmate-review",
+      ],
+      citations: [
+        {
+          uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
+          kind: "redirect" as const,
+        },
+      ],
+      researchCoverage: [],
+    });
+
+    it("★ sources와 citations를 둘 다 덜어낸다 (어느 하류 에이전트도 논증에 쓰지 않는다)", () => {
+      const promptContext = toPromptContext(context);
+
+      expect(promptContext).not.toHaveProperty("sources");
+      expect(promptContext).not.toHaveProperty("citations");
+
+      // 직렬화된 프롬프트에도 URL 문자열이 남으면 안 된다 — 4번 재전송되는 바이트다
+      const serialized = JSON.stringify(promptContext);
+      for (const source of context.sources) {
+        expect(serialized).not.toContain(source);
+      }
+      expect(serialized).not.toContain("grounding-api-redirect");
+    });
+
+    it("논증에 쓰이는 나머지 필드는 하나도 잃지 않는다", () => {
+      const promptContext = toPromptContext(context);
+
+      // 코드가 두 키만 delete한다 — 나머지는 통째로 넘어간다
+      const rest: Partial<MarketContext> = { ...context };
+      delete rest.sources;
+      delete rest.citations;
+      expect(promptContext).toEqual(rest);
+
+      // 하류 논증의 근거가 되는 필드들 (ADR-013: communityVoices는 코드가 주입한 사실이다)
+      expect(promptContext.communityVoices).toEqual(context.communityVoices);
+      expect(promptContext.competitors).toEqual(context.competitors);
+      expect(promptContext.painPointEvidence).toEqual(context.painPointEvidence);
+      expect(promptContext.trends).toEqual(context.trends);
+      expect(promptContext.briefing).toBe(context.briefing);
+    });
+
+    it("★ 원본 context를 변형하지 않는다 (저장 아티팩트의 sources·citations는 그대로 남는다)", () => {
+      const before = structuredClone(context);
+
+      toPromptContext(context);
+
+      // 프롬프트 사본을 만들다 저장될 객체를 깎으면 리포트의 출처가 조용히 사라진다 (ADR-013)
+      expect(context).toEqual(before);
+      expect(context.sources).toHaveLength(2);
+      expect(context.citations).toHaveLength(1);
     });
   });
 

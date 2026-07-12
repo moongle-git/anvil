@@ -94,11 +94,12 @@ export async function runVerdict(
   criticism: Criticism,
   solution: Solution,
 ): Promise<Verdict> {
+  // minify한다 — 들여쓰기 공백·줄바꿈도 입력 토큰으로 과금된다 (ADR-016)
   const prompt = VERDICT_PROMPT_TEMPLATE.replace("{idea}", idea)
-    .replace("{marketContext}", JSON.stringify(toPromptContext(context), null, 2))
-    .replace("{thesis}", JSON.stringify(thesis, null, 2))
-    .replace("{criticism}", JSON.stringify(criticism, null, 2))
-    .replace("{solution}", JSON.stringify(solution, null, 2));
+    .replace("{marketContext}", JSON.stringify(toPromptContext(context)))
+    .replace("{thesis}", JSON.stringify(thesis))
+    .replace("{criticism}", JSON.stringify(criticism))
+    .replace("{solution}", JSON.stringify(solution));
 
   return deps.gemini.generateStructured({
     systemInstruction: VERDICT_SYSTEM_PROMPT,

@@ -144,15 +144,19 @@ describe("runThesis", () => {
     const prompt = generateStructured.mock.calls[0][0].prompt as string;
 
     expect(prompt).toContain(IDEA);
-    expect(prompt).toContain(
+    // minify다 — 들여쓰기 공백까지 입력 토큰으로 과금된다 (ADR-016)
+    expect(prompt).toContain(JSON.stringify(toPromptContext(MARKET_CONTEXT)));
+    expect(prompt).not.toContain(
       JSON.stringify(toPromptContext(MARKET_CONTEXT), null, 2),
     );
     // citations는 코드가 만든 출처 메타데이터라 하류 논증에 쓰이지 않는다 —
     // 4개 프롬프트에 같은 리다이렉트 URL 뭉치가 중복해 실리는 것을 막는다
     expect(prompt).not.toContain("citations");
     expect(prompt).not.toContain("grounding-api-redirect");
-    // sources(LLM 자기보고)는 남는다 — 하류에 맥락을 준다
-    expect(prompt).toContain(MARKET_CONTEXT.sources[0]);
+    // sources(LLM 자기보고 URL)도 뺀다 — 어느 에이전트도 논증에 인용하지 않으면서
+    // context의 33.7%를 차지하고 4번 재전송된다 (ADR-016). 저장 아티팩트에는 그대로 남는다
+    expect(prompt).not.toContain("sources");
+    expect(prompt).not.toContain(MARKET_CONTEXT.sources[0]);
     expect(prompt).toContain("도그메이트");
     expect(prompt).toContain("산책 시킬 시간이 없어서 너무 미안해요...");
   });

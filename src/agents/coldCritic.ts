@@ -91,9 +91,10 @@ export async function runColdCritic(
   context: MarketContext,
   thesis: Thesis,
 ): Promise<Criticism> {
+  // minify한다 — 들여쓰기 공백·줄바꿈도 입력 토큰으로 과금된다 (ADR-016)
   const prompt = COLD_CRITIC_PROMPT_TEMPLATE.replace("{idea}", idea)
-    .replace("{marketContext}", JSON.stringify(toPromptContext(context), null, 2))
-    .replace("{thesis}", JSON.stringify(thesis, null, 2));
+    .replace("{marketContext}", JSON.stringify(toPromptContext(context)))
+    .replace("{thesis}", JSON.stringify(thesis));
 
   return deps.gemini.generateStructured({
     systemInstruction: COLD_CRITIC_SYSTEM_PROMPT,

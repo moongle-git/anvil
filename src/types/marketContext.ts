@@ -148,19 +148,31 @@ export const MarketContextSchema = z.preprocess(
 export type MarketContext = z.infer<typeof MarketContextSchema>;
 
 /**
- * 하류 에이전트(正·反·合·판정) 프롬프트용. citations는 코드가 만든 출처 메타데이터라 논증에 쓰이지 않는다.
+ * 하류 에이전트(正·反·合·판정) 프롬프트용. 이것은 **프롬프트 사본**이지 저장 형태가 아니다 —
+ * 저장되는 context 아티팩트에는 citations·sources가 그대로 남고 리포트가 둘 다 렌더한다 (ADR-013).
+ * 바뀌는 것은 "하류 프롬프트에 넣지 않는다"뿐이다 (ADR-016).
+ *
+ * citations는 코드가 만든 출처 메타데이터라 논증에 쓰이지 않는다.
  * run당 10~30개이고 리다이렉트 URL이 길어서, 그대로 두면 같은 URL 뭉치가 하류 4개 프롬프트에 중복해 실린다.
- * sources는 남긴다 — LLM 자기보고 설명은 하류에 맥락을 준다.
- * researchCoverage도 남긴다 — "국내 커뮤니티 근거가 아예 없다"를 하류가 알아야 논증에서 근거 부재를
+ *
+ * sources는 "자기보고 설명이 하류에 맥락을 준다"는 이유로 남겨뒀었다. 실측이 그 전제를 뒤집었다 —
+ * context의 33.7%(4,449자)를 차지하면서 正·反·合·판정 어느 에이전트도 논증에 인용하지 않고,
+ * 같은 바이트가 4번 재전송된다. ADR-013이 이미 링크를 박탈한 필드다(자기보고 URL의 60%가 도달 불가) —
+ * 하류 프롬프트에서 빼는 것은 그 판단의 연장이다.
+ *
+ * researchCoverage는 남긴다 — "국내 커뮤니티 근거가 아예 없다"를 하류가 알아야 논증에서 근거 부재를
  * 진술할 수 있다. 소스가 3개뿐이라 프롬프트를 부풀리지도 않는다.
  */
 export function toPromptContext(
   context: MarketContext,
-): Omit<MarketContext, "citations"> {
-  // citations만 덜어내고 나머지는 그대로 넘긴다 — MarketContext에 필드가 늘어도 자동으로 따라간다
-  const promptContext: Omit<MarketContext, "citations"> & {
+): Omit<MarketContext, "citations" | "sources"> {
+  // 논증에 쓰이지 않는 두 필드만 덜어내고 나머지는 그대로 넘긴다 —
+  // MarketContext에 필드가 늘어도 자동으로 따라간다
+  const promptContext: Omit<MarketContext, "citations" | "sources"> & {
     citations?: Citation[];
+    sources?: string[];
   } = { ...context };
   delete promptContext.citations;
+  delete promptContext.sources;
   return promptContext;
 }

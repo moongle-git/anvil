@@ -6,6 +6,13 @@ const DEFAULT_MAX_VIDEOS = 5;
 const DEFAULT_MAX_COMMENTS_PER_VIDEO = 10;
 // YouTube API는 보통 1초 내 응답한다 — hang을 끊기 위한 상한
 const DEFAULT_TIMEOUT_MS = 15_000;
+/**
+ * 이 길이를 넘는 댓글은 자르지 않고 버린다 (hackerNews.ts의 MAX_COMMENT_LENGTH와 같은 규칙).
+ * 상한이 없으면 장문 댓글 몇 개가 하류 프롬프트를 무제한 팽창시킨다 — 비용이자 견고성 문제다.
+ * 잘라서 싣지 않는 이유: 잘린 조각이 communityVoices에 그대로 실려 "원문 그대로 인용"으로
+ * 리포트에 나간다. 요약본을 인용으로 실으면 리포트가 거짓말을 한다 (research/format.ts).
+ */
+const MAX_COMMENT_LENGTH = 1200;
 
 export interface YoutubeVideo {
   videoId: string;
@@ -161,6 +168,10 @@ export class YoutubeService {
         continue;
       }
       if (snippet?.textOriginal === undefined) {
+        continue;
+      }
+      // 초과분은 잘라내지 않고 통째로 버린다 (HN과 같은 규칙)
+      if (snippet.textOriginal.length > MAX_COMMENT_LENGTH) {
         continue;
       }
       comments.push({

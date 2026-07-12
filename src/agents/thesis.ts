@@ -65,9 +65,11 @@ export async function runThesis(
   idea: string,
   context: MarketContext,
 ): Promise<Thesis> {
+  // minify한다 — 들여쓰기 공백·줄바꿈도 입력 토큰으로 과금된다 (ADR-016).
+  // 이 JSON은 읽을 데이터이지 형식 지시가 아니라, 사람이 볼 일도 형식을 흉내낼 일도 없다
   const prompt = THESIS_PROMPT_TEMPLATE.replace("{idea}", idea).replace(
     "{marketContext}",
-    JSON.stringify(toPromptContext(context), null, 2),
+    JSON.stringify(toPromptContext(context)),
   );
 
   return deps.gemini.generateStructured({

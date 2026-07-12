@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DIALECTIC_AXIS_LABELS,
+  MarketContextSchema,
   RECOMMENDATION_LABELS,
   SOURCE_LABELS,
+  toPromptContext,
   type Criticism,
   type MarketContext,
   type Solution,
@@ -490,6 +492,40 @@ describe("renderReport", () => {
       expect(report).toContain(
         "> 아래 항목은 모델이 자기 기억으로 적어낸 것이라 검증되지 않았다. 링크를 걸지 않는다.",
       );
+    });
+
+    // ADR-016의 프롬프트 다이어트가 하류 프롬프트에서 sources를 뺐다. 저장 아티팩트는 건드리지 않았다 —
+    // 여기가 그 경계의 안전벨트다. toPromptContext를 저장·렌더 경로에 잘못 끼워 넣으면 이 테스트가 잡는다.
+    it("★ 저장된 context 아티팩트의 sources는 리포트에 전부 렌더된다 (ADR-013 상보성)", () => {
+      // loadStepOutput이 돌려주는 것과 같은 형태 — DB의 artifacts.content를 zod가 파싱한 결과다
+      const stored = MarketContextSchema.parse({
+        ...context,
+        sources: [
+          "https://example.com/plant-market-2026",
+          "https://example.com/planta-review",
+          "https://example.com/greenery-teardown",
+        ],
+      });
+
+      const rendered = renderReport(
+        IDEA,
+        stored,
+        thesis,
+        criticism,
+        solution,
+        verdict,
+      );
+
+      for (const source of stored.sources) {
+        expect(rendered, `리포트에서 사라진 출처: ${source}`).toContain(
+          `*   \`${source}\``,
+        );
+      }
+      expect(rendered).toContain(`미검증 출처 ${stored.sources.length}개`);
+
+      // 프롬프트 사본은 sources를 벗지만, 리포트가 받는 아티팩트는 벗지 않는다
+      expect(toPromptContext(stored)).not.toHaveProperty("sources");
+      expect(stored.sources).toHaveLength(3);
     });
 
     it("백틱이 든 source도 코드 스팬을 깨뜨리지 않는다", () => {

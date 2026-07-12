@@ -244,6 +244,41 @@ describe("YoutubeService.fetchComments", () => {
     ]);
   });
 
+  // ADR-016: 상한이 없으면 장문 댓글 몇 개가 하류 프롬프트를 무제한 팽창시킨다.
+  // HN(hackerNews.ts)이 이미 같은 규칙으로 1200자 컷을 하고 있다.
+  it("1200자를 초과하는 댓글은 자르지 않고 드롭한다", async () => {
+    const essay = "가".repeat(1201);
+    const fetchFn = fakeFetch(
+      jsonResponse({
+        items: [
+          commentItem(essay, "장문러", 5, "UgxLong"),
+          commentItem("짧은 댓글", "유저", 2, "UgxShort"),
+        ],
+      }),
+    );
+
+    const comments = await service(fetchFn).fetchComments("vid1");
+
+    expect(comments.map((c) => c.commentId)).toEqual(["UgxShort"]);
+    // 잘린 조각이 communityVoices에 실려 "원문 그대로 인용"으로 리포트에 나가면 원문 왜곡이다
+    for (const comment of comments) {
+      expect(comment.text.length).toBeLessThanOrEqual(1200);
+      expect(comment.text.startsWith("가가가")).toBe(false);
+    }
+  });
+
+  it("정확히 1200자인 댓글은 남는다 (경계값 — 초과분만 버린다)", async () => {
+    const exact = "가".repeat(1200);
+    const fetchFn = fakeFetch(
+      jsonResponse({ items: [commentItem(exact, "경계", 1, "UgxEdge")] }),
+    );
+
+    const comments = await service(fetchFn).fetchComments("vid1");
+
+    expect(comments).toHaveLength(1);
+    expect(comments[0].text).toBe(exact);
+  });
+
   it("commentThreads 엔드포인트에 part=snippet, order=relevance, maxResults, videoId, key를 담아 요청한다", async () => {
     const fetchFn = fakeFetch(jsonResponse({ items: [] }));
 
