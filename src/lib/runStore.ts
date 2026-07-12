@@ -14,6 +14,7 @@ import {
   type RunState,
   type StepState,
 } from "../types/index.js";
+import { estimateCostUsd, type CallUsage } from "./cost.js";
 import { openDb, type ArtifactKind } from "./db.js";
 
 /** step 산출물이 저장되는 artifacts.kind (ADR-014) */
@@ -70,6 +71,36 @@ export interface ListRunsOptions {
   q?: string;
   /** stalled 판정의 기준 시각 (테스트 주입용) */
   nowMs?: number;
+}
+
+/** label(에이전트) 하나가 쓴 비용. 재시도한 호출까지 전부 합산된다 */
+export interface LabelUsage {
+  label: string;
+  calls: number;
+  costUsd: number;
+  promptTokens: number;
+  outputTokens: number;
+  thoughtsTokens: number;
+}
+
+/** 한 run의 usage 집계 (ADR-016). usage 행이 없으면 전부 0 / 빈 배열이다 */
+export interface RunUsageSummary {
+  runId: string;
+  totalCostUsd: number;
+  totalTokens: number;
+  promptTokens: number;
+  cachedTokens: number;
+  outputTokens: number;
+  thoughtsTokens: number;
+  /** thinking이 과금 출력에서 차지하는 비중 (0~1). 출력이 0이면 0 */
+  thoughtsRatio: number;
+  /** grounded 호출 수. 토큰과 별개로 요청당 정액 과금된다 */
+  groundedCalls: number;
+  totalCalls: number;
+  /** 재시도로 낭비된 호출 수 (= totalCalls - label 수). 재시도가 비싼지 한눈에 본다 */
+  retryCalls: number;
+  /** label별 집계. 비싼 순 내림차순 */
+  byLabel: LabelUsage[];
 }
 
 /** LIKE의 와일드카드(%·_)를 리터럴로 만든다 — 사용자가 친 "100%"가 "아무거나"가 되면 안 된다 */
@@ -133,6 +164,27 @@ interface StepRow {
   completed_at: string | null;
   failed_at: string | null;
   error_message: string | null;
+}
+
+interface UsageTotalsRow {
+  cost_usd: number;
+  total_tokens: number;
+  prompt_tokens: number;
+  cached_tokens: number;
+  output_tokens: number;
+  thoughts_tokens: number;
+  grounded_calls: number;
+  total_calls: number;
+  labels: number;
+}
+
+interface LabelUsageRow {
+  label: string;
+  calls: number;
+  cost_usd: number;
+  prompt_tokens: number;
+  output_tokens: number;
+  thoughts_tokens: number;
 }
 
 /** DB 행 → RunState의 원시 형태. 검증은 zod가 한다 (DB는 바이트를, zod는 의미를 소유한다 — ADR-014) */
@@ -546,6 +598,110 @@ export class RunStore {
       .prepare("SELECT 1 FROM artifacts WHERE run_id = ? AND kind = ?")
       .get(runId, REPORT_KIND);
     return row !== undefined;
+  }
+
+  /**
+   * usage 한 행을 append한다 — UPSERT가 아니다 (ADR-016). 같은 label에 재시도 행이 여러 개
+   * 쌓이는 것이 정상이고, 덮어쓰면 이미 청구된 재시도 비용이 장부에서 사라진다.
+   *
+   * 다른 쓰기와 달리 삭제된 run에 대해 throw하지 않는다 — saveRun의 UPDATE-only 에러는 **상태**를
+   * 지키기 위한 불변식이지만(ADR-014/015), usage는 관측치다. 계측 실패가 파이프라인을 죽여선 안 된다.
+   */
+  saveUsage(runId: string, usage: CallUsage): void {
+    const nowIso = new Date().toISOString();
+    this.tx(() => {
+      const touched = this.db
+        .prepare("UPDATE runs SET updated_at = ? WHERE run_id = ?")
+        .run(nowIso, runId);
+      if (Number(touched.changes) === 0) {
+        return; // 삭제된 run에 쓰려는 좀비다. 아무 일도 일으키지 않는다
+      }
+      this.db
+        .prepare(
+          `INSERT INTO usage (run_id, label, model, grounded, attempt, prompt_tokens,
+                              cached_tokens, output_tokens, thoughts_tokens, total_tokens,
+                              cost_usd, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          runId,
+          usage.label,
+          usage.model,
+          usage.grounded ? 1 : 0,
+          usage.attempt,
+          usage.promptTokens,
+          usage.cachedTokens,
+          usage.outputTokens,
+          usage.thoughtsTokens,
+          usage.totalTokens,
+          estimateCostUsd(usage),
+          nowIso,
+        );
+    });
+  }
+
+  /**
+   * 집계는 SQL이 한다(SUM·GROUP BY). 행이 없으면 0으로 채운 요약이다 — null이 아니므로
+   * 호출부가 분기를 만들 필요가 없다. usage 이전에 만들어진 구 run이 그 경우다.
+   */
+  loadRunUsage(runId: string): RunUsageSummary {
+    const totals = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(cost_usd), 0)        AS cost_usd,
+           COALESCE(SUM(total_tokens), 0)    AS total_tokens,
+           COALESCE(SUM(prompt_tokens), 0)   AS prompt_tokens,
+           COALESCE(SUM(cached_tokens), 0)   AS cached_tokens,
+           COALESCE(SUM(output_tokens), 0)   AS output_tokens,
+           COALESCE(SUM(thoughts_tokens), 0) AS thoughts_tokens,
+           COALESCE(SUM(grounded), 0)        AS grounded_calls,
+           COUNT(*)                          AS total_calls,
+           COUNT(DISTINCT label)             AS labels
+         FROM usage WHERE run_id = ?`,
+      )
+      .get(runId) as unknown as UsageTotalsRow;
+
+    const rows = this.db
+      .prepare(
+        `SELECT label,
+                COUNT(*)               AS calls,
+                SUM(cost_usd)          AS cost_usd,
+                SUM(prompt_tokens)     AS prompt_tokens,
+                SUM(output_tokens)     AS output_tokens,
+                SUM(thoughts_tokens)   AS thoughts_tokens
+         FROM usage WHERE run_id = ?
+         GROUP BY label
+         ORDER BY SUM(cost_usd) DESC, label ASC`,
+      )
+      .all(runId) as unknown as LabelUsageRow[];
+
+    const outputTokens = Number(totals.output_tokens);
+    const thoughtsTokens = Number(totals.thoughts_tokens);
+    // thinking은 출력 요금으로 과금되므로 분모는 "과금되는 출력" 전체다 (ADR-016)
+    const billedOutput = outputTokens + thoughtsTokens;
+
+    return {
+      runId,
+      totalCostUsd: Number(totals.cost_usd),
+      totalTokens: Number(totals.total_tokens),
+      promptTokens: Number(totals.prompt_tokens),
+      cachedTokens: Number(totals.cached_tokens),
+      outputTokens,
+      thoughtsTokens,
+      thoughtsRatio: billedOutput === 0 ? 0 : thoughtsTokens / billedOutput,
+      groundedCalls: Number(totals.grounded_calls),
+      totalCalls: Number(totals.total_calls),
+      // label당 첫 시도를 제외한 나머지가 곧 재시도다. 재시도가 없으면 0이다
+      retryCalls: Number(totals.total_calls) - Number(totals.labels),
+      byLabel: rows.map((row) => ({
+        label: row.label,
+        calls: Number(row.calls),
+        costUsd: Number(row.cost_usd),
+        promptTokens: Number(row.prompt_tokens),
+        outputTokens: Number(row.output_tokens),
+        thoughtsTokens: Number(row.thoughts_tokens),
+      })),
+    };
   }
 
   /**

@@ -18,6 +18,7 @@ import {
   type RunState,
   type Solution,
 } from "../types/index.js";
+import { estimateCostUsd, type CallUsage } from "./cost.js";
 import { openDb } from "./db.js";
 import {
   RunNotFoundError,
@@ -115,6 +116,21 @@ const evidence: ResearchEvidence = {
     { source: "naver", status: "unconfigured", count: 0 },
   ],
 };
+
+/** Gemini 호출 한 번의 사용량. label 외에는 전부 기본값을 쓴다 */
+function usage(overrides: Partial<CallUsage> & { label: string }): CallUsage {
+  return {
+    model: "gemini-2.5-flash",
+    grounded: false,
+    attempt: 1,
+    promptTokens: 1_000,
+    cachedTokens: 0,
+    outputTokens: 500,
+    thoughtsTokens: 400,
+    totalTokens: 1_900,
+    ...overrides,
+  };
+}
 
 describe("RunStore", () => {
   let tmpDir: string;
@@ -764,6 +780,177 @@ describe("RunStore", () => {
       });
 
       expect(runs.map((r) => r.status)).toEqual(["stalled"]);
+    });
+  });
+
+  describe("saveUsage / loadRunUsage (비용은 관측된다 — ADR-016)", () => {
+    it("usage 한 행을 왕복하고 cost_usd는 estimateCostUsd와 일치한다", () => {
+      const { runId } = store.createRun("아이디어");
+      const call = usage({ label: "thesis" });
+
+      store.saveUsage(runId, call);
+
+      const summary = store.loadRunUsage(runId);
+      expect(summary.runId).toBe(runId);
+      expect(summary.totalCalls).toBe(1);
+      expect(summary.totalCostUsd).toBeCloseTo(estimateCostUsd(call), 10);
+      expect(summary.totalTokens).toBe(call.totalTokens);
+      expect(summary.promptTokens).toBe(call.promptTokens);
+      expect(summary.cachedTokens).toBe(call.cachedTokens);
+      expect(summary.outputTokens).toBe(call.outputTokens);
+      expect(summary.thoughtsTokens).toBe(call.thoughtsTokens);
+    });
+
+    // ★ 재시도가 장부에서 사라지면 "재시도를 줄이는 것이 이득인가"에 영영 답할 수 없다.
+    // UPSERT였다면 행이 1개로 뭉개지고 비용이 1/3로 보인다.
+    it("같은 label로 3번 저장하면 행이 3개 남고 비용이 3배다 (append-only)", () => {
+      const { runId } = store.createRun("아이디어");
+      const call = usage({ label: "cold-critic" });
+
+      store.saveUsage(runId, { ...call, attempt: 1 });
+      store.saveUsage(runId, { ...call, attempt: 2 });
+      store.saveUsage(runId, { ...call, attempt: 3 });
+
+      const summary = store.loadRunUsage(runId);
+      expect(countRows("usage", runId)).toBe(3);
+      expect(summary.totalCalls).toBe(3);
+      expect(summary.byLabel).toEqual([
+        expect.objectContaining({ label: "cold-critic", calls: 3 }),
+      ]);
+      expect(summary.totalCostUsd).toBeCloseTo(estimateCostUsd(call) * 3, 10);
+    });
+
+    it("재시도 없이 한 번씩만 성공한 run은 retryCalls가 0이다", () => {
+      const { runId } = store.createRun("아이디어");
+      store.saveUsage(runId, usage({ label: "thesis" }));
+      store.saveUsage(runId, usage({ label: "cold-critic" }));
+
+      const summary = store.loadRunUsage(runId);
+      expect(summary.totalCalls).toBe(2);
+      expect(summary.retryCalls).toBe(0);
+    });
+
+    it("retryCalls는 label당 첫 시도를 제외한 나머지 호출 수다", () => {
+      const { runId } = store.createRun("아이디어");
+      store.saveUsage(runId, usage({ label: "thesis", attempt: 1 }));
+      store.saveUsage(runId, usage({ label: "thesis", attempt: 2 }));
+      store.saveUsage(runId, usage({ label: "thesis", attempt: 3 }));
+      store.saveUsage(runId, usage({ label: "verdict", attempt: 1 }));
+
+      const summary = store.loadRunUsage(runId);
+      expect(summary.totalCalls).toBe(4);
+      expect(summary.retryCalls).toBe(2);
+    });
+
+    it("usage 행이 없는 구 run은 0으로 채운 요약이다 (null이 아니다)", () => {
+      const { runId } = store.createRun("아이디어");
+
+      expect(store.loadRunUsage(runId)).toEqual({
+        runId,
+        totalCostUsd: 0,
+        totalTokens: 0,
+        promptTokens: 0,
+        cachedTokens: 0,
+        outputTokens: 0,
+        thoughtsTokens: 0,
+        thoughtsRatio: 0,
+        groundedCalls: 0,
+        totalCalls: 0,
+        retryCalls: 0,
+        byLabel: [],
+      });
+    });
+
+    it("없는 run도 0으로 채운 요약이다 (throw하지 않는다)", () => {
+      expect(store.loadRunUsage("no-such-run").totalCalls).toBe(0);
+    });
+
+    it("thoughtsRatio는 thinking이 과금 출력에서 차지하는 비중이다", () => {
+      const { runId } = store.createRun("아이디어");
+      store.saveUsage(
+        runId,
+        usage({ label: "verdict", outputTokens: 250, thoughtsTokens: 750 }),
+      );
+
+      expect(store.loadRunUsage(runId).thoughtsRatio).toBeCloseTo(0.75, 10);
+    });
+
+    it("출력이 0이면 thoughtsRatio는 0이다 (0으로 나누지 않는다)", () => {
+      const { runId } = store.createRun("아이디어");
+      store.saveUsage(
+        runId,
+        usage({ label: "thesis", outputTokens: 0, thoughtsTokens: 0 }),
+      );
+
+      expect(store.loadRunUsage(runId).thoughtsRatio).toBe(0);
+    });
+
+    it("groundedCalls는 grounded 호출만 센다 — 요청당 정액 과금이라 따로 본다", () => {
+      const { runId } = store.createRun("아이디어");
+      store.saveUsage(runId, usage({ label: "context-hunter", grounded: true }));
+      store.saveUsage(runId, usage({ label: "context-hunter", grounded: true }));
+      store.saveUsage(runId, usage({ label: "thesis" }));
+
+      const summary = store.loadRunUsage(runId);
+      expect(summary.groundedCalls).toBe(2);
+      expect(summary.totalCalls).toBe(3);
+    });
+
+    it("byLabel은 비용 내림차순이다 — 어느 에이전트가 비싼지가 요점이다", () => {
+      const { runId } = store.createRun("아이디어");
+      store.saveUsage(runId, usage({ label: "interviewer", outputTokens: 10 }));
+      store.saveUsage(runId, usage({ label: "verdict", outputTokens: 5_000 }));
+      store.saveUsage(runId, usage({ label: "thesis", outputTokens: 500 }));
+
+      const byLabel = store.loadRunUsage(runId).byLabel;
+
+      expect(byLabel.map((row) => row.label)).toEqual([
+        "verdict",
+        "thesis",
+        "interviewer",
+      ]);
+      expect(byLabel[0]).toEqual({
+        label: "verdict",
+        calls: 1,
+        costUsd: estimateCostUsd(usage({ label: "verdict", outputTokens: 5_000 })),
+        promptTokens: 1_000,
+        outputTokens: 5_000,
+        thoughtsTokens: 400,
+      });
+    });
+
+    it("saveUsage가 runs.updated_at을 민다", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-12T00:00:00.000Z"));
+      const { runId } = store.createRun("아이디어");
+
+      const at = Date.parse("2026-07-12T00:07:00.000Z");
+      vi.setSystemTime(new Date(at));
+      store.saveUsage(runId, usage({ label: "thesis" }));
+
+      expect(store.loadRunRecord(runId)?.updatedAtMs).toBe(at);
+    });
+
+    // saveRun의 UPDATE-only 에러(ADR-014/015)는 **상태**를 지키기 위한 것이다. usage는 관측치다 —
+    // 계측 실패가 파이프라인을 죽이면 안 되므로, 삭제된 run에 대한 쓰기는 조용히 사라진다.
+    it("삭제된 run에 저장해도 throw하지 않고 조용히 무시한다", () => {
+      const { runId } = store.createRun("아이디어");
+      store.deleteRun(runId);
+
+      expect(() => store.saveUsage(runId, usage({ label: "thesis" }))).not.toThrow();
+      expect(countRows("usage", runId)).toBe(0);
+      expect(countRows("runs", runId)).toBe(0);
+    });
+
+    it("run을 지우면 usage도 CASCADE로 사라진다", () => {
+      const { runId } = store.createRun("아이디어");
+      store.saveUsage(runId, usage({ label: "thesis" }));
+      store.saveUsage(runId, usage({ label: "verdict" }));
+
+      store.deleteRun(runId);
+
+      expect(countRows("usage", runId)).toBe(0);
+      expect(store.loadRunUsage(runId).totalCalls).toBe(0);
     });
   });
 

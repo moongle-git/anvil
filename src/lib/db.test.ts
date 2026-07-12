@@ -1,9 +1,42 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ARTIFACT_KINDS, getDefaultDbPath, openDb } from "./db.js";
+
+/** usage 이전의 스키마. "기존 data/anvil.db를 열어도 살아남는가"를 검증하려면 v1을 직접 지어야 한다 */
+const V1_DDL = `
+CREATE TABLE IF NOT EXISTS runs (
+  run_id       TEXT PRIMARY KEY,
+  idea         TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  completed_at TEXT,
+  interview    INTEGER NOT NULL DEFAULT 0,
+  rerun_of     TEXT REFERENCES runs(run_id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS steps (
+  run_id        TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  ordinal       INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  started_at    TEXT,
+  completed_at  TEXT,
+  failed_at     TEXT,
+  error_message TEXT,
+  PRIMARY KEY (run_id, name)
+);
+CREATE TABLE IF NOT EXISTS artifacts (
+  run_id     TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (run_id, kind)
+);
+CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
+`;
 
 let tmpDir: string;
 let open: DatabaseSync[];
@@ -51,6 +84,15 @@ function insertArtifact(db: DatabaseSync, runId: string, kind: string): void {
   ).run(runId, kind, "2026-07-12T00:00:00.000Z");
 }
 
+function insertUsage(db: DatabaseSync, runId: string, label: string): void {
+  db.prepare(
+    `INSERT INTO usage (run_id, label, model, grounded, attempt, prompt_tokens,
+                        cached_tokens, output_tokens, thoughts_tokens, total_tokens,
+                        cost_usd, created_at)
+     VALUES (?, ?, 'gemini-2.5-flash', 0, 1, 100, 0, 50, 20, 170, 0.001, ?)`,
+  ).run(runId, label, "2026-07-12T00:00:00.000Z");
+}
+
 function countRows(db: DatabaseSync, table: string, runId: string): number {
   const row = db
     .prepare(`SELECT count(*) AS n FROM ${table} WHERE run_id = ?`)
@@ -74,11 +116,17 @@ afterEach(() => {
 
 describe("openDb", () => {
   describe("스키마", () => {
-    it("3개 테이블과 schema_version을 만든다", () => {
+    it("도메인 테이블 3개 + 관측 테이블 usage + schema_version을 만든다", () => {
       const db = track(openDb(":memory:"));
 
       expect(tableNames(db)).toEqual(
-        expect.arrayContaining(["runs", "steps", "artifacts", "schema_version"]),
+        expect.arrayContaining([
+          "runs",
+          "steps",
+          "artifacts",
+          "usage",
+          "schema_version",
+        ]),
       );
     });
 
@@ -92,12 +140,37 @@ describe("openDb", () => {
       expect(indexes.map((row) => row.name)).toContain("idx_runs_created_at");
     });
 
-    it("schema_version에 1을 기록한다", () => {
+    it("usage의 run_id 인덱스를 만든다 — run별 비용 집계다 (ADR-016)", () => {
+      const db = track(openDb(":memory:"));
+
+      const indexes = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+        .all() as { name: string }[];
+
+      expect(indexes.map((row) => row.name)).toContain("idx_usage_run_id");
+    });
+
+    it("usage에 PK가 없다 — 같은 (run_id, label)에 재시도 행이 여러 개 생기는 게 정상이다", () => {
+      const db = track(openDb(":memory:"));
+      insertRun(db, "run-1");
+
+      // PK나 UNIQUE가 있으면 두 번째 INSERT가 깨진다. 재시도 비용은 장부에서 사라지면 안 된다
+      insertUsage(db, "run-1", "thesis");
+      insertUsage(db, "run-1", "thesis");
+
+      expect(countRows(db, "usage", "run-1")).toBe(2);
+      const columns = db.prepare("PRAGMA table_info(usage)").all() as {
+        pk: number;
+      }[];
+      expect(columns.every((column) => column.pk === 0)).toBe(true);
+    });
+
+    it("schema_version에 2를 기록한다 — usage 테이블이 추가됐다 (ADR-016)", () => {
       const db = track(openDb(":memory:"));
 
       const rows = db.prepare("SELECT version FROM schema_version").all();
 
-      expect(rows).toEqual([{ version: 1 }]);
+      expect(rows).toEqual([{ version: 2 }]);
     });
 
     it("에이전트 산출물을 컬럼으로 쪼개지 않는다 — artifacts는 content 한 덩어리다 (ADR-014)", () => {
@@ -155,7 +228,29 @@ describe("openDb", () => {
       expect(countRows(second, "runs", "run-1")).toBe(1);
       expect(
         second.prepare("SELECT version FROM schema_version").all(),
-      ).toEqual([{ version: 1 }]);
+      ).toEqual([{ version: 2 }]);
+    });
+
+    // usage 추가는 IF NOT EXISTS 증분이라 변환할 기존 데이터가 없다 — 마이그레이션 러너를 두지
+    // 않는 근거다 (ADR-014). 그 대신 이 테스트가 "기존 DB를 열어도 데이터가 살아 있다"를 지킨다.
+    it("v1 DB를 열면 usage 테이블만 더해지고 version이 2가 된다 — 기존 데이터는 보존된다", () => {
+      const dbPath = path.join(tmpDir, "anvil.db");
+      const v1 = new DatabaseSync(dbPath);
+      v1.exec("PRAGMA foreign_keys = ON");
+      v1.exec(V1_DDL);
+      v1.prepare("INSERT INTO schema_version (version) VALUES (1)").run();
+      insertRun(v1, "old-run");
+      insertArtifact(v1, "old-run", "report");
+      v1.close();
+
+      const upgraded = track(openDb(dbPath));
+
+      expect(countRows(upgraded, "runs", "old-run")).toBe(1);
+      expect(countRows(upgraded, "artifacts", "old-run")).toBe(1);
+      expect(tableNames(upgraded)).toContain("usage");
+      expect(
+        upgraded.prepare("SELECT version FROM schema_version").all(),
+      ).toEqual([{ version: 2 }]);
     });
 
     it("상위 디렉토리가 없으면 만든다", () => {
@@ -184,18 +279,29 @@ describe("openDb", () => {
       );
     });
 
-    it("run을 지우면 steps·artifacts가 CASCADE로 함께 사라진다 (ADR-015)", () => {
+    it("존재하지 않는 run_id로 usage에 INSERT하면 실패한다", () => {
+      const db = track(openDb(":memory:"));
+
+      expect(() => insertUsage(db, "ghost", "thesis")).toThrow(
+        /FOREIGN KEY constraint failed/i,
+      );
+    });
+
+    it("run을 지우면 steps·artifacts·usage가 CASCADE로 함께 사라진다 (ADR-015)", () => {
       const db = track(openDb(":memory:"));
       insertRun(db, "run-1");
       insertStep(db, "run-1", "context-hunter");
       insertStep(db, "run-1", "thesis");
       insertArtifact(db, "run-1", "context");
       insertArtifact(db, "run-1", "report");
+      insertUsage(db, "run-1", "thesis");
+      insertUsage(db, "run-1", "cold-critic");
 
       db.prepare("DELETE FROM runs WHERE run_id = ?").run("run-1");
 
       expect(countRows(db, "steps", "run-1")).toBe(0);
       expect(countRows(db, "artifacts", "run-1")).toBe(0);
+      expect(countRows(db, "usage", "run-1")).toBe(0);
     });
 
     it("원본 run을 지워도 재실행 run은 살아남고 rerun_of만 NULL이 된다 (ADR-015)", () => {

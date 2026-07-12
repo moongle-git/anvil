@@ -21,7 +21,10 @@
     {
       "step": 2,
       "name": "usage-store",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-12T21:55:27+0900",
+      "summary": "usage 저장 계층 (배선은 step 3). (1) src/lib/db.ts — usage 테이블 추가: (run_id TEXT REFERENCES runs ON DELETE CASCADE, label, model, grounded INTEGER 0|1, attempt INTEGER, prompt_tokens, cached_tokens, output_tokens, thoughts_tokens, total_tokens, cost_usd REAL, created_at) + idx_usage_run_id. **PK 없음** — 같은 (run_id,label)에 재시도 행이 여러 개 생기는 것이 정상이고 (run_id,label,attempt)조차 resume 시 attempt가 1부터 재시작해 충돌한다. 컬럼명은 step 1의 CallUsage와 1:1 대응한다(ADR-016 본문의 agent/ok/input_tokens/thinking_tokens 이름과는 다르다 — step 1이 이미 label/grounded/promptTokens로 확정했고 ok는 두지 않는다. 재시도 여부는 attempt와 retryCalls로 드러난다). SCHEMA_VERSION 1→2, 시딩은 행이 있으면 UPDATE·없으면 INSERT(멱등). 마이그레이션 러너 없음 — IF NOT EXISTS 증분이라 변환할 데이터가 없다. (2) src/lib/runStore.ts — saveUsage(runId: string, usage: CallUsage): void — append-only INSERT(UPSERT 아님), cost_usd는 estimateCostUsd(usage)로 계산, runs.updated_at을 갱신하되 **삭제된 run이면 조용히 무시(throw 없음 — 계측이 파이프라인을 죽이지 않는다)**. loadRunUsage(runId: string): RunUsageSummary — SQL SUM·GROUP BY 집계, 행이 없으면 0으로 채운 요약(null 아님). RunUsageSummary { runId, totalCostUsd, totalTokens, promptTokens, cachedTokens, outputTokens, thoughtsTokens, thoughtsRatio(=thoughts/(output+thoughts), 분모 0이면 0), groundedCalls, totalCalls, retryCalls(=totalCalls - DISTINCT label 수), byLabel: LabelUsage[] }, LabelUsage { label, calls, costUsd, promptTokens, outputTokens, thoughtsTokens } — byLabel은 비용 내림차순. (3) 테스트 +18: db.test.ts 6개(usage 테이블·인덱스 생성, PK 부재, FK 위반 throw, run 삭제 시 CASCADE, schema_version=2, v1 DB를 열면 usage만 추가되고 기존 데이터 보존 ★), runStore.test.ts 13개(왕복·cost_usd 일치, 같은 label 3회 → 행 3개·비용 3배 ★ append-only, retryCalls, 빈 요약, thoughtsRatio·0 나눗셈, groundedCalls, byLabel 정렬, updated_at 갱신, 삭제된 run에 throw 없음, CASCADE). 실 DB 사본(run 11개) 검증: openDb 후 runs 11·artifacts 54·steps 50 보존, usage 생성, version 2.",
+      "completed_at": "2026-07-12T22:02:00+0900"
     },
     {
       "step": 3,

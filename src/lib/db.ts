@@ -21,10 +21,11 @@ export const ARTIFACT_KINDS = [
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
 /**
- * 스키마 버전은 기록만 한다. 마이그레이션 러너는 만들지 않는다 —
- * 스키마 v2가 실제로 필요해질 때 이 값을 근거로 짓는다 (ADR-014).
+ * 스키마 버전은 기록만 한다. 마이그레이션 러너는 만들지 않는다 (ADR-014) —
+ * v2(usage 테이블 추가)는 IF NOT EXISTS 증분이라 변환할 기존 데이터가 없다.
+ * 기존 DB는 테이블만 더해지고 행은 그대로 살아 있다.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const DDL = `
 CREATE TABLE IF NOT EXISTS runs (
@@ -57,9 +58,29 @@ CREATE TABLE IF NOT EXISTS artifacts (
   PRIMARY KEY (run_id, kind)
 );
 
+-- 산출물이 아니라 사건 로그다 (ADR-016). Gemini 호출 1회 = 1행이며, 검증에 실패한 시도도
+-- 과금되므로 행으로 남는다. 그래서 PK가 없다 — 같은 (run_id, label)에 재시도 행이 여러 개
+-- 생기는 것이 정상이고, (run_id, label, attempt)조차 resume 시 attempt가 1부터 재시작해 충돌한다.
+CREATE TABLE IF NOT EXISTS usage (
+  run_id          TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+  label           TEXT NOT NULL,             -- 에이전트 이름 (thesis, cold-critic, …)
+  model           TEXT NOT NULL,
+  grounded        INTEGER NOT NULL,          -- 0|1. 토큰과 별개로 요청당 정액 과금된다
+  attempt         INTEGER NOT NULL,          -- 1부터. 재시도한 시도도 과금되므로 행이 여러 개다
+  prompt_tokens   INTEGER NOT NULL,
+  cached_tokens   INTEGER NOT NULL,          -- prompt_tokens에 이미 포함된 값이다 (중복 아님)
+  output_tokens   INTEGER NOT NULL,
+  thoughts_tokens INTEGER NOT NULL,          -- thinking. 출력 요금으로 과금된다 (ADR-016)
+  total_tokens    INTEGER NOT NULL,
+  cost_usd        REAL NOT NULL,             -- 추정치다. 청구서가 아니다
+  created_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_usage_run_id ON usage(run_id);
 `;
 
 /** ANVIL_DB_PATH ?? <repo-root>/data/anvil.db */
@@ -93,6 +114,8 @@ export function openDb(dbPath: string): DatabaseSync {
 
   db.exec(DDL);
 
+  // 빈 DB면 시딩하고, 이미 있으면 갱신한다. 상수만 올리고 INSERT만 하면 기존 DB는 옛 번호로
+  // 남아 같은 스키마에 두 버전 번호가 생긴다 — 그걸 맞출 마이그레이션 러너는 없다 (ADR-014).
   const seeded = db
     .prepare("SELECT count(*) AS count FROM schema_version")
     .get() as { count: number };
@@ -100,6 +123,8 @@ export function openDb(dbPath: string): DatabaseSync {
     db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(
       SCHEMA_VERSION,
     );
+  } else {
+    db.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
   }
 
   return db;
