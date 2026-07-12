@@ -13,6 +13,7 @@ import {
 } from "../types/index.js";
 import {
   VERDICT_PROMPT_TEMPLATE,
+  VERDICT_THINKING_BUDGET,
   VERDICT_SYSTEM_PROMPT,
   runVerdict,
   type VerdictDeps,
@@ -303,5 +304,16 @@ describe("VERDICT_SYSTEM_PROMPT (판정 계약)", () => {
   it("conditions는 검증 가능한 조건이어야 한다고 지시한다", () => {
     expect(VERDICT_SYSTEM_PROMPT).toContain("검증 가능");
     expect(VERDICT_SYSTEM_PROMPT).toContain("희망");
+  });
+});
+
+describe("thinking 상한 (ADR-016)", () => {
+  it("자기 budget 상수를 넘긴다 — 판정 품질 때문에 분리한 에이전트다 (ADR-010)", async () => {
+    const { generateStructured } = await callVerdict();
+
+    expect(generateStructured.mock.calls[0][0].thinkingBudget).toBe(
+      VERDICT_THINKING_BUDGET,
+    );
+    expect(VERDICT_THINKING_BUDGET).toBeGreaterThan(0);
   });
 });

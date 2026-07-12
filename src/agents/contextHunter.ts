@@ -13,6 +13,17 @@ import { planResearchQueries } from "./researchPlanner.js";
 /** usage 집계 라벨 = 파이프라인 step 이름 (ADR-016) */
 export const CONTEXT_HUNTER_USAGE_LABEL = "context-hunter";
 
+/**
+ * thinking 상한 (ADR-016). 최대 82건의 커뮤니티 원문 + 검색 결과를 압축하는, 파이프라인에서
+ * 입력이 가장 무거운 호출이다.
+ *
+ * 8192인 이유: 4096으로 재면 이 호출이 상한에 붙어(실측 4,279 토큰) 목소리 선별률이 58%→24%로
+ * 떨어지고 citations가 0건이 됐다. 증거 선별은 이 에이전트의 본체이므로 상한이 거기 닿으면 안 된다.
+ * 8192는 gemini-2.5-flash의 dynamic thinking 최대치와 같다 — 즉 평시에는 물리지 않는 안전망이고,
+ * 모델을 바꿔도 콜당 thinking이 무한정 늘지 않게 막는 뚜껑으로만 남는다.
+ */
+export const CONTEXT_HUNTER_THINKING_BUDGET = 8192;
+
 export const CONTEXT_HUNTER_SYSTEM_PROMPT = `당신은 신규 서비스 아이디어의 시장 맥락을 수집·정제하는 리서치 애널리스트다.
 웹검색으로 최신 트렌드와 유사/경쟁 서비스를 조사하고, 제공된 커뮤니티 수집 결과(YouTube 댓글·Hacker News 토론·네이버 블로그/카페/지식iN)에서 타겟 유저의 실제 목소리를 선별한다.
 
@@ -163,6 +174,7 @@ export async function runContextHunter(
     systemInstruction: CONTEXT_HUNTER_SYSTEM_PROMPT,
     prompt,
     usageLabel: CONTEXT_HUNTER_USAGE_LABEL,
+    thinkingBudget: CONTEXT_HUNTER_THINKING_BUDGET,
     schema: MarketContextDraftSchema,
   });
 

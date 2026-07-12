@@ -10,6 +10,7 @@ import {
 } from "../types/index.js";
 import {
   SOLUTION_DESIGNER_PROMPT_TEMPLATE,
+  SOLUTION_DESIGNER_THINKING_BUDGET,
   SOLUTION_DESIGNER_SYSTEM_PROMPT,
   runSolutionDesigner,
   type SolutionDesignerDeps,
@@ -250,4 +251,17 @@ describe("SOLUTION_DESIGNER 프롬프트 (合 = 피벗 전략)", () => {
       expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).not.toContain(legacyField);
     },
   );
+});
+
+describe("thinking 상한 (ADR-016)", () => {
+  it("자기 budget 상수를 넘긴다 — 合은 리포트의 가장 중요한 섹션이라 끄지 않는다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await runSolutionDesigner(deps, IDEA, MARKET_CONTEXT, CRITICISM, THESIS);
+
+    expect(generateStructured.mock.calls[0][0].thinkingBudget).toBe(
+      SOLUTION_DESIGNER_THINKING_BUDGET,
+    );
+    expect(SOLUTION_DESIGNER_THINKING_BUDGET).toBeGreaterThan(0);
+  });
 });

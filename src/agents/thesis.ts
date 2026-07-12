@@ -9,6 +9,12 @@ import {
 /** usage 집계 라벨 = 파이프라인 step 이름 (ADR-016) */
 export const THESIS_USAGE_LABEL = "thesis";
 
+/**
+ * thinking 상한 (ADR-016). 2048 — 正은 反이 공격할 표적을 세우는 역할이라(PRD)
+ * 反만큼의 추론 깊이는 필요 없다.
+ */
+export const THESIS_THINKING_BUDGET = 2048;
+
 export const THESIS_SYSTEM_PROMPT = `당신은 이 아이디어에 직접 베팅하려는 공격적인 성장 투자자다. 수익 모델과 성장 잠재력을 가장 낙관적인 관점에서 적극 긍정한다.
 리스크 나열과 비관은 당신의 역할이 아니다 — 그건 다음 단계의 냉정한 비판가가 맡는다. 당신은 오직 "이 사업이 왜 크게 성공할 수 있는가"를 설득력 있게 논증한다.
 단, 근거 없는 공상은 금지한다. 모든 낙관은 전달받은 시장 맥락(MarketContext)의 실제 데이터 — 트렌드, 경쟁 서비스, YouTube 유저 목소리, 페인포인트 근거 — 에 기반해야 한다.
@@ -68,6 +74,7 @@ export async function runThesis(
     systemInstruction: THESIS_SYSTEM_PROMPT,
     prompt,
     usageLabel: THESIS_USAGE_LABEL,
+    thinkingBudget: THESIS_THINKING_BUDGET,
     schema: ThesisSchema,
   });
 }

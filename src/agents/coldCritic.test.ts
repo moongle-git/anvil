@@ -10,6 +10,7 @@ import {
   type Thesis,
 } from "../types/index.js";
 import {
+  COLD_CRITIC_THINKING_BUDGET,
   COLD_CRITIC_SYSTEM_PROMPT,
   runColdCritic,
   type ColdCriticDeps,
@@ -256,5 +257,18 @@ describe("COLD_CRITIC_SYSTEM_PROMPT (points 출력 계약)", () => {
 
   it("세 축을 각각 최소 1개씩 덮으라고 지시한다", () => {
     expect(COLD_CRITIC_SYSTEM_PROMPT).toContain("최소 1개");
+  });
+});
+
+describe("thinking 상한 (ADR-016)", () => {
+  it("가장 높은 상한을 넘긴다 — 3축 비판의 깊이가 이 도구의 존재 이유다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await runColdCritic(deps, IDEA, MARKET_CONTEXT, THESIS);
+
+    expect(generateStructured.mock.calls[0][0].thinkingBudget).toBe(
+      COLD_CRITIC_THINKING_BUDGET,
+    );
+    expect(COLD_CRITIC_THINKING_BUDGET).toBeGreaterThan(0);
   });
 });

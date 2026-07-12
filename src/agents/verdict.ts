@@ -14,6 +14,12 @@ import {
 /** usage 집계 라벨 = 파이프라인 step 이름 (ADR-016) */
 export const VERDICT_USAGE_LABEL = "verdict";
 
+/**
+ * thinking 상한 (ADR-016). 2048 — 판정 품질 때문에 별도 에이전트로 분리한 만큼(ADR-010)
+ * thinking을 끄지는 않는다. 끄는 것과 상한을 두는 것은 다르다.
+ */
+export const VERDICT_THINKING_BUDGET = 2048;
+
 /** 밴드는 스키마의 refine이 검증한다. 프롬프트가 같은 숫자를 말해야 재시도 루프가 돌지 않는다. */
 function band(recommendation: Recommendation): string {
   const { min, max } = RECOMMENDATION_SCORE_BANDS[recommendation];
@@ -98,6 +104,7 @@ export async function runVerdict(
     systemInstruction: VERDICT_SYSTEM_PROMPT,
     prompt,
     usageLabel: VERDICT_USAGE_LABEL,
+    thinkingBudget: VERDICT_THINKING_BUDGET,
     schema: VerdictSchema,
   });
 }

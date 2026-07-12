@@ -9,6 +9,7 @@ import {
 } from "../types/index.js";
 import {
   THESIS_PROMPT_TEMPLATE,
+  THESIS_THINKING_BUDGET,
   THESIS_SYSTEM_PROMPT,
   runThesis,
   type ThesisDeps,
@@ -180,5 +181,18 @@ describe("THESIS_SYSTEM_PROMPT (points 출력 계약)", () => {
 describe("THESIS_PROMPT_TEMPLATE (세 축 커버리지 요구)", () => {
   it.each(DIALECTIC_AXES)("축 %s의 낙관 주장을 요구한다", (axis) => {
     expect(THESIS_PROMPT_TEMPLATE).toContain(axis);
+  });
+});
+
+describe("thinking 상한 (ADR-016)", () => {
+  it("자기 budget 상수를 넘긴다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await runThesis(deps, IDEA, MARKET_CONTEXT);
+
+    expect(generateStructured.mock.calls[0][0].thinkingBudget).toBe(
+      THESIS_THINKING_BUDGET,
+    );
+    expect(THESIS_THINKING_BUDGET).toBeGreaterThan(0);
   });
 });

@@ -42,6 +42,8 @@ export interface GenerateStructuredParams<T> {
   schema: ZodType<T>;
   /** 어느 에이전트의 호출인가 (usage 집계용) */
   usageLabel: string;
+  /** thinking 토큰 상한. 0이면 thinking을 끈다. 생략하면 모델 기본값 (ADR-016) */
+  thinkingBudget?: number;
 }
 
 export interface GenerateGroundedParams<T> {
@@ -52,6 +54,8 @@ export interface GenerateGroundedParams<T> {
   usageLabel: string;
   /** 경쟁사 공식 페이지를 모델이 직접 읽게 한다 (ADR-012). 기본 true */
   useUrlContext?: boolean;
+  /** thinking 토큰 상한. 0이면 thinking을 끈다. 생략하면 모델 기본값 (ADR-016) */
+  thinkingBudget?: number;
 }
 
 /**
@@ -101,6 +105,25 @@ function stripNullProps(value: unknown): unknown {
     return out;
   }
   return value;
+}
+
+/**
+ * thinking 상한을 config 조각으로 만든다 (ADR-016 결정 4).
+ *
+ * gemini-2.5-flash는 thinkingConfig가 없으면 **동적 thinking이 기본 ON**이고(콜당 최대 8,192
+ * 토큰), thinking 토큰은 출력 요금으로 과금된다. 그래서 상한을 둔다 — 끄지는 않는다.
+ * 생략(undefined)의 의미는 "모델 기본값"이므로 그때는 키 자체를 넣지 않는다. 모델을 바꿨을 때
+ * 예상 밖의 강제가 걸리지 않게 하기 위해서다.
+ *
+ * includeThoughts: false — thought 원문을 응답으로 받아올 이유가 없다. 받으면 그것도 토큰이다.
+ */
+function thinkingConfigOf(
+  thinkingBudget: number | undefined,
+): Pick<GenerateContentConfig, "thinkingConfig"> {
+  if (thinkingBudget === undefined) {
+    return {};
+  }
+  return { thinkingConfig: { thinkingBudget, includeThoughts: false } };
 }
 
 function extractJsonText(text: string): string {
@@ -326,13 +349,15 @@ export class GeminiService {
   }
 
   async generateStructured<T>(params: GenerateStructuredParams<T>): Promise<T> {
-    const { systemInstruction, prompt, schema, usageLabel } = params;
+    const { systemInstruction, prompt, schema, usageLabel, thinkingBudget } =
+      params;
 
     const { data } = await this.generateValidated({
       baseConfig: {
         systemInstruction,
         responseMimeType: "application/json",
         responseJsonSchema: z.toJSONSchema(schema),
+        ...thinkingConfigOf(thinkingBudget),
       },
       basePrompt: prompt,
       schema,
@@ -359,6 +384,7 @@ export class GeminiService {
       schema,
       usageLabel,
       useUrlContext = true,
+      thinkingBudget,
     } = params;
 
     const tools = useUrlContext
@@ -366,7 +392,12 @@ export class GeminiService {
       : [{ googleSearch: {} }];
 
     const { data, responses } = await this.generateValidated({
-      baseConfig: { systemInstruction, tools },
+      // googleSearch·urlContext 도구와 thinkingConfig는 병용 가능하다
+      baseConfig: {
+        systemInstruction,
+        tools,
+        ...thinkingConfigOf(thinkingBudget),
+      },
       basePrompt: `${prompt}\n\n${JSON_ONLY_INSTRUCTION}`,
       schema,
       maxRetries: this.groundedMaxRetries,

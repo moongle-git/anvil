@@ -7,6 +7,12 @@ import { SearchQueriesSchema, type SearchQueries } from "../types/index.js";
  */
 export const RESEARCH_PLANNER_USAGE_LABEL = "research-planner";
 
+/**
+ * thinking 상한 (ADR-016). 0 — 아이디어를 소스별 검색어로 바꾸는 형식 변환이다.
+ * 판단이 아니라 생성이므로 추론이 필요 없다.
+ */
+export const RESEARCH_PLANNER_THINKING_BUDGET = 0;
+
 export const RESEARCH_PLANNER_SYSTEM_PROMPT = `당신은 아이디어를 읽고 소스별 검색어를 설계하는 리서치 플래너다. 당신은 검색을 수행하지 않는다 — 다음 단계의 리서치 애널리스트가 실제로 던질 검색어만 만든다.
 
 ## 검색어 설계 원칙
@@ -64,6 +70,7 @@ export async function planResearchQueries(
       systemInstruction: RESEARCH_PLANNER_SYSTEM_PROMPT,
       prompt,
       usageLabel: RESEARCH_PLANNER_USAGE_LABEL,
+      thinkingBudget: RESEARCH_PLANNER_THINKING_BUDGET,
       schema: SearchQueriesSchema,
     });
   } catch (error) {

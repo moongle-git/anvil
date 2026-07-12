@@ -4,7 +4,11 @@ import {
   InterviewQuestionsSchema,
   type InterviewQuestions,
 } from "../types/index.js";
-import { runInterviewer, type InterviewerDeps } from "./interviewer.js";
+import {
+  INTERVIEWER_THINKING_BUDGET,
+  runInterviewer,
+  type InterviewerDeps,
+} from "./interviewer.js";
 
 const IDEA = "AI로 사람들을 도와주는 앱";
 
@@ -79,5 +83,18 @@ describe("runInterviewer", () => {
     const result = await runInterviewer(deps, "명확한 아이디어");
 
     expect(result.questions).toEqual([]);
+  });
+});
+
+describe("thinking 상한 (ADR-016)", () => {
+  it("thinking을 끈다 — 질문 생성은 판단이 아니라 형식 변환이다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await runInterviewer(deps, IDEA);
+
+    expect(generateStructured.mock.calls[0][0].thinkingBudget).toBe(
+      INTERVIEWER_THINKING_BUDGET,
+    );
+    expect(INTERVIEWER_THINKING_BUDGET).toBe(0);
   });
 });

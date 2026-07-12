@@ -3,6 +3,7 @@ import type { GeminiService } from "../services/gemini.js";
 import { SearchQueriesSchema, type SearchQueries } from "../types/index.js";
 import {
   RESEARCH_PLANNER_PROMPT_TEMPLATE,
+  RESEARCH_PLANNER_THINKING_BUDGET,
   RESEARCH_PLANNER_SYSTEM_PROMPT,
   planResearchQueries,
   type ResearchPlannerDeps,
@@ -189,5 +190,18 @@ describe("RESEARCH_PLANNER_PROMPT_TEMPLATE", () => {
   it("{idea}와 {clarifications} placeholder를 갖는다", () => {
     expect(RESEARCH_PLANNER_PROMPT_TEMPLATE).toContain("{idea}");
     expect(RESEARCH_PLANNER_PROMPT_TEMPLATE).toContain("{clarifications}");
+  });
+});
+
+describe("thinking 상한 (ADR-016)", () => {
+  it("thinking을 끈다 — 검색어 생성은 판단이 아니라 형식 변환이다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await planResearchQueries(deps, IDEA);
+
+    expect(generateStructured.mock.calls[0][0].thinkingBudget).toBe(
+      RESEARCH_PLANNER_THINKING_BUDGET,
+    );
+    expect(RESEARCH_PLANNER_THINKING_BUDGET).toBe(0);
   });
 });

@@ -828,3 +828,97 @@ describe("usage 계측 (onUsage — ADR-016)", () => {
     ).resolves.toEqual({ title: "아이디어", score: 42 });
   });
 });
+
+describe("thinkingBudget (ADR-016 결정 4)", () => {
+  function grounding(client: GoogleGenAI): GeminiService {
+    return new GeminiService({ apiKey: "test-key" }, client);
+  }
+
+  it("thinkingBudget: 0이면 구조화 호출의 thinking을 끈다", async () => {
+    const { client, generateContent } = fakeClient(VALID_JSON);
+
+    await service(client).generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "research-planner",
+      thinkingBudget: 0,
+    });
+
+    expect(generateContent.mock.calls[0][0].config.thinkingConfig).toEqual({
+      thinkingBudget: 0,
+      // thought 원문을 받아올 이유가 없다 — 받으면 그것도 토큰이다
+      includeThoughts: false,
+    });
+  });
+
+  it("thinkingBudget을 생략하면 thinkingConfig 자체를 넣지 않는다 (모델 기본값)", async () => {
+    const { client, generateContent } = fakeClient(VALID_JSON);
+
+    await service(client).generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "test",
+    });
+
+    const { config } = generateContent.mock.calls[0][0];
+    expect(config.thinkingConfig).toBeUndefined();
+    expect("thinkingConfig" in config).toBe(false);
+  });
+
+  it("grounded 호출도 tool과 함께 thinkingConfig를 싣는다", async () => {
+    const { client, generateContent } = fakeClient(VALID_JSON);
+
+    await grounding(client).generateGrounded({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "context-hunter",
+      thinkingBudget: 4096,
+    });
+
+    const { config } = generateContent.mock.calls[0][0];
+    // googleSearch·urlContext와 thinkingConfig는 병용 가능하다
+    expect(config.tools).toEqual([{ googleSearch: {} }, { urlContext: {} }]);
+    expect(config.thinkingConfig).toEqual({
+      thinkingBudget: 4096,
+      includeThoughts: false,
+    });
+  });
+
+  it("grounded 호출도 thinkingBudget을 생략하면 thinkingConfig가 없다", async () => {
+    const { client, generateContent } = fakeClient(VALID_JSON);
+
+    await grounding(client).generateGrounded({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "test",
+    });
+
+    expect(
+      "thinkingConfig" in generateContent.mock.calls[0][0].config,
+    ).toBe(false);
+  });
+
+  it("재시도한 시도에도 같은 상한이 걸린다 — 재시도가 가장 비싼 경로다", async () => {
+    const { client, generateContent } = fakeClient("이것은 JSON이 아님", VALID_JSON);
+
+    await service(client).generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "cold-critic",
+      thinkingBudget: 2048,
+    });
+
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    for (const call of generateContent.mock.calls) {
+      expect(call[0].config.thinkingConfig).toEqual({
+        thinkingBudget: 2048,
+        includeThoughts: false,
+      });
+    }
+  });
+});

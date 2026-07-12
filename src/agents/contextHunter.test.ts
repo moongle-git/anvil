@@ -21,6 +21,7 @@ import {
 } from "../types/index.js";
 import {
   CONTEXT_HUNTER_PROMPT_TEMPLATE,
+  CONTEXT_HUNTER_THINKING_BUDGET,
   CONTEXT_HUNTER_SYSTEM_PROMPT,
   runContextHunter,
   type ContextHunterDeps,
@@ -754,5 +755,18 @@ describe("CONTEXT_HUNTER_SYSTEM_PROMPT (인사이트 변환 지시)", () => {
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("communityVoiceRefs");
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("다시 받아적지 않는다");
     expect(CONTEXT_HUNTER_SYSTEM_PROMPT).toContain("코드가 그 ID로 복원한다");
+  });
+});
+
+describe("thinking 상한 (ADR-016)", () => {
+  it("grounded 호출에 자기 budget 상수를 넘긴다", async () => {
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA);
+
+    expect(generateGrounded.mock.calls[0][0].thinkingBudget).toBe(
+      CONTEXT_HUNTER_THINKING_BUDGET,
+    );
+    expect(CONTEXT_HUNTER_THINKING_BUDGET).toBeGreaterThan(0);
   });
 });
