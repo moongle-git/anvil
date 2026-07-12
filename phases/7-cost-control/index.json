@@ -7,7 +7,8 @@
       "name": "design-docs",
       "status": "completed",
       "started_at": "2026-07-12T21:40:56+0900",
-      "summary": "ADR-016(비용을 관측 가능하게 만들고 thinking에 상한을 둔다) 추가 — 결정 4개: (1) usage는 artifacts가 아닌 새 관측 테이블 usage(id PK AUTOINCREMENT, run_id CASCADE, agent, model, attempt, ok, input_tokens, output_tokens, thinking_tokens, cached_tokens, cost_usd REAL, created_at) + idx_usage_run_id — 자연키(run_id,agent,attempt)는 resume 시 attempt가 1부터 재시작해 충돌하므로 대리키를 쓴다, schema_version은 1 유지 (2) 검증 실패한 시도도 ok=0으로 기록 (형식이 실패한 것이지 청구가 실패한 게 아니다 — ADR-013과 같은 논리) (3) GeminiService는 DB를 모른다 — onUsage 콜백으로 흘리고 cli/가 배선 (4) thinking은 끄지 않고 에이전트별 thinkingBudget 상한: researchPlanner·interviewer 0, contextHunter·thesis 2048, coldCritic·solutionDesigner·verdict 4096. 기각: explicit/implicit 캐싱(입력은 비용의 8%뿐 — cached_tokens 계측 후 다음 phase에서 결정), flash-lite 강등, Batch API, sources[] 스키마 제거(ADR-013 상보성 유지 — 하류 프롬프트에서만 뺀다). ARCHITECTURE에 usage DDL·'비용은 관측된다' 패턴·lib/cost 추가, CLAUDE.md에 usage 기록 규칙 1줄 추가. 코드 무변경."
+      "summary": "ADR-016(비용을 관측 가능하게 만들고 thinking에 상한을 둔다) 추가 — 결정 4개: (1) usage는 artifacts가 아닌 새 관측 테이블 usage(id PK AUTOINCREMENT, run_id CASCADE, agent, model, attempt, ok, input_tokens, output_tokens, thinking_tokens, cached_tokens, cost_usd REAL, created_at) + idx_usage_run_id — 자연키(run_id,agent,attempt)는 resume 시 attempt가 1부터 재시작해 충돌하므로 대리키를 쓴다, schema_version은 1 유지 (2) 검증 실패한 시도도 ok=0으로 기록 (형식이 실패한 것이지 청구가 실패한 게 아니다 — ADR-013과 같은 논리) (3) GeminiService는 DB를 모른다 — onUsage 콜백으로 흘리고 cli/가 배선 (4) thinking은 끄지 않고 에이전트별 thinkingBudget 상한: researchPlanner·interviewer 0, contextHunter·thesis 2048, coldCritic·solutionDesigner·verdict 4096. 기각: explicit/implicit 캐싱(입력은 비용의 8%뿐 — cached_tokens 계측 후 다음 phase에서 결정), flash-lite 강등, Batch API, sources[] 스키마 제거(ADR-013 상보성 유지 — 하류 프롬프트에서만 뺀다). ARCHITECTURE에 usage DDL·'비용은 관측된다' 패턴·lib/cost 추가, CLAUDE.md에 usage 기록 규칙 1줄 추가. 코드 무변경.",
+      "completed_at": "2026-07-12T21:45:44+0900"
     },
     {
       "step": 1,
