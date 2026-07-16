@@ -254,7 +254,13 @@ async function main(): Promise<void> {
       {
         store,
         createGemini: (onUsage) =>
-          new GeminiService({ apiKey: geminiKey, onUsage }),
+          // 일시적 오류(503·429) 재시도는 조용히 넘어가면 "왜 이 step이 오래 걸렸나"를
+          // 나중에 설명할 수 없다. 진행 로그와 같은 stderr로 보낸다.
+          new GeminiService({
+            apiKey: geminiKey,
+            onUsage,
+            log: (message) => console.error(message),
+          }),
         sources: buildResearchSources(process.env),
       },
       args,

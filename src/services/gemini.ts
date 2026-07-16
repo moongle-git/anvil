@@ -20,6 +20,42 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_GROUNDED_TIMEOUT_MS = 180_000;
 // grounding 실패는 대개 JSON 형식이라 2회면 잡힌다. 3회째가 살리는 경우는 드물다.
 const DEFAULT_GROUNDED_MAX_RETRIES = 2;
+// 503("high demand")·429는 용량 스파이크라 대개 수 초 안에 풀린다. 초기 1회 + 재시도 2회면
+// 순간 스파이크는 넘긴다. 그래도 안 되면 모델이 실제로 오래 포화된 것이라, 더 기다리는 것보다
+// 실패로 알리는 편이 낫다 — 파이프라인은 resume으로 이어서 돌릴 수 있다.
+const DEFAULT_TRANSPORT_MAX_ATTEMPTS = 3;
+const DEFAULT_TRANSPORT_BACKOFF_MS = 1_000;
+
+/**
+ * 재시도해서 의미가 있는 HTTP 상태 — Google이 SDK 기본값으로 쓰는 목록과 같다
+ * (@google/genai의 DEFAULT_RETRY_HTTP_STATUS_CODES).
+ *
+ * 503 UNAVAILABLE·429는 "지금 서버가 바쁘다"는 뜻이라 **같은 요청이 잠시 뒤 그대로 성공한다**.
+ * 반대로 400·401·403·404는 요청 자체가 틀렸다는 뜻이라 백 번을 보내도 같은 답이 온다 —
+ * 재시도하면 진짜 원인이 백오프 뒤에 묻히기만 한다.
+ */
+const RETRYABLE_HTTP_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+
+/**
+ * 이 에러가 "잠시 뒤 다시 보내면 될" 종류인가.
+ *
+ * SDK의 ApiError는 status(HTTP 코드)를 싣는다. instanceof 대신 형태로 판별한다 —
+ * SDK 버전이나 스트리밍 경로에 따라 클래스가 달라져도 status의 의미는 같기 때문이다.
+ *
+ * status가 없는 에러(withTimeout의 시간 초과, 코드 버그)는 재시도하지 않는다. 특히 타임아웃은
+ * 의도적으로 제외한다 — 아래 callWithTransportRetry의 시간 예산 설명을 보라.
+ */
+export function isRetryableTransportError(error: unknown): boolean {
+  if (error === null || typeof error !== "object" || !("status" in error)) {
+    return false;
+  }
+  const { status } = error as { status: unknown };
+  return typeof status === "number" && RETRYABLE_HTTP_STATUS.has(status);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export interface GeminiServiceOptions {
   apiKey: string;
@@ -28,12 +64,18 @@ export interface GeminiServiceOptions {
   timeoutMs?: number;
   groundedTimeoutMs?: number;
   groundedMaxRetries?: number;
+  /** 일시적 전송 오류(503·429)의 최대 시도 횟수 (초기 호출 포함). 1이면 재시도하지 않는다 */
+  transportMaxAttempts?: number;
+  /** 전송 재시도의 지수 백오프 기준 간격. 0이면 즉시 재시도한다 (테스트용) */
+  transportBackoffMs?: number;
   /**
    * 매 generateContent 응답마다(재시도·검증 실패 포함) 호출된다 (ADR-016).
    * 서비스는 "얼마 썼다"를 알릴 뿐, 그것을 어디에 적을지는 배선하는 쪽(cli/)이 정한다 —
    * services/는 DB를 모른다.
    */
   onUsage?: (usage: CallUsage) => void;
+  /** 일시적 오류를 삼키고 재시도할 때 그 사실을 알린다 — 없으면 조용히 재시도한다 */
+  log?: (message: string) => void;
 }
 
 export interface GenerateStructuredParams<T> {
@@ -215,7 +257,10 @@ export class GeminiService {
   private readonly timeoutMs: number;
   private readonly groundedMaxRetries: number;
   private readonly groundedTimeoutMs: number;
+  private readonly transportMaxAttempts: number;
+  private readonly transportBackoffMs: number;
   private readonly onUsage: ((usage: CallUsage) => void) | undefined;
+  private readonly log: ((message: string) => void) | undefined;
 
   constructor(options: GeminiServiceOptions, client?: GoogleGenAI) {
     this.client = client ?? new GoogleGenAI({ apiKey: options.apiKey });
@@ -226,7 +271,73 @@ export class GeminiService {
       options.groundedMaxRetries ?? DEFAULT_GROUNDED_MAX_RETRIES;
     this.groundedTimeoutMs =
       options.groundedTimeoutMs ?? DEFAULT_GROUNDED_TIMEOUT_MS;
+    this.transportMaxAttempts =
+      options.transportMaxAttempts ?? DEFAULT_TRANSPORT_MAX_ATTEMPTS;
+    this.transportBackoffMs =
+      options.transportBackoffMs ?? DEFAULT_TRANSPORT_BACKOFF_MS;
     this.onUsage = options.onUsage;
+    this.log = options.log;
+  }
+
+  /**
+   * 물리적 HTTP 호출 1회 + 일시적 실패(503·429)에 대한 재시도.
+   *
+   * **왜 검증 재시도와 분리했는가.** 503은 모델이 응답을 준 적이 없다는 뜻이다. 이것을
+   * generateValidated의 재시도로 처리하면 두 가지가 동시에 망가진다 — (1) 존재하지도 않는
+   * '직전 응답'을 고치라는 [교정 요청] 프롬프트가 나가고, (2) 용량 스파이크 한 번이 자가 교정
+   * 예산을 갉아먹는다. 형식 오류(응답은 왔으나 틀림)와 전송 오류(응답이 없음)는 다른 실패이고,
+   * 처방도 다르다: 전자는 고쳐서 다시 묻고, 후자는 **같은 것을 그대로** 다시 묻는다.
+   *
+   * **시간 예산.** 타임아웃은 재시도하지 않기 때문에(isRetryableTransportError) 한 번의 검증
+   * 시도 안에서 타임아웃은 최대 1회만 일어난다 — 나머지 전송 시도는 즉시 실패하는 503류다.
+   * 그래서 최악의 경우도 `검증 재시도 × (타임아웃 1회 + 백오프 ~3초)`로 묶인다:
+   * grounding 2 × (180초 + 3초) ≈ 6분으로, STALLED_THRESHOLD_MS(15분) 안에 그대로 남는다.
+   * 타임아웃까지 재시도하면 이 곱이 터져 웹 UI가 정상 run을 "중단됨"으로 오탐한다.
+   */
+  private async callWithTransportRetry(
+    request: { model: string; contents: string; config: GenerateContentConfig },
+    timeoutMs: number,
+  ): Promise<GenerateContentResponse> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        // abortSignal로 실제 HTTP 요청을 취소하고, withTimeout으로 SDK가 signal을
+        // 무시하더라도 반드시 시간 상한 안에서 promise가 정착하도록 이중으로 막는다.
+        // signal은 시도마다 새로 만든다 — 재사용하면 두 번째 시도가 이미 흘러간 시계를
+        // 물려받아 즉시 중단된다.
+        return await withTimeout(
+          this.client.models.generateContent({
+            ...request,
+            config: {
+              ...request.config,
+              abortSignal: AbortSignal.timeout(timeoutMs),
+            },
+          }),
+          timeoutMs,
+          "Gemini 호출",
+        );
+      } catch (error) {
+        if (!isRetryableTransportError(error)) {
+          throw error;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        if (attempt >= this.transportMaxAttempts) {
+          // 원문(서버가 뭐라 했는가)과 시도 횟수(일회성이 아니었다)를 함께 남긴다.
+          // cause로 원본을 보존해 status를 잃지 않는다.
+          throw new Error(
+            `Gemini 호출이 일시적 오류로 ${attempt}회 모두 실패했다: ${message}`,
+            { cause: error },
+          );
+        }
+        // 지수 백오프 — 용량 포화(503)를 즉시 다시 때리면 같은 벽에 부딪힌다.
+        // 지터는 여러 run이 같은 순간 깨어나 동시에 재시도하는 것을 흩는다.
+        const base = this.transportBackoffMs * 2 ** (attempt - 1);
+        const delay = base + Math.random() * base * 0.25;
+        this.log?.(
+          `[gemini] 일시적 오류로 재시도한다 (${attempt}/${this.transportMaxAttempts}, ${Math.round(delay)}ms 후): ${message}`,
+        );
+        await sleep(delay);
+      }
+    }
   }
 
   /**
@@ -301,16 +412,11 @@ export class GeminiService {
           ? basePrompt
           : `${basePrompt}\n\n[교정 요청] 직전 응답이 검증에 실패했다. 아래 에러를 해결한 JSON을 다시 출력하라.\n${lastError}`;
 
-      // abortSignal로 실제 HTTP 요청을 취소하고, withTimeout으로 SDK가 signal을
-      // 무시하더라도 반드시 시간 상한 안에서 promise가 정착하도록 이중으로 막는다
-      const response = await withTimeout(
-        this.client.models.generateContent({
-          model: this.model,
-          contents,
-          config: { ...baseConfig, abortSignal: AbortSignal.timeout(timeoutMs) },
-        }),
+      // 503·429 같은 일시적 실패는 여기서 흡수된다 — 이 루프의 attempt는 소비되지 않는다.
+      // 응답이 아예 오지 않은 것은 교정할 형식 오류가 아니기 때문이다.
+      const response = await this.callWithTransportRetry(
+        { model: this.model, contents, config: baseConfig },
         timeoutMs,
-        "Gemini 호출",
       );
 
       // 검증 결과와 무관하게 누적한다 — 이 시도의 검색은 이미 일어났다

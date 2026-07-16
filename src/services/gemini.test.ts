@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { ApiError } from "@google/genai";
 import type { GenerateContentResponse, GoogleGenAI } from "@google/genai";
 import type { CallUsage } from "../lib/cost.js";
 import {
   DEFAULT_GEMINI_MODEL,
   GeminiService,
   extractCitations,
+  type GeminiServiceOptions,
 } from "./gemini.js";
 
 const TestSchema = z.object({
@@ -18,15 +20,23 @@ interface FakeClient {
   generateContent: ReturnType<typeof vi.fn>;
 }
 
-/** 응답 본문(text)만 주거나, grounding metadata·usageMetadata까지 실은 raw 응답을 준다 */
+/**
+ * 응답 본문(text)만 주거나, grounding metadata·usageMetadata까지 실은 raw 응답을 준다.
+ * Error를 주면 그 시도는 reject한다 — 503 같은 전송 실패를 재현한다.
+ */
 type FakeResponse =
   | string
   | undefined
+  | Error
   | { text?: string; candidates?: unknown[]; usageMetadata?: unknown };
 
 function fakeClient(...responses: FakeResponse[]): FakeClient {
   const generateContent = vi.fn();
   for (const response of responses) {
+    if (response instanceof Error) {
+      generateContent.mockRejectedValueOnce(response);
+      continue;
+    }
     generateContent.mockResolvedValueOnce(
       typeof response === "object" ? response : { text: response },
     );
@@ -472,6 +482,198 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
         usageLabel: "test",
       }),
     ).rejects.toThrow(/시간 초과/);
+  });
+});
+
+describe("일시적 전송 오류 재시도 (503/429)", () => {
+  /**
+   * SDK가 실제로 던지는 에러다 — message는 응답 본문 JSON 전문, status는 HTTP 코드.
+   * 실측된 시장조사 실패의 원문:
+   * {"error":{"code":503,"message":"This model is currently experiencing high demand...","status":"UNAVAILABLE"}}
+   */
+  function apiError(code: number, status: string, message: string): ApiError {
+    return new ApiError({
+      message: JSON.stringify({ error: { code, message, status } }),
+      status: code,
+    });
+  }
+
+  const OVERLOADED = (): ApiError =>
+    apiError(
+      503,
+      "UNAVAILABLE",
+      "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+    );
+  const RATE_LIMITED = (): ApiError =>
+    apiError(429, "RESOURCE_EXHAUSTED", "Quota exceeded.");
+  const BAD_REQUEST = (): ApiError =>
+    apiError(400, "INVALID_ARGUMENT", "Invalid JSON payload.");
+
+  /** 백오프를 0으로 둬야 테스트가 실제로 잠들지 않는다 */
+  function resilient(
+    client: GoogleGenAI,
+    overrides: Partial<GeminiServiceOptions> = {},
+  ): GeminiService {
+    return new GeminiService(
+      { apiKey: "test-key", transportBackoffMs: 0, ...overrides },
+      client,
+    );
+  }
+
+  const structured = {
+    systemInstruction: "system",
+    prompt: "원본 프롬프트",
+    schema: TestSchema,
+    usageLabel: "test",
+  };
+
+  it("503 UNAVAILABLE로 실패하면 재시도해 성공 응답을 반환한다", async () => {
+    const { client, generateContent } = fakeClient(OVERLOADED(), VALID_JSON);
+
+    const result = await resilient(client).generateStructured(structured);
+
+    expect(result).toEqual({ title: "아이디어", score: 42 });
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("429 RESOURCE_EXHAUSTED도 재시도 대상이다", async () => {
+    const { client, generateContent } = fakeClient(RATE_LIMITED(), VALID_JSON);
+
+    await expect(
+      resilient(client).generateStructured(structured),
+    ).resolves.toEqual({ title: "아이디어", score: 42 });
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("★ 전송 재시도는 원본 프롬프트를 그대로 다시 보낸다 — 교정 요청이 아니다", async () => {
+    // 503은 모델이 응답을 준 적이 없다는 뜻이다. 교정하라고 시키면 존재하지도 않는
+    // '직전 응답'을 고치라는 말이 되어 모델을 오염시킨다.
+    const { client, generateContent } = fakeClient(OVERLOADED(), VALID_JSON);
+
+    await resilient(client).generateStructured(structured);
+
+    const retryContents = generateContent.mock.calls[1][0].contents as string;
+    expect(retryContents).toBe("원본 프롬프트");
+    expect(retryContents).not.toContain("교정 요청");
+  });
+
+  it("★ 전송 재시도는 검증 재시도 예산을 쓰지 않는다", async () => {
+    // 503(응답 없음)과 형식 오류(응답은 왔으나 틀림)는 다른 실패다. 503이 교정 예산을
+    // 갉아먹으면, 용량 스파이크 한 번에 자가 교정 기회가 통째로 사라진다.
+    const invalid = JSON.stringify({ title: "아이디어", score: "높음" });
+    const { client, generateContent } = fakeClient(
+      OVERLOADED(),
+      invalid,
+      VALID_JSON,
+    );
+
+    const result = await resilient(client, {
+      maxRetries: 2,
+    }).generateStructured(structured);
+
+    // maxRetries=2인데도 3번 호출됐다 — 503은 검증 시도로 세지 않았다는 뜻이다
+    expect(result).toEqual({ title: "아이디어", score: 42 });
+    expect(generateContent).toHaveBeenCalledTimes(3);
+  });
+
+  it("503이 계속되면 시도 횟수와 원인을 담아 던진다", async () => {
+    const { client, generateContent } = fakeClient(
+      OVERLOADED(),
+      OVERLOADED(),
+      OVERLOADED(),
+    );
+
+    const call = resilient(client, {
+      transportMaxAttempts: 3,
+    }).generateStructured(structured);
+
+    // 원인 진단에 필요한 것: 몇 번 시도했는가와 서버가 뭐라 했는가
+    await expect(call).rejects.toThrow(/3회/);
+    await expect(call).rejects.toThrow(/high demand/);
+    expect(generateContent).toHaveBeenCalledTimes(3);
+  });
+
+  it("★ 400 INVALID_ARGUMENT는 재시도하지 않고 즉시 던진다", async () => {
+    // 요청 자체가 틀렸다는 뜻이다 — 백 번을 보내도 같은 답이 온다.
+    // 재시도하면 진짜 원인이 백오프 뒤에 묻히고 과금만 3배가 된다.
+    const { client, generateContent } = fakeClient(BAD_REQUEST(), VALID_JSON);
+
+    await expect(
+      resilient(client).generateStructured(structured),
+    ).rejects.toThrow(/INVALID_ARGUMENT/);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("★ 시간 초과는 재시도하지 않는다 (STALLED 예산 보호)", async () => {
+    // 503은 즉시 실패라 재시도가 싸지만, 타임아웃은 이미 timeoutMs를 통째로 태운
+    // 뒤다. 그것까지 재시도하면 `검증 재시도 × 전송 재시도 × 타임아웃`이 곱해져
+    // runStore의 STALLED_THRESHOLD_MS(15분)를 넘고, 웹 UI가 정상 run을 중단됨으로 오탐한다.
+    const { client } = hangingClient();
+
+    await expect(
+      resilient(client, { timeoutMs: 20, maxRetries: 1 }).generateStructured(
+        structured,
+      ),
+    ).rejects.toThrow(/시간 초과/);
+    // hangingClient는 영원히 pending이므로 호출 수 단언 대신 시간 초과 전파로 검증한다
+  });
+
+  it("전송 재시도 사이에는 백오프를 두어 즉시 다시 때리지 않는다", async () => {
+    const { client } = fakeClient(OVERLOADED(), VALID_JSON);
+    const started = Date.now();
+
+    await resilient(client, { transportBackoffMs: 40 }).generateStructured(
+      structured,
+    );
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+  });
+
+  it("실패한 전송 시도는 과금되지 않으므로 usage를 기록하지 않는다", async () => {
+    // 503은 응답 본문이 없다 = 토큰을 쓴 적이 없다. 검증 실패(과금됨)와 정반대다.
+    const usages: CallUsage[] = [];
+    const { client } = fakeClient(OVERLOADED(), {
+      text: VALID_JSON,
+      usageMetadata: { promptTokenCount: 10, totalTokenCount: 12 },
+    });
+
+    await new GeminiService(
+      {
+        apiKey: "test-key",
+        transportBackoffMs: 0,
+        onUsage: (usage) => usages.push(usage),
+      },
+      client,
+    ).generateStructured(structured);
+
+    expect(usages).toHaveLength(1);
+    expect(usages[0].attempt).toBe(1);
+  });
+
+  it("★ grounding 경로도 전송 오류를 재시도한다 (시장조사가 503으로 죽던 경로)", async () => {
+    const { client, generateContent } = fakeClient(
+      OVERLOADED(),
+      grounded(VALID_JSON, {
+        chunks: [{ web: { uri: "https://a.dev", title: "A" } }],
+        queries: ["시장 규모"],
+      }),
+    );
+
+    const result = await resilient(client, {
+      groundedMaxRetries: 2,
+    }).generateGrounded({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: TestSchema,
+      usageLabel: "context-hunter",
+    });
+
+    expect(result.data).toEqual({ title: "아이디어", score: 42 });
+    // 503으로 날아간 시도는 인용을 남기지 않지만, 살아남은 시도의 인용은 온전하다
+    expect(result.citations).toEqual([
+      { uri: "https://a.dev", title: "A", kind: "redirect" },
+    ]);
+    expect(generateContent).toHaveBeenCalledTimes(2);
   });
 });
 
