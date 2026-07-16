@@ -1,0 +1,49 @@
+{
+  "project": "anvil",
+  "phase": "8-fatal-remedy",
+  "steps": [
+    {
+      "step": 0,
+      "name": "design-docs",
+      "status": "completed",
+      "started_at": "2026-07-17T01:15:34+0900",
+      "summary": "ADR-017 '치명적 결함에는 해결책이 따라야 한다'를 docs/ADR.md에 추가하고 ARCHITECTURE(패턴 2줄 + 데이터 흐름 원장 + types/ledger)·PRD(합 섹션 각주 + 리포트 5절 원장 규격)·CLAUDE.md(CRITICAL 1줄)를 갱신. 코드 무변경. 결정 4개: (1) Solution.remedies[] = {respondsTo: CriticismPoint.id, strategy: defend|bypass, remedy: string}, fatal 전건 커버리지 강제 + synthesis의 .optional() 제거; (2) Verdict.remedyAudits[] = {criticismId, assessment: solid|restated|dismissed, note}; (3) 교차검증은 src/types/의 스키마 팩토리 solutionSchemaFor(criticism)/verdictSchemaFor(criticism) — superRefine으로 참조 무결성·fatal 커버리지·중복 검사, 반환 z.ZodType<T>라 generateStructured 재시도 루프를 그대로 탐, 공유 어휘는 새 파일 src/types/ledger.ts (Remedy·RemedyAudit·fatalIds·danglingRefs·uncoveredFatalIds); (4) 코드는 침묵·참조 무결성·귀속만 소유하고 유효성 판단은 판정에 남긴다 (ADR-013의 유비가 절반만 적용 — 외부 정답지가 없다). 정적 스키마는 .default([])로 관대, 팩토리만 엄격 (관대한 읽기/엄격한 쓰기 — 웹 읽기 경로는 정적 스키마 유지). floor(점수 하한)·accept 출구·자기신고 코드주입·rebuts 교차검증·major 전건강제는 기각. 정보 차단벽: 재설계 프롬프트에 점수 규칙 금지(step 2). ⚠️ step 0 지시서의 '태깅 2/5' 실측은 DB 전수조사 결과 거짓 — 5개 run 전부가 모든 fatal id를 revisedConcept에 언급하며(형식만 5가지로 제각각) ADR에 정정을 명시했다. 나머지 실측(잔존 fatal 0건 4/5, 472fc2만 1건, 점수 65/65/65/75/75, abandon 0회, rebuts dangling 0/16, synthesis 없음 = 구형식 criticism 5건과 정확히 일치)은 전부 사실로 확인. 결정 1의 superRefine은 기존 5개 run 어디에도 걸리지 않는다 — 결정 1은 기반(원장을 주소지정 가능하게)이고 결정 2가 지렛대(6af78e의 c5 재주장·c1 기각이 승인된 실제 결함)."
+    },
+    {
+      "step": 1,
+      "name": "remedy-schema",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "solution-remedy-agent",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "verdict-audit-agent",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "pipeline-wiring",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "report-ledger",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "web-ledger",
+      "status": "pending"
+    },
+    {
+      "step": 7,
+      "name": "final-verify",
+      "status": "pending"
+    }
+  ],
+  "created_at": "2026-07-17T01:15:34+0900"
+}

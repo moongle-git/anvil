@@ -14,7 +14,9 @@ src/
 │                      #   runStore (SQLite 저장소 — run·step·artifact·usage CRUD + listRuns),
 │                      #   cost (모델 단가표 + 토큰→USD 추정 — 순수 함수. 추정치이지 청구서가 아니다),
 │                      #   report (Markdown 렌더러), html (HTML 태그·엔티티 제거)
-└── types/             # zod 스키마 + TypeScript 타입 (RunState, MarketContext, Criticism, Solution)
+└── types/             # zod 스키마 + TypeScript 타입 (RunState, MarketContext, Criticism, Solution),
+                       #   ledger (合의 원장·판정의 감사가 공유하는 어휘 — Remedy, RemedyAudit,
+                       #     참조 무결성·침묵 검사 순수 함수. severity가 dialectic에 사는 것과 같은 이유 — ADR-017)
 
 web/                   # Next.js App Router 웹 UI (npm workspace) — 1-web-ui phase
 ├── src/app/           # 라우트: / (홈), /runs/[id] (진행/리포트), /compare, /api/*
@@ -75,6 +77,8 @@ usage(run_id REFERENCES runs ON DELETE CASCADE, label, model, grounded, attempt,
 - **저장소는 바이트를, zod는 의미를** (ADR-014): 에이전트 산출물은 artifacts 테이블에 JSON 문자열로 통째로 들어간다. 컬럼으로 정규화하지 않는다. 스키마의 권위는 zod 단독이다.
 - **삭제는 CASCADE, 재실행은 포크** (ADR-015): run 삭제는 FK `ON DELETE CASCADE`로 steps·artifacts를 함께 지운다(`running` run은 삭제 불가). 재실행은 원본을 덮어쓰지 않고 `idea`·`questions`·`answers`만 복사한 새 run을 만들어 자료조사부터 다시 돈다. 계보는 `runs.rerun_of`에 남는다.
 - **비용은 관측된다** (ADR-016): 모든 Gemini 호출은 **재시도까지 포함해** `usage` 테이블에 한 행씩 기록된다 — 검증에 실패한 시도도 과금되므로 자기 행을 남긴다(형식이 실패한 것이지 청구가 실패한 게 아니다). thinking 토큰은 출력 요금으로 과금되므로 `thoughts_tokens` 컬럼으로 분리해 본다. thinking은 끄지 않고 에이전트별 `thinkingBudget`으로 상한만 둔다(기계적 에이전트 0, 추론 에이전트 2048~8192). `GeminiService`는 **DB를 모른다** — usage를 `onUsage` 콜백으로 흘려보내고, DB 기록은 `cli/`가 배선한다(서비스 레이어 격리). 계측 결과 run 비용의 **65%가 `context-hunter`** 하나이고(grounding 정액 + 형식 실패 재시도), thinking은 예상(58%)보다 훨씬 작았다(실측 21.6%) — ADR-016 "실측 결과" 참조.
+- **교차 산출물 검증은 스키마 팩토리다** (ADR-017): 하류 산출물의 스키마는 상류를 알 수 있다. 상류는 하류를 모른다 — 의존은 파이프라인이 흐르는 방향으로만 흐른다. `solutionSchemaFor(criticism)`·`verdictSchemaFor(criticism)`은 여전히 `ZodType<Solution>`·`ZodType<Verdict>`이므로 ADR-004의 자가 교정 루프를 그대로 탄다(에러 메시지가 곧 재시도 피드백이다). 검증을 orchestrator로 빼면 `generateStructured`가 반환한 **뒤**라 재시도가 붙지 않는다.
+- **치명적 결함에는 해결책이 따른다** (ADR-017): 反이 `severity: "fatal"`로 판정한 비판은 合이 전부 해결책(`solution.remedies[]`)을 내야 하고, 판정이 그것을 항목별로 감사한다(`verdict.remedyAudits[]` — `solid`/`restated`/`dismissed`). **코드는 침묵**(재설계가 어떤 fatal에 대해 아무 말도 하지 않음)**·참조 무결성·귀속만 소유하고, 유효성 판단은 판정에 남긴다** — "이 해결책이 유효한가"는 어떤 API 응답에도 없어 주입할 사실이 존재하지 않기 때문이다(ADR-013의 유비가 절반만 적용되는 이유). 점수 하한(floor) 강제는 ADR-010 위반이라 두지 않는다.
 
 ## 데이터 흐름
 ```
@@ -96,7 +100,13 @@ usage(run_id REFERENCES runs ON DELETE CASCADE, label, model, grounded, attempt,
   → step: thesis (正)     (gemini, context 주입)             → artifacts.kind=thesis
   → step: cold-critic (反) (gemini, context+thesis 주입)      → artifacts.kind=criticism
   → step: solution-designer (合) (gemini, context+thesis+criticism 주입) → artifacts.kind=solution
+      └ remedies[]: 결함별 해결책 원장 (respondsTo=CriticismPoint.id, strategy=defend|bypass)
+          └ solutionSchemaFor(criticism)이 fatal 전건 커버리지·참조 무결성을 강제 — ADR-017
+            (재설계는 점수 규칙을 모른다. 알면 점수를 위해 해결책을 지어낸다)
   → step: verdict         (gemini, context+正+反+合 주입)     → artifacts.kind=verdict
+      └ remedyAudits[]: 해결책 감사 (criticismId, assessment=solid|restated|dismissed)
+          └ verdictSchemaFor(criticism)이 fatal 전건 감사·참조 무결성을 강제 — ADR-017
+            (판정은 비판의 severity를 못 바꾼다. 상류에서 동결된다)
   → lib/report 렌더러 → artifacts.kind=report (마크다운 원문) → CLI가 완료 출력
 ```
 - step의 진행 상태(`status`·타임스탬프·`error_message`)는 `steps` 테이블에, run 단위 메타(`idea`·`completed_at`·`updated_at`·`rerun_of`)는 `runs` 테이블에 기록된다.

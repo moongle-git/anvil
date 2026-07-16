@@ -39,6 +39,10 @@
       "dir": "7-cost-control",
       "status": "completed",
       "completed_at": "2026-07-12T22:54:33+0900"
+    },
+    {
+      "dir": "8-fatal-remedy",
+      "status": "pending"
     }
   ]
 }
