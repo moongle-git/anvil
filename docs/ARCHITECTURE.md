@@ -15,8 +15,11 @@ src/
 │                      #   cost (모델 단가표 + 토큰→USD 추정 — 순수 함수. 추정치이지 청구서가 아니다),
 │                      #   report (Markdown 렌더러), html (HTML 태그·엔티티 제거)
 └── types/             # zod 스키마 + TypeScript 타입 (RunState, MarketContext, Criticism, Solution),
-                       #   ledger (合의 원장·판정의 감사가 공유하는 어휘 — Remedy, RemedyAudit,
-                       #     참조 무결성·침묵 검사 순수 함수. severity가 dialectic에 사는 것과 같은 이유 — ADR-017)
+                       #   ledger (合의 원장·판정의 감사가 공유하는 어휘 — 참조 무결성·침묵 검사
+                       #     순수 함수(fatalIds·danglingRefs·uncoveredFatalIds·duplicateRefs)와
+                       #     렌더러용 파생 buildLedger/LedgerEntry. Remedy는 solution.ts에,
+                       #     RemedyAudit은 verdict.ts에 산다 — 각자 자기 산출물의 필드다.
+                       #     severity가 dialectic에 사는 것과 같은 이유 — ADR-017)
 
 web/                   # Next.js App Router 웹 UI (npm workspace) — 1-web-ui phase
 ├── src/app/           # 라우트: / (홈), /runs/[id] (진행/리포트), /compare, /api/*

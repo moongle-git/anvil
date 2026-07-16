@@ -135,6 +135,7 @@ const solution: Solution = {
   monetization: "구독 모델",
   revisedConcept: "제로 UI 식물 집사",
   synthesis: "낙관과 비판을 종합하면 데이터 축적이 핵심 해자다",
+  remedies: [],
 };
 
 const verdict: Verdict = {
@@ -150,6 +151,7 @@ const verdict: Verdict = {
     },
   ],
   conditions: ["출시 6개월 내 리텐션 D30 20% 확보"],
+  remedyAudits: [],
 };
 
 interface FakeGemini {

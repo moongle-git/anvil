@@ -226,6 +226,7 @@ const SOLUTION_TEXT = JSON.stringify({
   dataFlywheel: "가정별 생육 로그가 진단 정확도를 높인다",
   monetization: "진단 무료, 케어 플랜 구독 월 4,900원",
   revisedConcept: "리마인더가 아니라 조기 진단으로 축을 옮긴다",
+  synthesis: "저빈도 고통은 진단 축으로 옮겨야 지불 의사가 생긴다",
 });
 
 const VERDICT_TEXT = JSON.stringify({
