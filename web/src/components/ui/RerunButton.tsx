@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "./Button";
 
-const SUBTITLE = "자료조사부터 다시";
+const TOOLTIP = "자료조사부터 다시";
 
 interface RerunButtonProps {
   /** 새 run을 만들고 그 상세로 이동시킨다. 실패 처리(에러 표시)는 호출부가 소유한다 */
@@ -14,7 +14,7 @@ interface RerunButtonProps {
  * 재실행(rerun) 진입 (UI_GUIDE "재실행 버튼").
  *
  * resume("이어서 실행")과 다른 버튼이다 — resume은 중단 지점부터, rerun은 자료조사부터다.
- * 그래서 Secondary이고(완료된 run의 주인공은 리포트다) 부제로 범위를 밝힌다.
+ * 그래서 Secondary이고(완료된 run의 주인공은 리포트다) 툴팁으로 범위를 밝힌다.
  * 확인 단계는 두지 않는다: 원본을 보존하고 새 run을 만드는 비파괴 액션이다 (ADR-015).
  * in-flight 동안 비활성 — 두 번 눌리면 run이 두 개 생기고 외부 API 쿼터를 두 배 쓴다.
  */
@@ -32,17 +32,13 @@ export function RerunButton({ onRerun }: RerunButtonProps) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        variant="secondary"
-        disabled={rerunning}
-        title={SUBTITLE}
-        onClick={() => void handleRerun()}
-      >
-        {rerunning ? "재실행 중…" : "재실행"}
-      </Button>
-      {/* 부제는 뱃지·라벨 안에 밀어 넣지 않고 분리 노출한다 (UI_GUIDE) */}
-      <span className="text-xs text-neutral-500">{SUBTITLE}</span>
-    </div>
+    <Button
+      variant="secondary"
+      disabled={rerunning}
+      title={TOOLTIP}
+      onClick={() => void handleRerun()}
+    >
+      {rerunning ? "재실행 중…" : "재실행"}
+    </Button>
   );
 }
