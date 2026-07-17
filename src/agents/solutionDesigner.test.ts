@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { GeminiService } from "../services/gemini.js";
+import type {
+  GeminiService,
+  GenerateStructuredParams,
+} from "../services/gemini.js";
 import {
+  REMEDY_STRATEGIES,
+  REMEDY_STRATEGY_LABELS,
   SolutionSchema,
   type Criticism,
   toPromptContext,
@@ -124,6 +129,16 @@ const CRITICISM: Criticism = {
   verdict: "현 구조로는 사업 성립이 어렵다",
 };
 
+/** fatal이 c2 하나뿐인 CRITICISM으로는 "전건" 커버리지를 검증할 수 없다 */
+const TWO_FATAL_CRITICISM: Criticism = {
+  ...CRITICISM,
+  points: CRITICISM.points.map((point) =>
+    point.id === "c3"
+      ? { ...point, severity: "fatal" as const, riskScore: 78 }
+      : point,
+  ),
+};
+
 const SOLUTION: Solution = {
   minimalInput: "스마트 목줄 센서 데이터로 산책 필요 시점을 자동 감지한다",
   agenticWorkflow: "백그라운드 에이전트가 산책자 매칭과 일정 조율을 자율 수행한다",
@@ -133,6 +148,14 @@ const SOLUTION: Solution = {
     "죄책감 해소가 아닌 반려견 건강 관리 서비스로 재정의하여 fatal 비판에 대응한다",
   synthesis:
     "낙관론의 감정 트리거와 반론의 마진 한계를 종합하면, 산책 대행이 아니라 감정을 데이터로 전환하는 건강 관리 구독이 승부처다",
+  remedies: [
+    {
+      respondsTo: "c2",
+      strategy: "bypass",
+      remedy:
+        "회당 수수료 전장을 떠나, 축적된 산책·활동 데이터를 반려견 건강 리포트 구독으로 판다",
+    },
+  ],
 };
 
 interface FakeDeps {
@@ -140,8 +163,16 @@ interface FakeDeps {
   generateStructured: ReturnType<typeof vi.fn>;
 }
 
-function fakeDeps(): FakeDeps {
-  const generateStructured = vi.fn().mockResolvedValue(SOLUTION);
+/**
+ * 실제 generateStructured는 넘겨받은 schema로 응답을 검증한 뒤에야 반환한다 (ADR-004).
+ * fake도 그 계약을 지켜야 "어떤 스키마를 넘겼는가"가 행동으로 드러난다 — 스키마 객체
+ * 동일성(toBe)을 단언하면 팩토리가 무엇을 강제하는지는 끝내 확인되지 않는다.
+ */
+function fakeDeps(response: unknown = SOLUTION): FakeDeps {
+  const generateStructured = vi.fn(
+    async (params: GenerateStructuredParams<Solution>) =>
+      params.schema.parse(response),
+  );
   return {
     deps: { gemini: { generateStructured } as unknown as GeminiService },
     generateStructured,
@@ -164,11 +195,9 @@ describe("runSolutionDesigner", () => {
     expect(SolutionSchema.safeParse(result).success).toBe(true);
 
     expect(generateStructured).toHaveBeenCalledTimes(1);
-    const params = generateStructured.mock.calls[0][0];
-    expect(params.schema).toBe(SolutionSchema);
   });
 
-  it("시스템 프롬프트에 4대 설계 원칙·비판 수용 강제·정반합 종합 강제 문구가 포함된다", async () => {
+  it("시스템 프롬프트에 4대 설계 원칙·원장 계약·정반합 종합 강제 문구가 포함된다", async () => {
     const { deps, generateStructured } = fakeDeps();
 
     await runSolutionDesigner(deps, IDEA, MARKET_CONTEXT, CRITICISM, THESIS);
@@ -236,7 +265,7 @@ describe("SOLUTION_DESIGNER 프롬프트 (合 = 피벗 전략)", () => {
     expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("단순 절충");
   });
 
-  it("synthesis를 스키마상 optional이지만 사실상 필수로 요구한다", () => {
+  it("synthesis를 필수로 요구한다", () => {
     expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("synthesis");
     expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("반드시");
   });
@@ -254,6 +283,124 @@ describe("SOLUTION_DESIGNER 프롬프트 (合 = 피벗 전략)", () => {
       expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).not.toContain(legacyField);
     },
   );
+});
+
+describe("결함↔해결책 원장 계약 (ADR-017)", () => {
+  // 스키마가 이 이름들로 검증하고, 재시도 프롬프트가 이 이름들로 에러를 되먹인다 (ADR-004).
+  // 프롬프트가 다른 말로 부르면 교정 요청이 가리키는 칸을 모델이 못 찾는다.
+  it.each(["remedies", "respondsTo", "strategy", "remedy"])(
+    "시스템 프롬프트가 스키마 필드명 %s를 글자 그대로 쓴다",
+    (field) => {
+      expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain(field);
+    },
+  );
+
+  it("strategy의 enum 값과 한국어 라벨이 스키마의 단일 소스와 일치한다", () => {
+    for (const strategy of REMEDY_STRATEGIES) {
+      expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain(strategy);
+    }
+    for (const label of Object.values(REMEDY_STRATEGY_LABELS)) {
+      expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain(label);
+    }
+  });
+
+  it("fatal 전건에 remedies를 강제하고, major·minor는 강제하지 않는다", () => {
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toMatch(/fatal[\s\S]{0,80}각각/);
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("강제하지 않는다");
+  });
+
+  it("원장은 revisedConcept의 대체가 아니라 추가다", () => {
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("revisedConcept");
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).toContain("대체하지 않는다");
+  });
+
+  it("유저 프롬프트의 지시사항도 원장을 요구한다", () => {
+    expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).toContain("remedies");
+    expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).toContain("respondsTo");
+  });
+
+  // 못 풀어도 되는 출구를 주면 그 출구가 기본값이 된다 (ADR-017)
+  it.each(["대응할 수 없는", "대응 불가능한", "한계를 명시", "얼버무리"])(
+    "탈출구 문구 %s가 남아 있지 않다",
+    (escapeHatch) => {
+      expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).not.toContain(escapeHatch);
+      expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).not.toContain(escapeHatch);
+    },
+  );
+});
+
+describe("정보 차단벽 — 재설계는 점수를 모른다 (ADR-017 / ADR-010)", () => {
+  // 채점 기준을 아는 응시자는 답이 아니라 채점자를 겨냥한다.
+  it.each([
+    "survivalScore",
+    "recommendation",
+    "abandon",
+    "점수",
+    "밴드",
+    "판정",
+  ])("프롬프트가 %s를 언급하지 않는다", (forbidden) => {
+    expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).not.toContain(forbidden);
+    expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).not.toContain(forbidden);
+  });
+
+  // strategy는 "무엇을 했는가"이지 "성공했는가"가 아니다. 해소 여부는 판정의 말이다.
+  it.each(["resolved", "fixed", "solved", "해소했", "해결됐"])(
+    "성적 어휘 %s로 자기 채점을 유도하지 않는다",
+    (gradeWord) => {
+      expect(SOLUTION_DESIGNER_SYSTEM_PROMPT).not.toContain(gradeWord);
+      expect(SOLUTION_DESIGNER_PROMPT_TEMPLATE).not.toContain(gradeWord);
+    },
+  );
+});
+
+describe("solutionSchemaFor 배선 (ADR-017)", () => {
+  it("fatal 결함에 침묵한 재설계를 거부한다 — 빠진 id를 이름으로 지목한다", async () => {
+    const { deps } = fakeDeps({ ...SOLUTION, remedies: [] });
+
+    await expect(
+      runSolutionDesigner(deps, IDEA, MARKET_CONTEXT, CRITICISM, THESIS),
+    ).rejects.toThrow(/c2/);
+  });
+
+  it("fatal 하나만 채우고 나머지를 빠뜨린 재설계를 거부한다", async () => {
+    const { deps } = fakeDeps(SOLUTION); // c2만 있다. TWO_FATAL_CRITICISM은 c3도 fatal이다
+
+    await expect(
+      runSolutionDesigner(
+        deps,
+        IDEA,
+        MARKET_CONTEXT,
+        TWO_FATAL_CRITICISM,
+        THESIS,
+      ),
+    ).rejects.toThrow(/c3/);
+  });
+
+  it("fatal 전건을 채운 재설계는 통과한다", async () => {
+    const { deps } = fakeDeps(SOLUTION);
+
+    const result = await runSolutionDesigner(
+      deps,
+      IDEA,
+      MARKET_CONTEXT,
+      CRITICISM,
+      THESIS,
+    );
+
+    expect(result.remedies.map((remedy) => remedy.respondsTo)).toEqual(["c2"]);
+  });
+
+  // 관대한 읽기 / 엄격한 쓰기 — 두 단계 엄격도는 설계이지 실수가 아니다 (ADR-017)
+  it("정적 SolutionSchema를 그대로 넘기지 않는다 — 그건 fatal 침묵을 통과시킨다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+    const silent = { ...SOLUTION, remedies: [] };
+
+    await runSolutionDesigner(deps, IDEA, MARKET_CONTEXT, CRITICISM, THESIS);
+    const { schema } = generateStructured.mock.calls[0][0];
+
+    expect(SolutionSchema.safeParse(silent).success).toBe(true);
+    expect(schema.safeParse(silent).success).toBe(false);
+  });
 });
 
 describe("thinking 상한 (ADR-016)", () => {

@@ -227,6 +227,14 @@ const SOLUTION_TEXT = JSON.stringify({
   monetization: "진단 무료, 케어 플랜 구독 월 4,900원",
   revisedConcept: "리마인더가 아니라 조기 진단으로 축을 옮긴다",
   synthesis: "저빈도 고통은 진단 축으로 옮겨야 지불 의사가 생긴다",
+  // c2(fatal)에 침묵하면 solutionSchemaFor가 거부한다 — 원장은 이제 칸이다 (ADR-017)
+  remedies: [
+    {
+      respondsTo: "c2",
+      strategy: "bypass",
+      remedy: "구독이 아니라 생육 로그를 파는 축으로 옮겨 식물 사망이 이탈이 아니게 만든다",
+    },
+  ],
 });
 
 const VERDICT_TEXT = JSON.stringify({

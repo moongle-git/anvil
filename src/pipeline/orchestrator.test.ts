@@ -5,16 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RunStore, STEP_ARTIFACT_KINDS } from "../lib/runStore.js";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
+import { COLD_CRITIC_USAGE_LABEL } from "../agents/coldCritic.js";
+import { CONTEXT_HUNTER_USAGE_LABEL } from "../agents/contextHunter.js";
+import { INTERVIEWER_USAGE_LABEL } from "../agents/interviewer.js";
+import { RESEARCH_PLANNER_USAGE_LABEL } from "../agents/researchPlanner.js";
+import { SOLUTION_DESIGNER_USAGE_LABEL } from "../agents/solutionDesigner.js";
+import { THESIS_USAGE_LABEL } from "../agents/thesis.js";
+import { VERDICT_USAGE_LABEL } from "../agents/verdict.js";
 import {
-  CriticismSchema,
-  InterviewQuestionsSchema,
-  MarketContextDraftSchema,
   MarketContextSchema,
   RESEARCH_SOURCE_IDS,
-  SearchQueriesSchema,
-  SolutionSchema,
   SOURCE_LABELS,
-  ThesisSchema,
   VerdictSchema,
   type CommunityVoice,
   type Criticism,
@@ -135,7 +136,15 @@ const solution: Solution = {
   monetization: "구독 모델",
   revisedConcept: "제로 UI 식물 집사",
   synthesis: "낙관과 비판을 종합하면 데이터 축적이 핵심 해자다",
-  remedies: [],
+  // c2가 fatal이다 — 원장이 비면 solutionSchemaFor가 거부하므로 실제 파이프라인을
+  // 통과할 수 없는 산출물이 된다 (ADR-017)
+  remedies: [
+    {
+      respondsTo: "c2",
+      strategy: "defend",
+      remedy: "무료 대체재가 못 주는 생존 보장 과금으로 지불 의사를 구조적으로 만든다",
+    },
+  ],
 };
 
 const verdict: Verdict = {
@@ -169,37 +178,44 @@ const searchQueries: SearchQueries = {
 };
 
 /**
- * schema 파라미터로 어떤 step의 호출인지 판별해 해당 산출물을 돌려주는 fake.
+ * usageLabel로 어떤 에이전트의 호출인지 판별해 해당 산출물을 돌려주는 fake.
  * context-hunter만 generateGrounded를 쓰고, LLM이 채우는 draft(citations 제외)를 돌려받는다 (ADR-012).
  * failOn은 두 메서드 모두에 적용된다 — 어느 경로로 호출되든 그 step이 실패해야 한다.
+ *
+ * 스키마 객체 동일성(schema === XSchema)으로 판별하지 않는다 — solutionSchemaFor처럼
+ * criticism을 아는 팩토리는 호출마다 새 객체를 만든다 (ADR-017). usageLabel은 에이전트가
+ * usage 테이블에 적는 것과 같은 이름이라 파이프라인이 실제로 쓰는 계약이다 (ADR-016).
  */
 function fakeGemini(options?: {
-  failOn?: unknown;
+  failOn?: string;
   questions?: InterviewQuestions;
 }): FakeGemini {
   const generateStructured = vi.fn(
-    ({ schema }: { schema: unknown }): Promise<unknown> => {
-      if (schema === options?.failOn) {
+    ({ usageLabel }: { usageLabel: string }): Promise<unknown> => {
+      if (usageLabel === options?.failOn) {
         return Promise.reject(new Error("Gemini 호출 실패"));
       }
-      if (schema === InterviewQuestionsSchema) {
+      if (usageLabel === INTERVIEWER_USAGE_LABEL) {
         return Promise.resolve(options?.questions ?? { questions: [] });
       }
-      if (schema === SearchQueriesSchema) return Promise.resolve(searchQueries);
-      if (schema === ThesisSchema) return Promise.resolve(thesis);
-      if (schema === CriticismSchema) return Promise.resolve(criticism);
-      if (schema === SolutionSchema) return Promise.resolve(solution);
-      if (schema === VerdictSchema) return Promise.resolve(verdict);
-      return Promise.reject(new Error("예상하지 못한 스키마"));
+      if (usageLabel === RESEARCH_PLANNER_USAGE_LABEL)
+        return Promise.resolve(searchQueries);
+      if (usageLabel === THESIS_USAGE_LABEL) return Promise.resolve(thesis);
+      if (usageLabel === COLD_CRITIC_USAGE_LABEL)
+        return Promise.resolve(criticism);
+      if (usageLabel === SOLUTION_DESIGNER_USAGE_LABEL)
+        return Promise.resolve(solution);
+      if (usageLabel === VERDICT_USAGE_LABEL) return Promise.resolve(verdict);
+      return Promise.reject(new Error(`예상하지 못한 usageLabel: ${usageLabel}`));
     },
   );
 
   const generateGrounded = vi.fn(
-    ({ schema }: { schema: unknown }): Promise<unknown> => {
-      if (schema === options?.failOn) {
+    ({ usageLabel }: { usageLabel: string }): Promise<unknown> => {
+      if (usageLabel === options?.failOn) {
         return Promise.reject(new Error("Gemini 호출 실패"));
       }
-      if (schema === MarketContextDraftSchema) {
+      if (usageLabel === CONTEXT_HUNTER_USAGE_LABEL) {
         // LLM은 draft만 채운다 — citations·researchCoverage·communityVoices는 코드가 주입하는
         // 사실이고, 목소리 선별은 수집 증거의 ID 참조로만 표현된다 (ADR-013)
         const { citations, researchCoverage, communityVoices, ...draft } =
@@ -212,7 +228,9 @@ function fakeGemini(options?: {
           webSearchQueries: [],
         });
       }
-      return Promise.reject(new Error("예상하지 못한 스키마"));
+      return Promise.reject(
+        new Error(`예상하지 못한 usageLabel: ${usageLabel}`),
+      );
     },
   );
 
@@ -234,9 +252,10 @@ function fakeSources(): ResearchSource[] {
   }));
 }
 
-function calledSchemas(generateStructured: ReturnType<typeof vi.fn>): unknown[] {
-  return generateStructured.mock.calls.map(
-    (call) => (call[0] as { schema: unknown }).schema,
+/** 어느 에이전트가 어떤 순서로 호출됐는가 — step 실행 순서·resume skip의 관측 지점 */
+function calledLabels(generate: ReturnType<typeof vi.fn>): string[] {
+  return generate.mock.calls.map(
+    (call) => (call[0] as { usageLabel: string }).usageLabel,
   );
 }
 
@@ -268,17 +287,17 @@ describe("runPipeline", () => {
 
     // step 순서: context-hunter → thesis → cold-critic → solution-designer → verdict
     // (interviewer는 CLI에서 미실행). verdict는 合을 채점하므로 반드시 solution-designer 다음이다 (ADR-010).
-    // SearchQueriesSchema는 step이 아니라 context-hunter 내부의 researchPlanner 호출이다 (ADR-012) —
+    // research-planner는 step이 아니라 context-hunter 내부의 researchPlanner 호출이다 (ADR-012) —
     // PIPELINE_STEPS는 여전히 6개다.
-    expect(calledSchemas(generateStructured)).toEqual([
-      SearchQueriesSchema,
-      ThesisSchema,
-      CriticismSchema,
-      SolutionSchema,
-      VerdictSchema,
+    expect(calledLabels(generateStructured)).toEqual([
+      RESEARCH_PLANNER_USAGE_LABEL,
+      THESIS_USAGE_LABEL,
+      COLD_CRITIC_USAGE_LABEL,
+      SOLUTION_DESIGNER_USAGE_LABEL,
+      VERDICT_USAGE_LABEL,
     ]);
     // context-hunter만 grounding 경로다 (인용을 코드가 추출해야 하므로)
-    expect(calledSchemas(generateGrounded)).toEqual([MarketContextDraftSchema]);
+    expect(calledLabels(generateGrounded)).toEqual([CONTEXT_HUNTER_USAGE_LABEL]);
 
     // state 전이: 실행된 step은 completed + 타임스탬프, run 완료 시각 기록
     const saved = store.loadRun(result.runId);
@@ -313,7 +332,7 @@ describe("runPipeline", () => {
   });
 
   it("verdict step 실패: state에 error를 기록하고 리포트도 completedAt도 남기지 않는다", async () => {
-    const { gemini } = fakeGemini({ failOn: VerdictSchema });
+    const { gemini } = fakeGemini({ failOn: VERDICT_USAGE_LABEL });
 
     const promise = runPipeline(makeDeps(gemini), { idea: IDEA });
     await expect(promise).rejects.toBeInstanceOf(PipelineStepError);
@@ -345,7 +364,7 @@ describe("runPipeline", () => {
       resumeRunId: runId,
     });
 
-    expect(calledSchemas(second.generateStructured)).toEqual([]);
+    expect(calledLabels(second.generateStructured)).toEqual([]);
     expect(second.generateGrounded).not.toHaveBeenCalled();
     expect(store.loadStepOutput(runId, "verdict", VerdictSchema)).toEqual(
       verdict,
@@ -368,14 +387,14 @@ describe("runPipeline", () => {
       resumeRunId: runId,
     });
 
-    expect(calledSchemas(second.generateStructured)).toEqual([VerdictSchema]);
+    expect(calledLabels(second.generateStructured)).toEqual([VERDICT_USAGE_LABEL]);
     expect(store.loadStepOutput(runId, "verdict", VerdictSchema)).toEqual(
       verdict,
     );
   });
 
   it("cold-critic step 실패: state에 error를 기록하고 PipelineStepError를 던진다", async () => {
-    const { gemini } = fakeGemini({ failOn: CriticismSchema });
+    const { gemini } = fakeGemini({ failOn: COLD_CRITIC_USAGE_LABEL });
 
     const promise = runPipeline(makeDeps(gemini), { idea: IDEA });
     await expect(promise).rejects.toBeInstanceOf(PipelineStepError);
@@ -398,7 +417,7 @@ describe("runPipeline", () => {
 
   it("resume: completed step은 건너뛰고 저장된 산출물을 재사용한다", async () => {
     // 1차 실행 — cold-critic에서 실패
-    const first = fakeGemini({ failOn: CriticismSchema });
+    const first = fakeGemini({ failOn: COLD_CRITIC_USAGE_LABEL });
     const error = (await runPipeline(makeDeps(first.gemini), {
       idea: IDEA,
     }).catch((e: unknown) => e)) as PipelineStepError;
@@ -413,10 +432,10 @@ describe("runPipeline", () => {
 
     expect(result.runId).toBe(error.runId);
     // context-hunter·thesis는 1차에서 completed → skip, cold-critic 이후만 재실행
-    expect(calledSchemas(second.generateStructured)).toEqual([
-      CriticismSchema,
-      SolutionSchema,
-      VerdictSchema,
+    expect(calledLabels(second.generateStructured)).toEqual([
+      COLD_CRITIC_USAGE_LABEL,
+      SOLUTION_DESIGNER_USAGE_LABEL,
+      VERDICT_USAGE_LABEL,
     ]);
     // skip된 step은 어떤 소스도 수집하지 않는다
     for (const source of sources) {
@@ -454,11 +473,11 @@ describe("runPipeline", () => {
     });
 
     // context-hunter는 재실행(그 안에서 planner도 다시 돈다), 산출물이 멀쩡한 나머지 step은 skip
-    expect(calledSchemas(second.generateStructured)).toEqual([
-      SearchQueriesSchema,
+    expect(calledLabels(second.generateStructured)).toEqual([
+      RESEARCH_PLANNER_USAGE_LABEL,
     ]);
-    expect(calledSchemas(second.generateGrounded)).toEqual([
-      MarketContextDraftSchema,
+    expect(calledLabels(second.generateGrounded)).toEqual([
+      CONTEXT_HUNTER_USAGE_LABEL,
     ]);
 
     // 재실행으로 산출물이 복구된다
@@ -492,7 +511,7 @@ describe("runPipeline", () => {
 
     it("★ resume: context-hunter가 completed면 research를 재생성하지 않는다", async () => {
       // 1차 실행 — cold-critic에서 실패시켜 context-hunter만 completed로 남긴다
-      const first = fakeGemini({ failOn: CriticismSchema });
+      const first = fakeGemini({ failOn: COLD_CRITIC_USAGE_LABEL });
       const error = (await runPipeline(makeDeps(first.gemini), {
         idea: IDEA,
       }).catch((e: unknown) => e)) as PipelineStepError;
@@ -534,8 +553,8 @@ describe("runPipeline", () => {
       expect(store.loadReport(runId)).toBeNull();
 
       // 질문만 생성되고 하류 에이전트는 호출되지 않는다
-      expect(calledSchemas(generateStructured)).toEqual([
-        InterviewQuestionsSchema,
+      expect(calledLabels(generateStructured)).toEqual([
+        INTERVIEWER_USAGE_LABEL,
       ]);
       expect(store.loadInterviewQuestions(runId)).toEqual(QUESTIONS);
 
@@ -570,12 +589,12 @@ describe("runPipeline", () => {
       });
 
       expect(result.status).toBe("completed");
-      expect(calledSchemas(second.generateStructured)).toEqual([
-        SearchQueriesSchema,
-        ThesisSchema,
-        CriticismSchema,
-        SolutionSchema,
-        VerdictSchema,
+      expect(calledLabels(second.generateStructured)).toEqual([
+        RESEARCH_PLANNER_USAGE_LABEL,
+        THESIS_USAGE_LABEL,
+        COLD_CRITIC_USAGE_LABEL,
+        SOLUTION_DESIGNER_USAGE_LABEL,
+        VERDICT_USAGE_LABEL,
       ]);
 
       // context-hunter 프롬프트에 답변이 반영된다
@@ -607,15 +626,15 @@ describe("runPipeline", () => {
       });
 
       expect(result.status).toBe("completed");
-      expect(calledSchemas(generateStructured)).toEqual([
-        InterviewQuestionsSchema,
-        SearchQueriesSchema,
-        ThesisSchema,
-        CriticismSchema,
-        SolutionSchema,
-        VerdictSchema,
+      expect(calledLabels(generateStructured)).toEqual([
+        INTERVIEWER_USAGE_LABEL,
+        RESEARCH_PLANNER_USAGE_LABEL,
+        THESIS_USAGE_LABEL,
+        COLD_CRITIC_USAGE_LABEL,
+        SOLUTION_DESIGNER_USAGE_LABEL,
+        VERDICT_USAGE_LABEL,
       ]);
-      expect(calledSchemas(generateGrounded)).toEqual([MarketContextDraftSchema]);
+      expect(calledLabels(generateGrounded)).toEqual([CONTEXT_HUNTER_USAGE_LABEL]);
       expect(store.loadRun(runId).completedAt).toBeDefined();
     });
   });
