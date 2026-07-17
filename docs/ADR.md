@@ -304,10 +304,16 @@ CLAUDE.md의 CRITICAL 규칙과 ARCHITECTURE의 "서비스 레이어 격리" 때
 **1. 재설계는 치명적 결함마다 해결책을 낸다 — 프롬프트의 부탁을 칸으로 바꾼다.**
 
 ```ts
-// src/types/ledger.ts — 合의 원장과 판정의 감사가 공유하는 어휘
+// src/types/solution.ts — 원장은 재설계 자신의 필드다
 export const REMEDY_STRATEGIES = ["defend", "bypass"] as const;
 export const RemedyStrategySchema = z.enum(REMEDY_STRATEGIES);
 export type RemedyStrategy = (typeof REMEDY_STRATEGIES)[number];
+
+/** 한국어 라벨 단일 소스 — 리포트·웹이 함께 쓴다 */
+export const REMEDY_STRATEGY_LABELS: Record<RemedyStrategy, string> = {
+  defend: "방어",
+  bypass: "우회",
+};
 
 export const RemedySchema = z.object({
   /** 대응 대상 CriticismPoint.id */
@@ -321,24 +327,35 @@ export type Remedy = z.infer<typeof RemedySchema>;
 ```
 `SolutionSchema`에 `remedies: z.array(RemedySchema).default([])`가 추가되고, `synthesis`의 `.optional()`은 제거된다.
 
+> **초안은 이 블록을 `src/types/ledger.ts`에 적었으나 구현은 `solution.ts`에 두었다 — 문서를 코드에 맞춘다** (step 7 실측). `Remedy`는 **재설계 산출물의 필드**이고 `RemedyAudit`은 **판정 산출물의 필드**다. `ledger.ts`에 사는 것은 두 산출물이 *공유하는* 것(순수 파생 검사와 렌더러용 뷰)뿐이며, 필드 정의까지 끌어오면 `ledger.ts`가 두 하류의 스키마를 소유하게 되어 이 ADR이 세운 의존 방향이 흐려진다. `severity`가 `dialectic.ts`에 사는 것과 같은 규율이다. ARCHITECTURE는 이미 이 배치를 기술하고 있다. **결정 자체(칸을 만든다·전건 커버리지를 강제한다)는 그대로다** — 파일 배치만 정정한다. `REMEDY_STRATEGY_LABELS`는 초안에 없었으나 리포트·웹이 라벨을 각자 하드코딩하면 두 번째 진실이 되므로 구현이 추가했다.
+
 **2. 판정은 각 해결책을 감사한다.**
 
 ```ts
-// src/types/ledger.ts
-export const REMEDY_ASSESSMENTS = ["solid", "restated", "dismissed"] as const;
-export const RemedyAssessmentSchema = z.enum(REMEDY_ASSESSMENTS);
-export type RemedyAssessment = (typeof REMEDY_ASSESSMENTS)[number];
+// src/types/verdict.ts — 감사는 판정 자신의 필드다
+export const REMEDY_VERDICTS = ["solid", "restated", "dismissed"] as const;
+export const RemedyVerdictSchema = z.enum(REMEDY_VERDICTS);
+export type RemedyVerdict = (typeof REMEDY_VERDICTS)[number];
+
+/** 한국어 라벨 단일 소스 */
+export const REMEDY_VERDICT_LABELS: Record<RemedyVerdict, string> = {
+  solid: "유효한 해결책",
+  restated: "재주장",   // 비판이 이미 반박한 것을 수식어만 붙여 다시 제시
+  dismissed: "비판 기각", // 풀지 않고 비판이 과장이라며 넘김
+};
 
 export const RemedyAuditSchema = z.object({
   /** 감사 대상 CriticismPoint.id */
   criticismId: z.string().min(1),
   /** solid = 유효한 해결책 / restated = 비판을 수식어만 붙여 재주장 / dismissed = 비판을 기각하고 넘어감 */
-  assessment: RemedyAssessmentSchema,
+  assessment: RemedyVerdictSchema,
   note: z.string().min(1),
 });
 export type RemedyAudit = z.infer<typeof RemedyAuditSchema>;
 ```
-`VerdictSchema`에 `remedyAudits: z.array(RemedyAuditSchema).default([])`가 추가된다. 세 값은 발명이 아니라 **실측에서 관찰된 세 가지 양태**다(아래 `6af78e` 대조표).
+`VerdictSchema`에 `remedyAudits: z.array(RemedyAuditSchema).default([])`가 추가된다. 세 값은 발명이 아니라 **실측에서 관찰된 세 가지 양태**다(아래 `6af78e` 대조표). `ResidualRiskSchema`에는 `criticismId?`(선택)가 추가됐다 — 어느 비판에서 유래한 리스크인지 밝히되, 피벗이 **새로** 만든 리스크는 비워 둔다.
+
+> **초안의 이름은 `REMEDY_ASSESSMENTS`/`RemedyAssessmentSchema`/`RemedyAssessment`였으나 구현은 `REMEDY_VERDICTS`/`RemedyVerdictSchema`/`RemedyVerdict`다 — 문서를 코드에 맞춘다** (step 7 실측). 필드명 `assessment`는 그대로다. 위치도 `ledger.ts`가 아니라 `verdict.ts`다(위 정정과 같은 이유).
 
 **3. 교차 산출물 검증은 `src/types/`의 스키마 팩토리로 한다.**
 
@@ -349,12 +366,27 @@ export function fatalIds(points: readonly CriticismPoint[]): string[];
 export function danglingRefs(refs: readonly string[], points: readonly CriticismPoint[]): string[];
 /** 아무도 언급하지 않은 fatal이 있는가 (침묵) */
 export function uncoveredFatalIds(refs: readonly string[], points: readonly CriticismPoint[]): string[];
+/** 한 비판을 두 번 이상 참조했는가. 비판 하나에 해결책·감사는 하나다 */
+export function duplicateRefs(refs: readonly string[]): string[];
+
+/** 비판 하나와 그에 대한 해결책·감사를 짝지은 한 행 */
+export interface LedgerEntry {
+  point: CriticismPoint;
+  remedy?: { strategy: RemedyStrategy; remedy: string }; // undefined = 재설계의 침묵
+  audit?: { assessment: RemedyVerdict; note: string };   // undefined = 판정 이전
+}
+/** fatal은 침묵이어도 행이 남고, major·minor는 언급될 때만 오른다. unknown id는 조용히 드롭 */
+export function buildLedger(criticism: Criticism, solution?: Solution, verdict?: Verdict): LedgerEntry[];
+/** 렌더러(report.md·웹)가 공유하는 뷰 — fatal만. 원장이 통째로 비면 빈 배열(블록 생략) */
+export function fatalLedger(criticism: Criticism, solution?: Solution, verdict?: Verdict): LedgerEntry[];
 
 // src/types/solution.ts
 export function solutionSchemaFor(criticism: Criticism): z.ZodType<Solution>;
 // src/types/verdict.ts
 export function verdictSchemaFor(criticism: Criticism): z.ZodType<Verdict>;
 ```
+
+> **초안은 `duplicateRefs`·`LedgerEntry`·`buildLedger`·`fatalLedger`를 적지 않았다 — 문서를 코드에 맞춘다** (step 7 실측). `duplicateRefs`는 초안이 산문으로만 요구한 검사 (c)("중복 참조 없음")를 이름 붙인 것이고, 나머지 셋은 **렌더러가 집합 뺄셈을 다시 구현하지 않게 하려고** 파생을 한곳에 둔 것이다. 이 규칙이 렌더러마다 갈리면 `report.md`에서 생략되는 구 run이 웹에서는 "해결책 없음" 표로 뜨는 **두 개의 진실**이 된다. 판정 프롬프트의 fatal 대조표도 같은 `buildLedger`를 쓴다 — 판정 에이전트가 자기만의 뺄셈을 구현하지 않는다.
 두 팩토리는 `superRefine`으로 (a) `respondsTo`/`criticismId`의 참조 무결성, (b) fatal 전건 커버리지, (c) 중복 참조 없음을 검증한다. **에러 메시지에 누락된 id를 나열한다** — 그 문자열이 곧 자가 교정 재시도의 피드백이 되기 때문이다(ADR-004). 반환 타입이 `z.ZodType<Solution>`이라 `generateStructured`의 `schema: ZodType<T>`에 그대로 들어가고, **재시도 루프를 공짜로 탄다.** `VerdictSchema`가 이미 `.refine`(밴드 검증)을 달고도 `z.toJSONSchema`를 통과하고 있으므로 refinement 체이닝에는 선례가 있다.
 
 의존은 **파이프라인이 흐르는 방향으로만** 흐른다: 하류(solution·verdict)의 스키마는 상류(criticism)를 알 수 있고, 상류는 하류를 모른다. `CriticismSchema`는 지금도 Thesis를 모른다(`criticism.ts:16-18`) — 그 규율을 깨지 않는다.
@@ -446,3 +478,96 @@ export function verdictSchemaFor(criticism: Criticism): z.ZodType<Verdict>;
 - **`synthesis`의 `.optional()`은 제거한다.** 이것이 없는 구 solution은 **criticism이 이미 ADR-011 이전 형식이라 실패하는 run**(실측 5건: `e5d75e`·`dd2e18`·`8fd760`·`ca0eda`·`764b6f`)에만 있고, 그 run들은 오늘도 빈 화면 + "이전 버전 형식" 안내를 렌더한다. 빈 대립에 붙은 合 줄글을 지키려고 optional을 남길 이유가 없다.
 - **resume 시 `loadStepOutput`이 팩토리로 재검증하므로**, 원장 없는 저장된 solution은 `null` → "산출물이 없거나 손상됨"으로 자동 재생성된다 (ADR-011이 문서화한 이송 경로와 같다).
 - **웹 읽기 경로는 정적 스키마를 계속 쓴다.** 웹은 `criticism`을 로드하지 않고도 `solution`을 렌더해야 한다. **관대한 읽기 / 엄격한 쓰기** — 두 단계 엄격도는 설계이지 실수가 아니다.
+
+---
+
+#### 실측 결과 (2026-07-17, phase 8 step 7) — 구조는 작동한다. 진실성은 여전히 미지수다
+
+ADR-016의 선례를 따라 **추정이 아니라 실측을 근거로 삼는다.** 다만 ADR-016의 실측이 조건당 1~2 run이었던 것과 달리 **이것은 n=1이다.** 아래 숫자로 분포를 말하지 마라.
+
+측정: 같은 아이디어("직장인을 위한 AI 회의록 요약 서비스")·`gemini-2.5-flash`·소스 3개 활성·스크래치 DB(`ANVIL_DB_PATH`). run `6d53e7`.
+
+**1. 원장 커버리지 — 스키마가 실제로 강제한다.**
+
+| 항목 | 실측 |
+|---|---|
+| 비판 | 4건 (fatal 2 `c2`·`c3` / major 2 / minor 0) |
+| `solution.remedies[]` | **2건 — fatal 커버리지 2/2 (M = N)** |
+| `verdict.remedyAudits[]` | **2건 — fatal 감사 커버리지 2/2** |
+| 강제 대상 밖(major)의 자발적 해결책 | **0건** |
+
+**"허용하되 강제하지 않는다"는 실전에서 "하지 않는다"로 읽혔다.** major 2건에 자발적 해결책은 0건이다. 이것을 결함으로 기록하지 않는다 — 이 ADR이 강제 범위를 fatal로 한정한 것은 의도이고, major까지 강제하는 안은 재시도 위험과 출력 토큰을 이유로 명시적으로 기각했다. 다만 **`major`에 대한 원장은 사실상 죽은 기능**임을 관측으로 남긴다.
+
+**2. 재시도 — 원장 강제가 재시도를 늘리지 않았다.**
+
+| 항목 | 실측 |
+|---|---|
+| 총 콜 | 6 (`research-planner`·`context-hunter`·`thesis`·`cold-critic`·`solution-designer`·`verdict`) |
+| `attempt > 1` 행 | **0건** |
+| 출력 0토큰(grounded 형식 실패) | **0건** |
+
+**이 phase가 가장 두려워한 비용(전건 커버리지 강제 → 검증 실패 → 재시도)은 n=1에서 관측되지 않았다.** 모델은 첫 시도에 원장을 채웠다 — 이 ADR의 *"능력이 없는 게 아니라 칸이 없다(5/5)"* 논거와 일치한다. **단 n=1이고, grounded 재시도는 원래 6 run 중 3건에서 나오던 복권이다(ADR-016). 0건은 이번에 안 걸린 것이지 고쳐진 것이 아니다.**
+
+**3. 감사 결과 분포 — 말장난 비율의 최초 관측.**
+
+| assessment | 건수 |
+|---|---|
+| `solid` | **2** |
+| `restated` | 0 |
+| `dismissed` | 0 |
+
+**판정은 fatal 2건을 전부 `solid`로 감사했다.** 두 해결책은 실제로 구체적이었다(사람이 읽고 판단 — c2: 가치 제안을 '시간 절약'→'비즈니스 성과 증대'로 피벗 + ROI 연동 과금 / c3: 기업 내부 워크플로우 데이터 기반 데이터 플라이휠). `6af78e`의 실패 양태(*"허상"이라 한 것에 "경량화된"만 붙인 재주장*)와는 질적으로 다르다.
+
+**그러나 이것을 "말장난이 사라졌다"의 증거로 쓰지 마라.** 세 가지 이유다:
+- **n=1이다.** 관측된 감사는 2건뿐이고, 둘 다 같은 run·같은 판정 에이전트의 판단이다.
+- **`restated`·`dismissed`가 실제로 쓰이는 것을 아직 보지 못했다.** 스키마와 테스트는 셋 다 허용하고 floor가 없음을 증명하지만(`dismissed` 감사 + 88점도 통과한다), **야생에서 관측된 적은 없다.** "판정이 관대할 수 있다"는 가능성은 구조가 제거하지 못한다 — 이 ADR이 소리 내어 말한 한계 그대로다.
+- **관대함의 흔적이 이미 보인다.** 판정은 `c3`를 `solid`로 감사하면서, **그 해결책이 성립하기 위한 전제를 잔존 리스크에 `major`로 올렸다** ("데이터 플라이휠 구축 난이도 — 기업 내부 민감 데이터를 수집·학습할 시스템 구축과 사내 동의가 예상보다 훨씬 복잡할 수 있다"). 해결책이 유효하다고 부르면서 그 해결책이 작동할지 모르겠다고 같은 문서에 적은 것이다.
+  **이것이 이 phase가 만든 값어치다.** 예전이라면 이 관대함은 줄글에 묻혀 반박할 수 없었다. 지금은 `solid`라는 **귀속 가능한 주장**과 그것과 긴장하는 `residualRisks` 행이 한 화면에 나란히 렌더된다. **구조는 관대함을 없애지 못했다. 보이게 만들었다** — 그것이 이 ADR이 약속한 전부이고, 약속한 만큼은 지켜졌다.
+
+**4. 토큰·비용 — 이 phase의 출력 증가는 노이즈에 묻혔다.**
+
+| | ADR-016 post-diet (같은 아이디어, 2회 평균) | phase 8 (n=1) | 델타 |
+|---|---|---|---|
+| 총 USD | $0.1302 | **$0.0875** | −32.8% |
+| 입력 | 37,997 | 31,165 | −18.0% |
+| 출력 | 11,977 | 8,937 | −25.4% |
+| thinking | 14,556 | 8,315 | −42.9% |
+| 콜 | 6.5 | 6 | |
+| cached | — | **0** | |
+
+**이 −32.8%를 이 phase의 성과로 읽지 마라. 이 phase는 비용을 줄이는 일을 하나도 하지 않았다.** 감소분은 전부 이 phase가 건드리지 않은 두 변수다:
+- **grounded 재시도 복권에 이번엔 안 걸렸다** ($0.035 + 입력 1회분). ADR-016 실측에서 재시도 유무가 run 총액을 $0.1171 vs $0.1433로 갈랐다.
+- **`context-hunter`의 thinking이 1,450토큰이었다** — ADR-016 실측 범위(5,340~8,925, 평균 7,132)의 **1/5**다. 이 변수 하나가 run 간에 6,000토큰(≈$0.015)씩 흔들린다.
+
+**이 ADR이 예고한 "`remedies`·`remedyAudits`가 출력 토큰을 늘린다"는 n=1에서 확인도 반증도 되지 않았다.** 총 출력은 오히려 줄었지만 위 두 노이즈가 그보다 크다. 에이전트별로 좁히면 방향만 보인다 (기준선은 사용자 DB의 `usage` 행 — **다른 아이디어**라 직접 비교가 아니다):
+
+| label | 기준선 출력 (`6af78e` / `d32758`) | phase 8 | 읽기 |
+|---|---|---|---|
+| `verdict` | 993 / 825 | **1,059** | 감사 2건 추가와 **방향이 일치**(+7~28%). 절대량이 작아 노이즈에 강한 편 |
+| `solution-designer` | 3,221 / 2,876 | **2,474** | **오히려 감소.** 원장을 넣었는데 줄었다 — 아이디어가 달라 비교가 성립하지 않는다 |
+
+**정직한 결론: 이 phase의 출력 토큰 비용은 n=1로 측정되지 않는다.** `verdict`의 +150토큰(≈$0.0004)이 유일하게 방향이 일치하는 신호다. 소수점을 신뢰하지 마라.
+
+**5. 하위호환 — 실데이터로 증명됐다.** 사용자 `data/anvil.db`의 읽기 전용 복사본에 정적 스키마를 돌렸다:
+
+| 대상 | 결과 |
+|---|---|
+| 최신 run 5개(`500424`·`13c0ac`·`472fc2`·`6af78e`·`d32758`)의 `verdict` | **5/5 통과** |
+| 같은 run들의 `solution` | **5/5 통과** (`remedies`·`remedyAudits`의 `.default([])`가 작동) |
+| 구 run 5개(`e5d75e`·`dd2e18`·`8fd760`·`ca0eda`·`764b6f`)의 `criticism` | 5/5 실패 — **이 phase 이전에도 실패했다** (ADR-011 이전 형식: `points` 없음) |
+
+**`synthesis`의 `.optional()` 제거가 새로 깨뜨린 run은 없다.** `synthesis`가 없는 solution은 **정확히** 위 구 run 5개이고(전수 대조, 겹침 100%), 그 run들은 `verdict` 아티팩트가 아예 없어 웹이 이미 "이전 버전 형식" 안내를 띄운다. 다만 정확히 적는다 — **그 5개 run의 4절(合) 줄글은 이 phase 이전에는 렌더됐고 이제는 렌더되지 않는다**(`revisedConcept` 852~3,439자). 이 ADR이 *"빈 대립에 붙은 合 줄글을 지키려고 optional을 남길 이유가 없다"*며 **명시적으로 수용한 비용**이며, `report.md` 다운로드로 계속 읽을 수 있다. 예상 밖의 피해자는 없다.
+
+**6. ADR-008(결론 선노출 금지)은 지켜졌다.** 렌더된 `report.md` 4절에 감사 라벨 3종·`survivalScore`·`headline`·점수가 **전부 부재**하고, 같은 검사가 5절에서는 전부 검출된다(부재가 공허하지 않다). 구조가 그것을 보장한다 — `remedySection`·`RemedyClaims`는 `verdict`를 **인자로 받지 않는다.**
+
+**7. 이 phase가 건드리지 않은 것 (다음 phase의 입력).** 자료조사 수율은 이 phase의 scope가 아니었고, 여전히 ADR-016이 지목한 자리에 있다:
+
+| 항목 | 실측 (run `6d53e7`) |
+|---|---|
+| YouTube / 네이버 / HN | 15 / 15 / **0건** |
+| 목소리 선별률 | 30건 수집 → **8건 선별 (27%)** |
+| `citations[]` | **0건** — grounding이 인용을 반환하지 않았다 |
+
+**`citations` 0건은 ADR-013이 고치려던 바로 그 증상이다.** ADR-013은 재시도 폐기를 원인으로 지목하고 누적으로 고쳤는데, **이번 run은 재시도가 0건인데도 인용이 0건이다.** 즉 남은 0건은 재시도 폐기 때문이 아니다 — grounding이 애초에 `groundingChunks`를 안 준 것이거나 추출이 실패한 것이다. **원인이 측정되지 않았으므로 여기서 고치지 않는다**(*측정하지 않고 최적화하지 않는다*). 다음 phase가 볼 자리로 남긴다.
+
+**이 phase의 한 줄 결론**: **칸은 채워졌고(2/2), 재시도는 늘지 않았고(0), 구 run은 잃은 것이 없다(5/5).** 관측된 감사는 전부 `solid`이지만 n=2다 — **말장난이 사라졌다는 증거가 아니라, 이제 말장난을 지목할 좌표가 생겼다는 증거다.** 진실성은 여전히 판정의 몫이고, 이 ADR은 처음부터 그렇게 말했다.

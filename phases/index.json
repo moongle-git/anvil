@@ -42,7 +42,8 @@
     },
     {
       "dir": "8-fatal-remedy",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-07-17T22:52:00+0900"
     }
   ]
 }

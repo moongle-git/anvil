@@ -17,8 +17,9 @@ src/
 └── types/             # zod 스키마 + TypeScript 타입 (RunState, MarketContext, Criticism, Solution),
                        #   ledger (合의 원장·판정의 감사가 공유하는 어휘 — 참조 무결성·침묵 검사
                        #     순수 함수(fatalIds·danglingRefs·uncoveredFatalIds·duplicateRefs)와
-                       #     렌더러용 파생 buildLedger/LedgerEntry. Remedy는 solution.ts에,
-                       #     RemedyAudit은 verdict.ts에 산다 — 각자 자기 산출물의 필드다.
+                       #     렌더러용 파생 buildLedger/LedgerEntry + fatalLedger(fatal만 추린 공유 뷰 —
+                       #     report.md·웹·판정 프롬프트가 같은 것을 쓴다. 렌더러마다 갈리면 두 개의 진실이 된다).
+                       #     Remedy는 solution.ts에, RemedyAudit은 verdict.ts에 산다 — 각자 자기 산출물의 필드다.
                        #     severity가 dialectic에 사는 것과 같은 이유 — ADR-017)
 
 web/                   # Next.js App Router 웹 UI (npm workspace) — 1-web-ui phase
