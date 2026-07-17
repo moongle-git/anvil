@@ -246,6 +246,14 @@ const VERDICT_TEXT = JSON.stringify({
     { keyword: "이탈률", severity: "major", note: "식물 사망 시 구독 이유가 소멸한다" },
   ],
   conditions: ["케어 플랜 유지율 40% 이상"],
+  // c2(fatal)를 감사하지 않으면 verdictSchemaFor가 거부한다 — 감사도 이제 칸이다 (ADR-017)
+  remedyAudits: [
+    {
+      criticismId: "c2",
+      assessment: "solid",
+      note: "구독 이탈이 성립하는 전장을 실제로 떠나 생육 로그 판매로 옮겼다",
+    },
+  ],
 });
 
 /** 파이프라인 완주에 필요한 6개 응답 (interviewer는 CLI-direct run에서 돌지 않는다) */
