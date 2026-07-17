@@ -66,6 +66,34 @@ const SEVERITY_RANK: Record<CriticismSeverity, number> = {
 };
 
 /**
+ * 원장을 렌더하는 쪽(report.md · 웹 리포트)이 공유하는 뷰 (ADR-017).
+ *
+ * fatal만 싣는 이유: 전건 커버리지를 강제받는 것이 fatal뿐이고(major·minor는 허용하되
+ * 강제하지 않는다), PRD의 5절 원장 규격도 치명적 결함만을 대상으로 쓴다.
+ *
+ * 원장이 통째로 비면 빈 배열을 돌려주고 호출부가 블록을 생략한다. 구 run은 원장 계약 이전에
+ * 저장됐을 뿐인데 fatal마다 "해결책 없음"을 찍으면 있지도 않은 침묵을 지어내는 셈이다 —
+ * researchCoverage가 비면 커버리지 블록을 통째로 생략하는 것과 같은 태도다 (ADR-013).
+ *
+ * buildLedger 옆에 사는 이유는 이 규칙이 렌더러마다 갈리면 안 되기 때문이다. report.md에서는
+ * 생략되는 구 run이 웹에서는 "해결책 없음" 표로 뜨는 것은 두 개의 진실이다.
+ */
+export function fatalLedger(
+  criticism: Criticism,
+  solution?: Solution,
+  verdict?: Verdict,
+): LedgerEntry[] {
+  // buildLedger와 같은 방어 — 렌더링은 검증기가 아니다. 스키마를 거친 산출물은 .default([])로
+  // 항상 배열이지만, 원장을 그리려다 화면을 터뜨리는 것은 아무에게도 도움이 되지 않는다.
+  const remedyCount = (solution?.remedies ?? []).length;
+  const auditCount = (verdict?.remedyAudits ?? []).length;
+  if (remedyCount === 0 && auditCount === 0) return [];
+  return buildLedger(criticism, solution, verdict).filter(
+    (entry) => entry.point.severity === "fatal",
+  );
+}
+
+/**
  * 리포트·웹이 함께 쓰는 순수 파생. 강제 대상인 fatal은 해결책이 없어도(침묵) 행으로 남고,
  * 강제 대상이 아닌 major·minor는 누군가 언급했을 때만 오른다.
  *

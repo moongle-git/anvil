@@ -5,6 +5,7 @@ import {
   danglingRefs,
   duplicateRefs,
   fatalIds,
+  fatalLedger,
   uncoveredFatalIds,
 } from "./ledger.js";
 import type { Solution } from "./solution.js";
@@ -225,5 +226,40 @@ describe("buildLedger", () => {
     const ledger = buildLedger(criticism, dangling, danglingVerdict);
     expect(ledger.map((entry) => entry.point.id)).toEqual(["c2", "c3"]);
     expect(ledger.every((entry) => entry.remedy === undefined)).toBe(true);
+  });
+});
+
+// report.md와 웹 리포트가 공유하는 뷰. 이 규칙이 렌더러마다 갈리면 report.md에서 생략되는
+// 구 run이 웹에서는 "해결책 없음" 표로 뜨는 두 개의 진실이 생긴다 (ADR-017).
+describe("fatalLedger", () => {
+  it("fatal만 싣는다 — 전건 커버리지를 강제받는 것이 fatal뿐이다", () => {
+    const entries = fatalLedger(criticism, solution, verdict);
+    expect(entries.map((entry) => entry.point.id)).toEqual(["c2", "c3"]);
+  });
+
+  it("원장이 통째로 비면 빈 배열을 준다 — 호출부가 블록을 생략하는 근거다", () => {
+    expect(fatalLedger(criticism, { ...solution, remedies: [] })).toEqual([]);
+    expect(
+      fatalLedger(
+        criticism,
+        { ...solution, remedies: [] },
+        { ...verdict, remedyAudits: [] },
+      ),
+    ).toEqual([]);
+    // 구 run은 원장 계약 이전에 저장됐을 뿐이다. fatal마다 "해결책 없음"을 찍으면
+    // 있지도 않은 침묵을 지어내는 셈이다
+    expect(fatalLedger(criticism)).toEqual([]);
+  });
+
+  it("원장이 하나라도 있으면 침묵한 fatal도 행으로 남긴다", () => {
+    const entries = fatalLedger(criticism, {
+      ...solution,
+      remedies: [solution.remedies[0]],
+    });
+
+    expect(entries.map((entry) => entry.point.id)).toEqual(["c2", "c3"]);
+    // c3만 해결책이 있고 c2는 침묵이다 — 침묵이 행에서 사라지면 관측할 수 없다
+    expect(entries.find((entry) => entry.point.id === "c2")?.remedy).toBeUndefined();
+    expect(entries.find((entry) => entry.point.id === "c3")?.remedy).toBeDefined();
   });
 });

@@ -70,8 +70,14 @@ export function ReportView({
         <div className="flex min-w-0 flex-col gap-12">
           <MarketContextSection context={context} />
           <DialecticSplit thesis={thesis} criticism={criticism} />
-          <SolutionSection solution={solution} />
-          <VerdictSection verdict={verdict} />
+          {/* 원장은 criticism과의 대조라 두 섹션 모두 criticism을 받는다. SolutionSection에
+              verdict를 넘기지 않는 것이 ADR-008의 구조적 방어다 — 넘길 수 없으면 샐 수 없다. */}
+          <SolutionSection solution={solution} criticism={criticism} />
+          <VerdictSection
+            verdict={verdict}
+            criticism={criticism}
+            solution={solution}
+          />
         </div>
       </div>
     </div>

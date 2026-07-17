@@ -113,6 +113,20 @@ const solution: Solution = {
   dataFlywheel: "사용자 수정 피드백이 요약 품질을 높인다.",
   monetization: "팀 단위 구독. 좌석당 과금 모델.",
   synthesis: "낙관의 성장성과 반론의 번들 리스크를 종합하면 실행 추적이 해자다.",
+  // fatal(c1·c4) 전건 커버리지 — 원장 없는 솔루션은 이제 파이프라인을 통과할 수 없으므로
+  // 픽스처도 그 계약을 지킨다 (step 2~5가 e2e·cli·orchestrator 픽스처에 한 것과 동형)
+  remedies: [
+    {
+      respondsTo: "c1",
+      strategy: "bypass",
+      remedy: "요약이 아니라 실행 추적으로 전장을 옮긴다.",
+    },
+    {
+      respondsTo: "c4",
+      strategy: "defend",
+      remedy: "수정 피드백 플라이휠이 복제 비용을 올린다.",
+    },
+  ],
 };
 
 const thesis: Thesis = {

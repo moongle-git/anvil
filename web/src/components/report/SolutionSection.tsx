@@ -1,6 +1,7 @@
-import type { Solution } from "@anvil/types";
+import type { Criticism, Solution } from "@anvil/types";
 import { Card, EmptyState, SectionHeading } from "@/components/ui";
 import { renderRichText } from "@/lib/richText";
+import { RemedyClaims } from "./RemedyLedger";
 
 type SolutionPartKey =
   | "minimalInput"
@@ -19,7 +20,16 @@ const PARTS: { key: SolutionPartKey; title: string }[] = [
 
 // 5단계 서사의 4단계(合) — 이 리포트에서 가장 중요한 섹션.
 // 단순 절충이 아니라 反의 비판을 방어·우회해 새 가치를 만드는 피벗(Pivot) 전략이다.
-export function SolutionSection({ solution }: { solution?: Solution }) {
+//
+// criticism은 결함↔해결책 원장을 위해 받는다. verdict는 받지 않는다 — 감사 결과가 이 섹션에
+// 닿을 수 없어야 독자가 5절 전에 결론을 알지 못한다 (ADR-008).
+export function SolutionSection({
+  solution,
+  criticism,
+}: {
+  solution?: Solution;
+  criticism?: Criticism;
+}) {
   return (
     <section aria-labelledby="solution" className="flex max-w-3xl flex-col gap-6">
       <SectionHeading id="solution">④ 인사이트 및 재설계 (合)</SectionHeading>
@@ -48,6 +58,11 @@ export function SolutionSection({ solution }: { solution?: Solution }) {
             </span>
             {renderRichText(solution.revisedConcept)}
           </Card>
+
+          {/* 구 run은 criticism이 검증에 실패해 없을 수 있다 — 그때는 원장을 통째로 생략한다 */}
+          {criticism !== undefined ? (
+            <RemedyClaims criticism={criticism} solution={solution} />
+          ) : null}
 
           {PARTS.map((part) => (
             <div key={part.key} className="flex flex-col gap-2">

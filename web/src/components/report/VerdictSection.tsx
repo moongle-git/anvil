@@ -1,6 +1,8 @@
 import {
   RECOMMENDATION_LABELS,
+  type Criticism,
   type Recommendation,
+  type Solution,
   type Verdict,
 } from "@anvil/types";
 import {
@@ -11,6 +13,7 @@ import {
   SeverityBadge,
 } from "@/components/ui";
 import { OrderedList, renderInline, renderRichText } from "@/lib/richText";
+import { RemedyLedgerTable } from "./RemedyLedger";
 import { SurvivalGauge } from "./SurvivalGauge";
 
 // recommendation → 뱃지 시맨틱 톤. 새 색이 아니라 기존 Badge 톤을 재사용한다.
@@ -28,7 +31,17 @@ function Subheading({ children }: { children: React.ReactNode }) {
 
 // 5단계 서사의 마지막 절: 제3의 판정 에이전트가 낸 최종 판정(verdict.json).
 // criticism.verdict(反의 소결론)와 다르다 — 최종 판정의 유일한 소스는 verdict.json이다 (ADR-010).
-export function VerdictSection({ verdict }: { verdict?: Verdict }) {
+// criticism·solution은 결함↔해결책 원장을 위해 받는다. 판정의 감사가 처음이자 유일하게
+// 드러나는 곳이 여기다 — 4절은 해결책의 주장까지만 보여준다 (ADR-008).
+export function VerdictSection({
+  verdict,
+  criticism,
+  solution,
+}: {
+  verdict?: Verdict;
+  criticism?: Criticism;
+  solution?: Solution;
+}) {
   if (verdict === undefined) {
     // 구버전 run은 verdict step 이전에 생성돼 verdict.json이 없다 (ADR-011)
     return (
@@ -64,6 +77,16 @@ export function VerdictSection({ verdict }: { verdict?: Verdict }) {
 
       {/* 종합 결론 단락 */}
       {renderRichText(verdict.rationale)}
+
+      {/* 원장은 잔존 리스크 앞에 온다 — 결함↔해결책 쌍은 부록이 아니라 판정의 근거다 (PRD).
+          구 run은 criticism이 검증에 실패해 없을 수 있다 — 그때는 블록을 통째로 생략한다. */}
+      {criticism !== undefined ? (
+        <RemedyLedgerTable
+          criticism={criticism}
+          solution={solution}
+          verdict={verdict}
+        />
+      ) : null}
 
       <div className="flex flex-col gap-3">
         <Subheading>잔존 리스크</Subheading>

@@ -1,7 +1,7 @@
 import {
-  buildLedger,
   DIALECTIC_AXES,
   DIALECTIC_AXIS_LABELS,
+  fatalLedger,
   RECOMMENDATION_LABELS,
   REMEDY_STRATEGY_LABELS,
   REMEDY_VERDICT_LABELS,
@@ -294,29 +294,6 @@ function criticismPointLines(
 
 function residualRiskLine(risk: ResidualRisk): string {
   return `*   **[${risk.severity.toUpperCase()}]** ${risk.keyword} — ${risk.note}`;
-}
-
-/**
- * 4·5절이 공유하는 원장 뷰 (ADR-017). 대조는 buildLedger가 한다 — 여기서 집합 뺄셈을
- * 다시 구현하면 렌더러와 타입 레이어에 두 개의 진실이 생긴다.
- *
- * fatal만 싣는 이유: 전건 커버리지를 강제받는 것이 fatal뿐이고(major·minor는 허용하되
- * 강제하지 않는다), PRD의 5절 원장 규격도 치명적 결함만을 대상으로 쓴다.
- *
- * 원장이 통째로 비면 빈 배열을 돌려주고 호출부가 블록을 생략한다. 구 run은 원장 계약 이전에
- * 저장됐을 뿐인데 fatal마다 "해결책 없음"을 찍으면 있지도 않은 침묵을 지어내는 셈이다 —
- * researchCoverage가 비면 커버리지 블록을 통째로 생략하는 것과 같은 태도다 (ADR-013).
- */
-function fatalLedger(
-  criticism: Criticism,
-  solution: Solution,
-  verdict?: Verdict,
-): LedgerEntry[] {
-  const auditCount = verdict?.remedyAudits.length ?? 0;
-  if (solution.remedies.length === 0 && auditCount === 0) return [];
-  return buildLedger(criticism, solution, verdict).filter(
-    (entry) => entry.point.severity === "fatal",
-  );
 }
 
 function remedyBullet(entry: LedgerEntry): string[] {
