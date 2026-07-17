@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ZodType } from "zod";
 import { RunStore, STEP_ARTIFACT_KINDS } from "../lib/runStore.js";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
@@ -16,7 +17,10 @@ import {
   MarketContextSchema,
   RESEARCH_SOURCE_IDS,
   SOURCE_LABELS,
+  SolutionSchema,
   VerdictSchema,
+  solutionSchemaFor,
+  verdictSchemaFor,
   type CommunityVoice,
   type Criticism,
   type InterviewQuestions,
@@ -160,7 +164,15 @@ const verdict: Verdict = {
     },
   ],
   conditions: ["출시 6개월 내 리텐션 D30 20% 확보"],
-  remedyAudits: [],
+  // c2가 fatal이다 — 감사가 비면 verdictSchemaFor가 거부하므로 실제 파이프라인을
+  // 통과할 수 없는 판정이 된다 (ADR-017)
+  remedyAudits: [
+    {
+      criticismId: "c2",
+      assessment: "solid",
+      note: "생존 보장 과금은 무료 대체재가 구조적으로 흉내낼 수 없는 약속이다",
+    },
+  ],
 };
 
 interface FakeGemini {
@@ -185,27 +197,45 @@ const searchQueries: SearchQueries = {
  * 스키마 객체 동일성(schema === XSchema)으로 판별하지 않는다 — solutionSchemaFor처럼
  * criticism을 아는 팩토리는 호출마다 새 객체를 만든다 (ADR-017). usageLabel은 에이전트가
  * usage 테이블에 적는 것과 같은 이름이라 파이프라인이 실제로 쓰는 계약이다 (ADR-016).
+ *
+ * 실제 generateStructured는 넘겨받은 schema로 응답을 검증한 뒤에야 반환한다 (ADR-004) —
+ * fake도 그 계약을 지켜야 원장 없는 산출물이 step error가 되는 것이 관측된다.
  */
 function fakeGemini(options?: {
   failOn?: string;
   questions?: InterviewQuestions;
+  /** 원장 없는 응답 등, 스키마가 거부해야 할 solution을 주입한다 */
+  solution?: unknown;
 }): FakeGemini {
   const generateStructured = vi.fn(
-    ({ usageLabel }: { usageLabel: string }): Promise<unknown> => {
+    ({
+      usageLabel,
+      schema,
+    }: {
+      usageLabel: string;
+      schema: ZodType<unknown>;
+    }): Promise<unknown> => {
       if (usageLabel === options?.failOn) {
         return Promise.reject(new Error("Gemini 호출 실패"));
       }
+      const respond = (response: unknown): Promise<unknown> => {
+        // 검증 실패는 재시도 끝에 throw된다 — fake는 그 종착지만 모델링한다
+        try {
+          return Promise.resolve(schema.parse(response));
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      };
       if (usageLabel === INTERVIEWER_USAGE_LABEL) {
-        return Promise.resolve(options?.questions ?? { questions: [] });
+        return respond(options?.questions ?? { questions: [] });
       }
       if (usageLabel === RESEARCH_PLANNER_USAGE_LABEL)
-        return Promise.resolve(searchQueries);
-      if (usageLabel === THESIS_USAGE_LABEL) return Promise.resolve(thesis);
-      if (usageLabel === COLD_CRITIC_USAGE_LABEL)
-        return Promise.resolve(criticism);
+        return respond(searchQueries);
+      if (usageLabel === THESIS_USAGE_LABEL) return respond(thesis);
+      if (usageLabel === COLD_CRITIC_USAGE_LABEL) return respond(criticism);
       if (usageLabel === SOLUTION_DESIGNER_USAGE_LABEL)
-        return Promise.resolve(solution);
-      if (usageLabel === VERDICT_USAGE_LABEL) return Promise.resolve(verdict);
+        return respond(options?.solution ?? solution);
+      if (usageLabel === VERDICT_USAGE_LABEL) return respond(verdict);
       return Promise.reject(new Error(`예상하지 못한 usageLabel: ${usageLabel}`));
     },
   );
@@ -391,6 +421,94 @@ describe("runPipeline", () => {
     expect(store.loadStepOutput(runId, "verdict", VerdictSchema)).toEqual(
       verdict,
     );
+  });
+
+  // ADR-017: 하류(solution·verdict) step의 스키마는 상류(criticism)를 안다. 그래서 resume이
+  // 교차 산출물 정합성까지 재검증한다 — 원장 없이 저장된 구 solution은 새 코드 없이
+  // ADR-011의 이송 경로("산출물이 없거나 손상됨 — 재실행한다")를 탄다.
+  describe("결함↔해결책 원장 (교차 산출물 검증)", () => {
+    it("★ resume: 원장 없이 저장된 solution은 손상으로 취급해 재실행한다", async () => {
+      const first = fakeGemini();
+      const { runId } = await runPipeline(makeDeps(first.gemini), { idea: IDEA });
+
+      // 원장이 생기기 전에 저장된 solution의 모양. 정적 SolutionSchema는 통과시키지만
+      // (관대한 읽기), criticism의 fatal(c2)에 침묵하므로 팩토리는 거부한다.
+      const legacySolution = { ...solution, remedies: [] };
+      store.saveStepOutput(runId, "solution-designer", legacySolution);
+      expect(SolutionSchema.safeParse(legacySolution).success).toBe(true);
+
+      const second = fakeGemini();
+      await runPipeline(makeDeps(second.gemini), {
+        idea: IDEA,
+        resumeRunId: runId,
+      });
+
+      // 침묵한 solution만 재실행된다. verdict는 completed이고 저장된 판정이 여전히
+      // 검증을 통과하므로 건너뛴다 — resume은 하류로 무효화를 전파하지 않는다 (ADR-004)
+      expect(calledLabels(second.generateStructured)).toEqual([
+        SOLUTION_DESIGNER_USAGE_LABEL,
+      ]);
+      // 재실행으로 원장이 복구된다 — 구 run은 resume만으로 이송된다
+      expect(
+        store.loadStepOutput(runId, "solution-designer", SolutionSchema)
+          ?.remedies,
+      ).toEqual(solution.remedies);
+    });
+
+    it("resume: 원장이 fatal을 전건 커버하면 재실행하지 않는다", async () => {
+      const first = fakeGemini();
+      const { runId } = await runPipeline(makeDeps(first.gemini), { idea: IDEA });
+
+      const second = fakeGemini();
+      await runPipeline(makeDeps(second.gemini), {
+        idea: IDEA,
+        resumeRunId: runId,
+      });
+
+      expect(calledLabels(second.generateStructured)).toEqual([]);
+      expect(
+        store.loadStepOutput(runId, "solution-designer", SolutionSchema),
+      ).toEqual(solution);
+    });
+
+    it("fatal에 침묵하는 solution은 solution-designer step이 error로 기록된다", async () => {
+      // 재시도를 다 쓰고도 원장을 못 채운 경우 — 침묵한 산출물이 저장되면 안 된다
+      const { gemini } = fakeGemini({ solution: { ...solution, remedies: [] } });
+
+      const promise = runPipeline(makeDeps(gemini), { idea: IDEA });
+      await expect(promise).rejects.toBeInstanceOf(PipelineStepError);
+      const error = (await promise.catch((e: unknown) => e)) as PipelineStepError;
+      expect(error.step).toBe("solution-designer");
+      // 재시도 피드백이 되는 메시지다 — 빠진 id를 이름으로 지목해야 한다 (ADR-004)
+      expect(error.message).toContain("c2");
+
+      const saved = store.loadRun(error.runId);
+      expect(saved.steps.map((s) => s.status)).toEqual([
+        "completed",
+        "completed",
+        "completed",
+        "error",
+        "pending",
+      ]);
+      expect(saved.completedAt).toBeUndefined();
+      expect(store.loadReport(error.runId)).toBeNull();
+    });
+
+    it("웹 읽기 경로가 쓰는 정적 스키마는 원장 없는 구 solution도 통과시킨다", async () => {
+      // 관대한 읽기 / 엄격한 쓰기는 설계다 — 웹은 criticism 없이 solution을 렌더해야 하고,
+      // 웹을 팩토리로 바꾸면 원장 이전에 저장된 기존 run이 조용히 빈 화면이 된다 (ADR-017)
+      const legacySolution = { ...solution, remedies: [] };
+      expect(SolutionSchema.safeParse(legacySolution).success).toBe(true);
+      expect(solutionSchemaFor(criticism).safeParse(legacySolution).success).toBe(
+        false,
+      );
+
+      const legacyVerdict = { ...verdict, remedyAudits: [] };
+      expect(VerdictSchema.safeParse(legacyVerdict).success).toBe(true);
+      expect(verdictSchemaFor(criticism).safeParse(legacyVerdict).success).toBe(
+        false,
+      );
+    });
   });
 
   it("cold-critic step 실패: state에 error를 기록하고 PipelineStepError를 던진다", async () => {

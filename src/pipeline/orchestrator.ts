@@ -12,9 +12,9 @@ import type { GeminiService } from "../services/gemini.js";
 import {
   CriticismSchema,
   MarketContextSchema,
-  SolutionSchema,
   ThesisSchema,
-  VerdictSchema,
+  solutionSchemaFor,
+  verdictSchemaFor,
   type InterviewAnswers,
   type InterviewQuestions,
   type PipelineStepName,
@@ -220,11 +220,29 @@ export async function runPipeline(
   const criticism = await executeStep("cold-critic", CriticismSchema, () =>
     runColdCritic({ gemini: deps.gemini }, idea, context, thesis),
   );
-  const solution = await executeStep("solution-designer", SolutionSchema, () =>
-    runSolutionDesigner({ gemini: deps.gemini }, idea, context, criticism, thesis),
+  // 아래 두 step은 criticism을 아는 팩토리 스키마를 쓴다 (ADR-017). 하류가 상류를 알 뿐,
+  // 의존은 파이프라인이 흐르는 방향으로만 흐른다. 그래서 resume이 교차 산출물 정합성까지
+  // 재검증한다 — 원장 없이 저장된 구 solution은 loadStepOutput이 null로 돌려주고
+  // "산출물이 없거나 손상됨 — 재실행한다" 경로로 자동 이송된다 (ADR-011).
+  //
+  // 웹 읽기 경로(web/src/lib/server/runs.ts)는 정적 SolutionSchema·VerdictSchema를 계속 쓴다.
+  // 관대한 읽기 / 엄격한 쓰기 — 두 단계 엄격도는 설계이지 실수가 아니다. 웹은 criticism 없이도
+  // solution을 렌더해야 하고, 웹을 "일관성"을 이유로 팩토리로 바꾸면 원장 이전에 저장된
+  // 기존 run이 조용히 빈 화면이 된다.
+  const solution = await executeStep(
+    "solution-designer",
+    solutionSchemaFor(criticism),
+    () =>
+      runSolutionDesigner(
+        { gemini: deps.gemini },
+        idea,
+        context,
+        criticism,
+        thesis,
+      ),
   );
   // 合을 설계한 당사자가 스스로 채점하면 낙관 편향이 들어간다 — 판정자는 분리한다 (ADR-010)
-  const verdict = await executeStep("verdict", VerdictSchema, () =>
+  const verdict = await executeStep("verdict", verdictSchemaFor(criticism), () =>
     runVerdict({ gemini: deps.gemini }, idea, context, thesis, criticism, solution),
   );
 
