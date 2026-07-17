@@ -3,6 +3,8 @@ import {
   DIALECTIC_AXIS_LABELS,
   MarketContextSchema,
   RECOMMENDATION_LABELS,
+  REMEDY_STRATEGY_LABELS,
+  REMEDY_VERDICT_LABELS,
   SOURCE_LABELS,
   toPromptContext,
   type Criticism,
@@ -167,6 +169,14 @@ const solution: Solution = {
   revisedConcept: "제로 UI 식물 집사 — fatal 비판(지불 의사)에 보장형 과금으로 대응한다",
   synthesis:
     "낙관의 성장 동력과 반론의 지불 의사 한계를 종합하면 '생존 보장'이 유일한 해자다",
+  // c2(유일한 fatal)를 덮는다 — solutionSchemaFor가 통과시키는 원장의 최소 형태다 (ADR-017)
+  remedies: [
+    {
+      respondsTo: "c2",
+      strategy: "bypass",
+      remedy: "무료 대체재와 같은 기능이 아니라 '죽으면 환불'이라는 결과를 판다",
+    },
+  ],
 };
 
 const verdict: Verdict = {
@@ -183,6 +193,13 @@ const verdict: Verdict = {
     },
   ],
   conditions: ["출시 6개월 내 유료 전환율 5% 확보"],
+  remedyAudits: [
+    {
+      criticismId: "c2",
+      assessment: "solid",
+      note: "결과 보장은 무료 리마인더가 흉내 낼 수 없는 약속이다",
+    },
+  ],
 };
 
 /** 첫 번째 <details> 블록(1절 원시 근거)의 경계 */
@@ -734,8 +751,13 @@ describe("renderReport", () => {
 
   describe("4. 合 — 인사이트 및 재설계", () => {
     it("Solution의 모든 필드가 본문에 포함된다", () => {
-      for (const value of Object.values(solution)) {
+      const { remedies, ...narrative } = solution;
+      for (const value of Object.values(narrative)) {
         expect(report).toContain(value);
+      }
+      // 원장은 문자열이 아니라 구조라 따로 본다 — 형태는 아래 "결함↔해결책 원장" describe가 확인한다
+      for (const remedy of remedies) {
+        expect(report).toContain(remedy.remedy);
       }
     });
 
@@ -791,6 +813,240 @@ describe("renderReport", () => {
       );
       expect(report).toContain("### 생존 조건");
       expect(report).toContain(`1. ${verdict.conditions[0]}`);
+    });
+  });
+
+  // ── 결함↔해결책 원장 (ADR-017): 이 리포트의 핵심 산출물이 revisedConcept 줄글에 묻혀 있었다 ──
+
+  describe("결함↔해결책 원장", () => {
+    /** fatal 2건 — c3(원래 minor)를 fatal로 올려 침묵·재주장 양태를 함께 본다 */
+    const twoFatals: Criticism = {
+      ...criticism,
+      points: criticism.points.map((point) =>
+        point.id === "c3" ? { ...point, severity: "fatal" as const } : point,
+      ),
+    };
+
+    const twoRemedies: Solution = {
+      ...solution,
+      remedies: [
+        ...solution.remedies,
+        {
+          respondsTo: "c3",
+          strategy: "defend",
+          remedy: "가정별 생육 로그를 축적해 복제 불가능한 진단 정확도를 만든다",
+        },
+      ],
+    };
+
+    const twoAudits: Verdict = {
+      ...verdict,
+      remedyAudits: [
+        ...verdict.remedyAudits,
+        {
+          criticismId: "c3",
+          assessment: "restated",
+          note: "'복제 불가능'은 해자 부재에 수식어만 덧붙인 재주장이다",
+        },
+      ],
+    };
+
+    function render(
+      overrides: {
+        criticism?: Criticism;
+        solution?: Solution;
+        verdict?: Verdict;
+      } = {},
+    ): string {
+      return renderReport(
+        IDEA,
+        context,
+        thesis,
+        overrides.criticism ?? criticism,
+        overrides.solution ?? solution,
+        overrides.verdict ?? verdict,
+      );
+    }
+
+    function sectionOf(rendered: string, from: string, to?: string): string {
+      const start = rendered.indexOf(from);
+      expect(start).toBeGreaterThan(-1);
+      return to === undefined
+        ? rendered.slice(start)
+        : rendered.slice(start, rendered.indexOf(to));
+    }
+
+    describe("4절 — 해결책만, 감사는 오지 않는다", () => {
+      const fourth = sectionOf(report, "## 4.", "## 5.");
+
+      it("전략 라벨과 해결책 본문을 결함별로 렌더링한다", () => {
+        const [remedy] = solution.remedies;
+        expect(fourth).toContain(
+          `*   **[${REMEDY_STRATEGY_LABELS.bypass}] 무료 대체재** — 지불 의사가 낮다`,
+        );
+        expect(fourth).toContain(`    *   ${remedy.remedy}`);
+      });
+
+      it("★ 감사 결과가 렌더되지 않는다 (ADR-008)", () => {
+        // 4절에 "재주장" 칩이 뜨면 독자는 5절을 읽기 전에 결론을 안다 —
+        // 그 순간 正/反 대립은 읽을 이유가 없는 장식이 된다
+        const rendered = render({
+          criticism: twoFatals,
+          solution: twoRemedies,
+          verdict: twoAudits,
+        });
+        const section = sectionOf(rendered, "## 4.", "## 5.");
+
+        for (const label of Object.values(REMEDY_VERDICT_LABELS)) {
+          expect(section, `4절에 샌 감사 라벨: ${label}`).not.toContain(label);
+        }
+        for (const audit of twoAudits.remedyAudits) {
+          expect(section).not.toContain(audit.note);
+        }
+      });
+
+      it("해결책을 검증된 사실이 아니라 재설계의 자기보고로 표기한다 (ADR-013)", () => {
+        expect(fourth).toContain(
+          "### 치명적 결함에 대한 해결책 (재설계의 주장 · 미검증)",
+        );
+        expect(fourth).toContain(
+          "> 아래는 재설계가 스스로 낸 대응이지 검증된 사실이 아니다." +
+            " 유효한지는 5절 최종 판정이 항목별로 감사한다.",
+        );
+      });
+
+      it("침묵한 fatal을 실패로 낙인찍지 않고 사실로만 적는다", () => {
+        // 침묵은 코드가 증명할 수 있지만, 그것을 실패라 부르는 것은 5절의 판단이다
+        const section = sectionOf(
+          render({ criticism: twoFatals }),
+          "## 4.",
+          "## 5.",
+        );
+        expect(section).toContain("*   **[해결책 없음] 해자 부재**");
+        expect(section).toContain("    *   재설계는 이 결함에 대해 아무 말도 하지 않았다.");
+      });
+    });
+
+    describe("5절 — 요약 줄 + 3열 표", () => {
+      it("요약 줄과 3열 표를 렌더링한다", () => {
+        const rendered = render({
+          criticism: twoFatals,
+          solution: twoRemedies,
+          verdict: twoAudits,
+        });
+        expect(rendered).toContain("### 결함↔해결책 원장");
+        expect(rendered).toContain("| 비판 | 재설계의 해결책 | 판정의 감사 |");
+        expect(rendered).toContain(
+          `| **무료 대체재** 지불 의사가 낮다` +
+            ` | **[${REMEDY_STRATEGY_LABELS.bypass}]** ${twoRemedies.remedies[0].remedy}` +
+            ` | **[${REMEDY_VERDICT_LABELS.solid}]** ${twoAudits.remedyAudits[0].note} |`,
+        );
+      });
+
+      it("★ 요약 줄의 숫자가 실제 원장과 일치한다", () => {
+        const rendered = render({
+          criticism: twoFatals,
+          solution: twoRemedies,
+          verdict: twoAudits,
+        });
+        expect(rendered).toContain(
+          `비판이 제기한 치명적 결함 2건 → 해결책 2건` +
+            ` (${REMEDY_VERDICT_LABELS.solid} 1 · ${REMEDY_VERDICT_LABELS.restated} 1)`,
+        );
+      });
+
+      it("요약 줄이 침묵을 세지 않는다 — 결함 2건에 해결책 1건", () => {
+        const rendered = render({ criticism: twoFatals });
+        expect(rendered).toContain(
+          `비판이 제기한 치명적 결함 2건 → 해결책 1건 (${REMEDY_VERDICT_LABELS.solid} 1)`,
+        );
+      });
+
+      it("★ 원장이 잔존 리스크보다 앞에 온다 — 부록이 아니라 판정의 근거다", () => {
+        const fifth = sectionOf(report, "## 5. 최종 판정 (Verdict)");
+        const ledgerAt = fifth.indexOf("### 결함↔해결책 원장");
+        expect(ledgerAt).toBeGreaterThan(fifth.indexOf(verdict.rationale));
+        expect(ledgerAt).toBeLessThan(fifth.indexOf("### 잔존 리스크"));
+        expect(fifth.indexOf("### 잔존 리스크")).toBeLessThan(
+          fifth.indexOf("### 생존 조건"),
+        );
+      });
+
+      it("침묵한 fatal을 '해결책 없음'으로 표시한다", () => {
+        const rendered = render({ criticism: twoFatals });
+        expect(rendered).toContain(
+          `| **해자 부재** 진입장벽이 없다 | 해결책 없음 |`,
+        );
+      });
+
+      it("셀 안의 줄바꿈과 |가 표를 깨뜨리지 않는다", () => {
+        const rendered = render({
+          solution: {
+            ...solution,
+            remedies: [
+              { ...solution.remedies[0], remedy: "첫 줄\n둘째 | 줄" },
+            ],
+          },
+        });
+        expect(rendered).toContain(
+          `**[${REMEDY_STRATEGY_LABELS.bypass}]** 첫 줄 둘째 \\| 줄 |`,
+        );
+      });
+    });
+
+    it("fatal이 아닌 비판은 원장에 오르지 않는다", () => {
+      // 전건 커버리지를 강제받는 것은 fatal뿐이다 (ADR-017 / PRD 5절 규격)
+      const rendered = render({
+        solution: {
+          ...solution,
+          remedies: [
+            ...solution.remedies,
+            {
+              respondsTo: "c1",
+              strategy: "defend",
+              remedy: "major 비판에 대한 선택적 해결책",
+            },
+          ],
+        },
+      });
+      expect(rendered).toContain("### 결함↔해결책 원장");
+      expect(rendered).not.toContain("major 비판에 대한 선택적 해결책");
+      expect(rendered).toContain("비판이 제기한 치명적 결함 1건 → 해결책 1건");
+    });
+
+    it("★ 원장 없는 구 solution·verdict는 블록 자체를 생략한다 — 빈 표를 그리지 않는다", () => {
+      // 구 run은 원장 계약 이전에 저장됐을 뿐이다. fatal마다 "해결책 없음"을 찍으면
+      // 있지도 않은 침묵을 지어내는 것이다 (coverageSection과 같은 태도 — ADR-013)
+      const rendered = render({
+        solution: { ...solution, remedies: [] },
+        verdict: { ...verdict, remedyAudits: [] },
+      });
+      expect(rendered).not.toContain("결함↔해결책 원장");
+      expect(rendered).not.toContain("치명적 결함에 대한 해결책");
+      expect(rendered).not.toContain("해결책 없음");
+      expect(rendered).not.toContain("0건");
+      // 나머지 5절은 그대로다
+      expect(rendered).toContain("### 잔존 리스크");
+      expect(rendered).toContain(verdict.rationale);
+    });
+
+    it("존재하지 않는 id를 참조하는 해결책이 섞여도 throw하지 않고 조용히 드롭한다", () => {
+      let rendered = "";
+      expect(() => {
+        rendered = render({
+          solution: {
+            ...solution,
+            remedies: [
+              { respondsTo: "c999", strategy: "defend", remedy: "유령 비판에 대한 해결책" },
+            ],
+          },
+        });
+      }).not.toThrow();
+
+      expect(rendered).not.toContain("c999");
+      expect(rendered).not.toContain("유령 비판에 대한 해결책");
+      // 드롭된 결과 c2는 침묵이 된다 — 렌더러는 검증기가 아니다
+      expect(rendered).toContain("*   **[해결책 없음] 무료 대체재**");
     });
   });
 

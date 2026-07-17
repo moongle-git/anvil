@@ -1,7 +1,11 @@
 import {
+  buildLedger,
   DIALECTIC_AXES,
   DIALECTIC_AXIS_LABELS,
   RECOMMENDATION_LABELS,
+  REMEDY_STRATEGY_LABELS,
+  REMEDY_VERDICT_LABELS,
+  REMEDY_VERDICTS,
   RESEARCH_SOURCE_IDS,
   SOURCE_LABELS,
 } from "../types/index.js";
@@ -12,6 +16,7 @@ import type {
   Criticism,
   CriticismPoint,
   DialecticAxis,
+  LedgerEntry,
   MarketContext,
   ResidualRisk,
   Solution,
@@ -267,7 +272,9 @@ function criticismPointLines(
   const badge = `**[${point.severity.toUpperCase()} · ${point.riskScore}/100 · ${point.riskKeyword}]**`;
   const lines = [`${badge} ${point.claim}`, ""];
 
-  // rebuts가 끊어진 참조를 가리키면 조용히 무시한다 — 스키마가 교차 참조를 검증하지 않는다
+  // rebuts가 끊어진 참조를 가리키면 조용히 무시한다. solution.remedies·verdict.remedyAudits와
+  // 달리 rebuts에는 교차 검증이 없다 — 실측상 dangling이 참조 16건 중 0건이라 ADR-017이
+  // 근거 부족을 이유로 검증을 사양했다(측정하지 않고 최적화하지 않는다). 렌더러는 검증기가 아니다.
   const rebutted = thesisPoints.find((t) => t.id === point.rebuts);
   if (rebutted !== undefined) {
     lines.push(`↳ 반박 대상: 正 "${rebutted.claim}"`, "");
@@ -287,6 +294,110 @@ function criticismPointLines(
 
 function residualRiskLine(risk: ResidualRisk): string {
   return `*   **[${risk.severity.toUpperCase()}]** ${risk.keyword} — ${risk.note}`;
+}
+
+/**
+ * 4·5절이 공유하는 원장 뷰 (ADR-017). 대조는 buildLedger가 한다 — 여기서 집합 뺄셈을
+ * 다시 구현하면 렌더러와 타입 레이어에 두 개의 진실이 생긴다.
+ *
+ * fatal만 싣는 이유: 전건 커버리지를 강제받는 것이 fatal뿐이고(major·minor는 허용하되
+ * 강제하지 않는다), PRD의 5절 원장 규격도 치명적 결함만을 대상으로 쓴다.
+ *
+ * 원장이 통째로 비면 빈 배열을 돌려주고 호출부가 블록을 생략한다. 구 run은 원장 계약 이전에
+ * 저장됐을 뿐인데 fatal마다 "해결책 없음"을 찍으면 있지도 않은 침묵을 지어내는 셈이다 —
+ * researchCoverage가 비면 커버리지 블록을 통째로 생략하는 것과 같은 태도다 (ADR-013).
+ */
+function fatalLedger(
+  criticism: Criticism,
+  solution: Solution,
+  verdict?: Verdict,
+): LedgerEntry[] {
+  const auditCount = verdict?.remedyAudits.length ?? 0;
+  if (solution.remedies.length === 0 && auditCount === 0) return [];
+  return buildLedger(criticism, solution, verdict).filter(
+    (entry) => entry.point.severity === "fatal",
+  );
+}
+
+function remedyBullet(entry: LedgerEntry): string[] {
+  const { point, remedy } = entry;
+  const head = remedy === undefined ? "해결책 없음" : REMEDY_STRATEGY_LABELS[remedy.strategy];
+  const body =
+    remedy === undefined
+      ? // 침묵은 두 문서 간의 집합 뺄셈이라 코드가 증명할 수 있는 사실이다. 그러나 그것을
+        // 실패라 부르는 것은 판단이고, 판단은 5절의 몫이다 (ADR-008 / ADR-017)
+        "재설계는 이 결함에 대해 아무 말도 하지 않았다."
+      : remedy.remedy;
+  return [`*   **[${head}] ${point.riskKeyword}** — ${point.claim}`, `    *   ${body}`];
+}
+
+/**
+ * 4절의 해결책 블록. 감사 결과는 여기 오지 않는다 — "재주장" 칩이 4절에 뜨면 독자가 5절 전에
+ * 결론을 알게 되고, 그 순간 正/反 대립은 읽을 이유가 없는 장식이 된다 (ADR-008).
+ * 그래서 이 함수는 verdict를 인자로 받지 않는다: 넘길 수 없는 것은 새어 나갈 수도 없다.
+ */
+function remedySection(criticism: Criticism, solution: Solution): string[] {
+  const entries = fatalLedger(criticism, solution);
+  if (entries.length === 0) return [];
+  return [
+    "### 치명적 결함에 대한 해결책 (재설계의 주장 · 미검증)",
+    "",
+    "> 아래는 재설계가 스스로 낸 대응이지 검증된 사실이 아니다. 유효한지는 5절 최종 판정이 항목별로 감사한다.",
+    "",
+    ...entries.flatMap(remedyBullet),
+    "",
+  ];
+}
+
+function ledgerRow(entry: LedgerEntry): string {
+  const { point, remedy, audit } = entry;
+  const criticism = `**${tableCell(point.riskKeyword)}** ${tableCell(point.claim)}`;
+  const solution =
+    remedy === undefined
+      ? "해결책 없음"
+      : `**[${REMEDY_STRATEGY_LABELS[remedy.strategy]}]** ${tableCell(remedy.remedy)}`;
+  // 감사가 없는 것은 판정이 이 항목을 봐주고 넘어간 것이 아니라 원장 이전에 저장된 run이라는 뜻이다
+  const verdict =
+    audit === undefined
+      ? "—"
+      : `**[${REMEDY_VERDICT_LABELS[audit.assessment]}]** ${tableCell(audit.note)}`;
+  return `| ${criticism} | ${solution} | ${verdict} |`;
+}
+
+/** 요약 줄의 숫자는 전부 원장에서 파생된다 — 따로 세면 표와 어긋나는 두 번째 진실이 생긴다 */
+function ledgerSummary(entries: readonly LedgerEntry[]): string {
+  const remedied = entries.filter((entry) => entry.remedy !== undefined).length;
+  const audited = REMEDY_VERDICTS.map((assessment) => ({
+    assessment,
+    count: entries.filter((entry) => entry.audit?.assessment === assessment).length,
+  }))
+    .filter(({ count }) => count > 0)
+    .map(({ assessment, count }) => `${REMEDY_VERDICT_LABELS[assessment]} ${count}`);
+  const breakdown = audited.length > 0 ? ` (${audited.join(" · ")})` : "";
+  return `비판이 제기한 치명적 결함 ${entries.length}건 → 해결책 ${remedied}건${breakdown}`;
+}
+
+/**
+ * 5절의 원장 — 잔존 리스크 앞에 온다. 결함↔해결책 쌍은 부록이 아니라 판정의 근거다 (PRD).
+ * 감사 결과가 처음이자 유일하게 등장하는 곳이 여기다.
+ */
+function ledgerSection(
+  criticism: Criticism,
+  solution: Solution,
+  verdict: Verdict,
+): string[] {
+  const entries = fatalLedger(criticism, solution, verdict);
+  if (entries.length === 0) return [];
+  return [
+    "### 결함↔해결책 원장",
+    "",
+    ledgerSummary(entries),
+    "",
+    "| 비판 | 재설계의 해결책 | 판정의 감사 |",
+    "| --- | --- | --- |",
+    ...entries.map(ledgerRow),
+    "",
+  ];
 }
 
 /**
@@ -362,6 +473,8 @@ export function renderReport(
     lines.push(`**종합 통찰:** ${solution.synthesis}`, "");
   }
   lines.push(`**재설계된 컨셉:** ${solution.revisedConcept}`, "");
+  // 결함↔해결책 쌍이 이 리포트의 핵심 산출물인데 그동안 revisedConcept 줄글에 묻혀 있었다 (ADR-017)
+  lines.push(...remedySection(criticism, solution));
   lines.push("### ① 데이터 수집 및 최소 입력 구조 (Minimal Input)", "");
   lines.push(solution.minimalInput, "");
   lines.push("### ② 에이전틱 워크플로우 (Agentic Workflow)", "");
@@ -379,6 +492,8 @@ export function renderReport(
     "",
   );
   lines.push(verdict.rationale, "");
+  // 잔존 리스크 앞이다 — 무엇을 solid라 불렀는지가 곧 점수의 근거다
+  lines.push(...ledgerSection(criticism, solution, verdict));
   lines.push("### 잔존 리스크", "");
   lines.push(...verdict.residualRisks.map(residualRiskLine), "");
   lines.push("### 생존 조건", "");
