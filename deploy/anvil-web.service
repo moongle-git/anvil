@@ -1,0 +1,62 @@
+# anvil 웹 UI (Next.js) systemd 유닛 — Phase 9-deploy
+#
+# 설치:
+#   sudo cp deploy/anvil-web.service /etc/systemd/system/anvil-web.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now anvil-web
+#
+# 전제: 레포는 /opt/anvil, 실행 사용자는 anvil, Node/npm은 /usr/bin (NodeSource 설치).
+# 이 값들을 바꾸려면 deploy/.env.production 의 ANVIL_DB_PATH·ANVIL_REPO_ROOT 도 함께 바꿔야 한다.
+
+[Unit]
+Description=anvil web UI (Next.js)
+Documentation=https://github.com/moongle-git/anvil
+# network-online.target 이후에 뜬다. network.target 만으로는 주소 할당 전에 시작될 수 있다.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=anvil
+Group=anvil
+WorkingDirectory=/opt/anvil
+
+# 루트 package.json 에는 start 스크립트가 없다 — web 워크스페이스에만 있다(next start).
+# 그래서 -w web 으로 워크스페이스를 지정한다. 이때 스크립트의 cwd 는 /opt/anvil/web 이 되며,
+# 이것이 web/src/lib/server/runs.ts 의 getDbPath()·getRepoRoot() 가 기대하는 cwd 다
+# (둘 다 process.cwd()/.. 를 본다). cwd 가 어긋나면 웹이 엉뚱한 DB 를 열고 조용히 빈 목록을 보여준다.
+# npm 은 절대 경로로 쓴다 — systemd 는 로그인 셸이 아니라 PATH 가 빈약하다.
+ExecStart=/usr/bin/npm run start -w web
+
+# PATH 를 명시하는 이유가 두 가지다:
+#  1. npm 의 shebang 은 `#!/usr/bin/env node` 다. 절대 경로로 npm 을 불러도 node 가 PATH 에
+#     없으면 실행되지 않는다.
+#  2. 웹은 파이프라인을 `npm run consult` 로 spawn 한다(ADR-007, spawnConsult.ts). 그 자식도
+#     PATH 에서 npm 을 찾는다. 즉 PATH 가 틀리면 웹은 뜨는데 run 만 조용히 실패한다.
+# nvm 으로 node 를 깔았다면 nvm 의 bin 디렉토리를 여기에 추가하라 — nvm 은 PATH 에 아예 없다.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+EnvironmentFile=/opt/anvil/.env.production
+
+# ── 이 유닛의 존재 이유 ─────────────────────────────────────────────────────────
+# systemd 기본값은 KillMode=control-group 이다 — stop/restart 시 cgroup 에 남은
+# 모든 프로세스에 SIGTERM 을 보낸다. spawnConsult.ts 의 detached:true + unref() 는
+# 프로세스 그룹·세션만 분리할 뿐 cgroup 소속을 바꾸지 못하므로, 기본값으로 두면
+# **배포할 때마다 진행 중이던 consult run 이 조용히 죽는다.**
+# run 하나는 Gemini 실비를 태우며 최악 6분까지 돈다(ADR-012, ADR-016).
+#
+# KillMode=process 는 메인 프로세스(next start)에만 시그널을 보내고 자식은 살려둔다.
+# 살아남은 CLI 는 자기 일을 마치고 DB 에 결과를 쓴다. runs·steps 테이블이 단일 진실
+# 공급원이므로(ADR-014) 웹이 재시작해도 폴링이 그대로 이어진다.
+# 이 줄을 지우지 마라.
+KillMode=process
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=anvil-web
+
+[Install]
+WantedBy=multi-user.target
