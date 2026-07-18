@@ -48,5 +48,6 @@
       "notes": "이 step 은 새로 확정한 배포 값이 없다 — step 0~3 이 정한 값을 근거로 승격했을 뿐이다. **phase 9 의 문서 소유 경계가 여기서 확정됐다: 절차는 docs/DEPLOY.md 단독 소유, 결정과 근거는 docs/ADR.md(ADR-018), 파일→서버 위치 표는 deploy/README.md 와 ARCHITECTURE 디렉토리 블록, 각 설정 항목의 이유는 해당 파일 주석.** ADR-018 에 커맨드를 한 줄도 넣지 않은 것이 이 경계의 실행이다. 남은 미검증 항목은 step 3 이 남긴 것과 동일하며 이 step 이 늘리지 않았다(systemd-analyze verify, caddy validate, Let's Encrypt 발급, iptables REJECT 줄 번호, basic_auth vs basicauth 버전 분기) — 전부 첫 배포 때 사람이 확인한다. ADR-018 이 명시적으로 미래로 미룬 결정 하나: **여러 사용자 요구가 생기면 로그인 + 사용자별 비용 쿼터가 세트로 필요하다**(번복 조건). 그 결정은 아직 내려지지 않았고, 내려질 때 ADR-018 을 폐기하는 것이 아니라 (b) 논거 ①③이 무효가 되는 방식으로 뒤집힌다."
     }
   ],
-  "created_at": "2026-07-18T18:03:40+0900"
+  "created_at": "2026-07-18T18:03:40+0900",
+  "completed_at": "2026-07-18T18:28:51+0900"
 }
