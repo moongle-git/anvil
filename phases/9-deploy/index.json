@@ -14,7 +14,11 @@
     {
       "step": 1,
       "name": "caddy-edge",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-18T18:07:09+0900",
+      "completed_at": "2026-07-18T18:11:30+0900",
+      "summary": "deploy/Caddyfile.example + deploy/README.md 신규 작성 (앱 코드 수정 0 — src/·web/src/ 무변경 확인). 확정 값 — basic auth 사용자명 규약 `anvil` (운영자 1명 전제라 사람 이름을 쓰지 않는다), 비밀번호는 20자 이상 랜덤(`openssl rand -base64 24`)을 `caddy hash-password --plaintext '...'` 로 해싱해 붙여 넣으며 레포에는 플레이스홀더만 둔다. 업스트림 리스닝 포트 localhost:3000 (deploy/.env.production 의 PORT 와 일치해야 하고 방화벽은 80/443 만 연다 — 3000 이 열리면 프록시 우회 가능). 도메인 폴백은 `<공인IP>.sslip.io` — 실재하는 공개 DNS 이름이라 Let's Encrypt HTTP-01 챌린지가 통과해 정식 인증서를 받는다(IP 리터럴은 인증서 발급 불가라 쓰면 안 된다). 도메인이 생기면 사이트 블록 첫 줄만 교체 후 reload. Caddy 파일 위치 /etc/caddy/Caddyfile. basic_auth 는 matcher 없이 사이트 블록 최상단에 두어 /api/* 를 포함한 전 경로에 적용된다(차단 대상 쓰기 경로 5개를 주석에 열거: POST /api/runs·resume·rerun·answers, DELETE /api/runs/{id}). 명시적 tls 디렉티브·http:// 블록·auto_https off 를 두지 않아 Caddy 기본 자동 HTTPS + 80→443 리다이렉트를 그대로 쓴다. basic auth 의 4가지 한계(단일 공유 자격증명·base64 는 암호화가 아니라 TLS 가 성립 조건·표준 로그아웃 없음·rate limit 없음)를 주석에 명시. **디렉티브 이름은 Caddy 2.8+ 가 basic_auth, 그 이전은 basicauth 이며 틀리면 Caddy 가 아예 뜨지 않는다는 경고 포함.** README 는 13줄로 파일→서버 위치 표 + docs/DEPLOY.md 포인터만 두고 런북을 중복하지 않는다. AC 8개 전부 통과(build·test 896+342 통과, 파일 2개 존재, grep 4종). 한계: 로컬에 caddy 바이너리가 없어(`which caddy` → not found) `caddy validate --config deploy/Caddyfile.example --adapter caddyfile` 을 실행하지 못했다 — 문법 검증은 step 3 런북에서 서버에 설치된 caddy 로 사람이 한다. 플레이스홀더(`<도메인 또는 <공인IP>.sslip.io>` 등)가 그대로라 이 파일 자체는 애초에 validate 를 통과하지 않는다는 점도 런북이 다뤄야 한다.",
+      "notes": "step 3 런북이 그대로 써야 할 값: 사용자명 anvil / 업스트림 localhost:3000 / sslip.io 폴백 / /etc/caddy/Caddyfile. step 4 ADR 이 정식화할 결정: 접근 통제를 앱이 아니라 엣지에 두는 근거 3가지(basic auth 는 Next 실행 전에 끊긴다 vs 앱 로그인은 엔드포인트를 공개해야 한다 / CLI 에 세션이 없어 DB 가 두 접근 모델을 갖게 된다 / DB 에 사용자 개념이 없어 user_id 는 항상 같은 값인 컬럼이다) — 현재 Caddyfile.example 주석에 요지만 적고 ADR 을 가리키고 있다. step 0 이 남긴 .gitignore 미해결 사항(.env.production 패턴)은 여전히 step 2 몫이다."
     },
     {
       "step": 2,
