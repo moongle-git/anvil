@@ -5,6 +5,10 @@ node_modules/
 .env
 .env.local
 .env.*.local
+# 서버의 실제 운영 환경변수 (systemd EnvironmentFile — deploy/.env.production.example 이 템플릿).
+# 레포 루트 안에 놓이므로 명시적으로 무시해야 한다. 위 .env.*.local 패턴은 이 이름을 잡지 못하고,
+# 그러면 scripts/deploy.sh 의 워킹트리 청결 검사가 매번 걸린다. API 키가 들어 있는 파일이다.
+.env.production
 
 # build output
 dist/
