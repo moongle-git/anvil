@@ -32,7 +32,16 @@ web/                   # Next.js App Router 웹 UI (npm workspace) — 1-web-ui 
 
 data/anvil.db          # SQLite DB — 실행 상태·산출물의 단일 진실 공급원 (git 미추적, ADR-014)
                        #   WAL 모드라 anvil.db-wal / anvil.db-shm 파일이 함께 생긴다 (역시 git 미추적)
+
+deploy/                # 배포 설정 원본 — 서버로 복사되는 템플릿이다 (ADR-018). 앱 코드가 아니다
+├── anvil-web.service  # → /etc/systemd/system/anvil-web.service (웹 서비스 유닛)
+├── .env.production.example  # → /opt/anvil/.env.production (0600. API 키가 들어가므로 커밋 금지)
+├── Caddyfile.example  # → /etc/caddy/Caddyfile (리버스 프록시 + basic auth + 자동 HTTPS)
+└── README.md          # 파일→서버 위치 표만. 절차는 적지 않는다
+
+scripts/deploy.sh      # 재배포 (서버에서 사람이 실행: cd /opt/anvil && ./scripts/deploy.sh)
 ```
+**배포 절차는 `docs/DEPLOY.md`가 단독으로 소유한다.** 위 표는 파일이 어디로 가는지만 말하고, 각 설정 항목의 이유는 해당 파일의 주석에 있다. 절차를 여기에 복사하지 마라 — 두 곳에 적으면 반드시 갈라진다.
 
 ## DB 스키마 (ADR-014, ADR-016)
 ```
@@ -82,6 +91,7 @@ usage(run_id REFERENCES runs ON DELETE CASCADE, label, model, grounded, attempt,
 - **삭제는 CASCADE, 재실행은 포크** (ADR-015): run 삭제는 FK `ON DELETE CASCADE`로 steps·artifacts를 함께 지운다(`running` run은 삭제 불가). 재실행은 원본을 덮어쓰지 않고 `idea`·`questions`·`answers`만 복사한 새 run을 만들어 자료조사부터 다시 돈다. 계보는 `runs.rerun_of`에 남는다.
 - **비용은 관측된다** (ADR-016): 모든 Gemini 호출은 **재시도까지 포함해** `usage` 테이블에 한 행씩 기록된다 — 검증에 실패한 시도도 과금되므로 자기 행을 남긴다(형식이 실패한 것이지 청구가 실패한 게 아니다). thinking 토큰은 출력 요금으로 과금되므로 `thoughts_tokens` 컬럼으로 분리해 본다. thinking은 끄지 않고 에이전트별 `thinkingBudget`으로 상한만 둔다(기계적 에이전트 0, 추론 에이전트 2048~8192). `GeminiService`는 **DB를 모른다** — usage를 `onUsage` 콜백으로 흘려보내고, DB 기록은 `cli/`가 배선한다(서비스 레이어 격리). 계측 결과 run 비용의 **65%가 `context-hunter`** 하나이고(grounding 정액 + 형식 실패 재시도), thinking은 예상(58%)보다 훨씬 작았다(실측 21.6%) — ADR-016 "실측 결과" 참조.
 - **교차 산출물 검증은 스키마 팩토리다** (ADR-017): 하류 산출물의 스키마는 상류를 알 수 있다. 상류는 하류를 모른다 — 의존은 파이프라인이 흐르는 방향으로만 흐른다. `solutionSchemaFor(criticism)`·`verdictSchemaFor(criticism)`은 여전히 `ZodType<Solution>`·`ZodType<Verdict>`이므로 ADR-004의 자가 교정 루프를 그대로 탄다(에러 메시지가 곧 재시도 피드백이다). 검증을 orchestrator로 빼면 `generateStructured`가 반환한 **뒤**라 재시도가 붙지 않는다.
+- **배포는 단일 VM에 묶인다** (ADR-018): 웹이 파이프라인을 **같은 머신의 자식 프로세스로 spawn하고**(ADR-007) 상태가 **로컬 SQLite 파일**에 있으므로(ADR-014), 두 프로세스는 같은 파일시스템·같은 커널을 공유해야 한다. 수평 확장·서버리스·다중 컨테이너는 성능 판단이 아니라 **구조적으로 불가능하다.** 접근 통제는 앱이 아니라 **리버스 프록시(Caddy)의 basic auth**로 엣지에서 끊는다 — 앱 코드에는 사용자·세션 개념이 없고, 배포를 위해 앱 소스는 한 줄도 바뀌지 않았다. 진행 중인 run은 배포보다 오래 산다(`KillMode=process` — `detached: true`는 cgroup을 탈출하지 못한다). devDeps는 **런타임 의존이기도 하다** — `npm run consult`가 `tsx`로 소스를 직접 실행하므로 `--omit=dev` 설치는 `stdio: "ignore"` 뒤에서 run을 조용히 죽인다. **절차는 `docs/DEPLOY.md`가 단독으로 소유한다.**
 - **치명적 결함에는 해결책이 따른다** (ADR-017): 反이 `severity: "fatal"`로 판정한 비판은 合이 전부 해결책(`solution.remedies[]`)을 내야 하고, 판정이 그것을 항목별로 감사한다(`verdict.remedyAudits[]` — `solid`/`restated`/`dismissed`). **코드는 침묵**(재설계가 어떤 fatal에 대해 아무 말도 하지 않음)**·참조 무결성·귀속만 소유하고, 유효성 판단은 판정에 남긴다** — "이 해결책이 유효한가"는 어떤 API 응답에도 없어 주입할 사실이 존재하지 않기 때문이다(ADR-013의 유비가 절반만 적용되는 이유). 점수 하한(floor) 강제는 ADR-010 위반이라 두지 않는다.
 
 ## 데이터 흐름
