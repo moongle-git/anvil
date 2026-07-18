@@ -7,7 +7,7 @@
       "name": "systemd-unit",
       "status": "completed",
       "started_at": "2026-07-18T18:03:40+0900",
-      "completed_at": "2026-07-18T18:07:00+0900",
+      "completed_at": "2026-07-18T18:07:09+0900",
       "summary": "deploy/anvil-web.service + deploy/.env.production.example 신규 작성 (앱 코드 수정 0). 확정 값 — 배포 경로(레포 루트) /opt/anvil, 서비스명 anvil-web (유닛 파일 /etc/systemd/system/anvil-web.service), 실행 사용자/그룹 anvil:anvil, WorkingDirectory=/opt/anvil, ExecStart=/usr/bin/npm run start -w web (스크립트 cwd 는 /opt/anvil/web — getDbPath()·getRepoRoot() 가 기대하는 cwd), EnvironmentFile=/opt/anvil/.env.production, Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin (npm shebang 의 node 탐색 + spawnConsult 자식의 npm 탐색 양쪽에 필요), KillMode=process (배포 시 진행 중 run 이 죽는 것을 막는 이 phase 의 존재 이유), Restart=on-failure/RestartSec=5, After+Wants=network-online.target, WantedBy=multi-user.target. env 템플릿은 GEMINI_API_KEY(필수)·YOUTUBE_API_KEY/NAVER_CLIENT_ID/NAVER_CLIENT_SECRET(선택)·ANVIL_DB_PATH=/opt/anvil/data/anvil.db·ANVIL_REPO_ROOT=/opt/anvil·NODE_ENV=production·PORT=3000 을 담고, systemd EnvironmentFile 이 dotenv 와 다른 점(export 금지·줄머리 주석만·따옴표/백슬래시·$ 미확장)을 상단 주석으로 경고한다. AC 6개 전부 통과, npm run build/test 통과(896+342). 한계: macOS 라 systemd-analyze verify 미실행 — 실제 유닛 동작 검증은 step 3 런북에서 서버에서 사람이 한다.",
       "notes": "step 2 를 위한 미해결 사항: 서버의 실제 /opt/anvil/.env.production 은 레포 루트 안에 놓이는데 .gitignore 의 현재 패턴(.env, .env.local, .env.*.local)이 이 이름을 잡지 못한다 — 배포 스크립트가 git 을 다루므로 step 2 에서 .gitignore 에 .env.production 을 추가할지 결정해야 한다. 이 step 은 파일 2개만 만들도록 범위가 한정되어 손대지 않았다."
     },
