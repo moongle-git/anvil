@@ -52,7 +52,8 @@
     },
     {
       "dir": "10-trend-scout",
-      "status": "pending"
+      "status": "completed",
+      "completed_at": "2026-07-19T15:43:07+0900"
     }
   ]
 }
