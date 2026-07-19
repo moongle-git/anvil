@@ -29,7 +29,10 @@
     {
       "step": 3,
       "name": "scout-synthesis",
-      "status": "pending"
+      "status": "completed",
+      "started_at": "2026-07-19T14:46:01+0900",
+      "completed_at": "2026-07-19T14:50:34+0900",
+      "summary": "runTrendScout — planScoutQueries(검색어) → searchCapitalSignals(grounded 사실+citations) → non-grounded 합성(thinkingBudget 8192, usageLabel trend-scout) 세 호출을 엮는 에이전트. 핵심은 침묵 게이트: citations 0건이면 합성 호출 자체를 건너뛰고 candidates: []로 즉시 종료한다(근거 없는 후보는 전부 사전지식=환각이라 '지어낼 이유를 없앤다'). 코드가 citations에 [C1]·[C2]… 번호를 붙여 title·domain만 노출하고(uri는 만료되는 리다이렉트라 판단에 무용) findings는 축별 별도 섹션으로 넣어 '모델이 서술한 것'과 '코드가 추출한 것'의 구분을 프롬프트에서도 유지한다. opportunitiesSchemaFor({citationIds, now, windowStart})를 generateStructured의 schema 인자로 넘겨 화이트리스트·삼각측량·날짜창·수치 귀속 위반이 자가 교정 재시도를 타게 한다(ADR-017 — 검증을 바깥으로 빼지 않는다). 해소 단계는 resolveVoiceRefs를 본떠 citationRef → Citation 객체로 치환하고 퍼지 매칭 없이 드롭+로그하며, 신호가 2건 미만이 되거나 counterSignal이 드롭되면 후보를 통째로 버린다(삼각측량이 뒷문으로 무너지지 않게). 최종 산출물에 citationRef 문자열은 남지 않는다. quote는 step 2의 조사 결론대로 코드 대조하지 않고 사람의 눈 검증(step 8)에 넘긴다 — 주석에 그 이유를 명시했다. 테스트 19건(Gemini mock)."
     },
     {
       "step": 4,
