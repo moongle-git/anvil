@@ -11,7 +11,10 @@ import {
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
 import { COLD_CRITIC_USAGE_LABEL } from "../agents/coldCritic.js";
-import { CONTEXT_HUNTER_USAGE_LABEL } from "../agents/contextHunter.js";
+import {
+  CONTEXT_HUNTER_SCOUT_HEADING,
+  CONTEXT_HUNTER_USAGE_LABEL,
+} from "../agents/contextHunter.js";
 import { INTERVIEWER_USAGE_LABEL } from "../agents/interviewer.js";
 import { RESEARCH_PLANNER_USAGE_LABEL } from "../agents/researchPlanner.js";
 import { SCOUT_PLANNER_USAGE_LABEL } from "../agents/scoutPlanner.js";
@@ -925,6 +928,39 @@ describe("runPipeline", () => {
         second.generateStructured.mock.calls[0][0] as { prompt: string }
       ).prompt;
       expect(plannerPrompt).toContain(chosen.title);
+    });
+
+    it("★ 선택된 후보가 자료조사 프롬프트로 흐른다 (근거를 idea 문자열로 압축하지 않는다)", async () => {
+      // 反이 공격해야 할 대상은 "이 주제가 기회라는 판단"이다. 그 근거(신호·날짜·반대 증거)가
+      // 프롬프트에 없으면 비판이 일반론이 되고, context는 正·反·合 전부에 주입된다
+      const first = fakeGemini();
+      const { runId } = store.createRun(SCOPE, { scout: true });
+      await runPipeline(makeDeps(first.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+      store.saveOpportunitySelection(runId, { candidateId: "O2" });
+
+      const second = fakeGemini();
+      await runPipeline(makeDeps(second.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+
+      const call = second.generateGrounded.mock.calls.find(
+        ([params]: [{ usageLabel: string }]) =>
+          params.usageLabel === CONTEXT_HUNTER_USAGE_LABEL,
+      ) as [{ prompt: string }];
+      const prompt = call[0].prompt;
+
+      // 고른 후보(O2)의 근거가 들어가고, 고르지 않은 후보(O1)의 근거는 들어가지 않는다
+      const chosen = scoutDraft.candidates[1];
+      expect(prompt).toContain(CONTEXT_HUNTER_SCOUT_HEADING);
+      expect(prompt).toContain(chosen.signals[0].statement);
+      expect(prompt).toContain(chosen.counterSignal.statement);
+      expect(prompt).not.toContain(
+        scoutDraft.candidates[0].counterSignal.statement,
+      );
     });
 
     it("★ 후보 0건: waiting이 아니라 error로 종료한다", async () => {

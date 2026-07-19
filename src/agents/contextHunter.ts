@@ -3,10 +3,14 @@ import { formatEvidenceSection, parseVoiceRef } from "../research/format.js";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
 import {
+  HORIZON_LABELS,
   MarketContextDraftSchema,
+  SIGNAL_TYPE_LABELS,
   type CommunityVoice,
   type MarketContext,
+  type Opportunity,
   type ResearchEvidence,
+  type ResolvedCapitalSignal,
 } from "../types/index.js";
 import { planResearchQueries } from "./researchPlanner.js";
 
@@ -82,6 +86,12 @@ export const CONTEXT_HUNTER_PROMPT_TEMPLATE = `## 아이디어 원문
 }
 communityVoiceRefs에는 위 수집 결과 섹션에 실제로 존재하는 [V*] ID만 담아라. 목소리 객체를 출력하지 마라 — 원문·출처·작성자는 코드가 ID로 붙인다.`;
 
+/**
+ * 스카우트 근거 섹션의 제목. 테스트와 코드가 같은 문자열을 봐야 "섹션이 붙지 않았다"를
+ * 계약으로 검사할 수 있다 (직접 입력 모드의 회귀 없음이 이 섹션의 부재로 표현된다).
+ */
+export const CONTEXT_HUNTER_SCOUT_HEADING = "## 주제 발굴 근거 (자본 흐름 스카우트)";
+
 export interface ContextHunterDeps {
   gemini: GeminiService;
   /** 등록된 소스가 곧 레지스트리다 (ADR-012). 키가 없는 소스는 애초에 배열에 없다 */
@@ -135,17 +145,73 @@ function resolveVoiceRefs(
   return resolved;
 }
 
+/**
+ * 신호 하나를 프롬프트 줄로 편다. 출처는 제목·도메인만 싣는다 —
+ * uri는 만료되는 리다이렉트라 판단에 쓸모가 없고, 보여주면 받아적다가 망가뜨린다 (ADR-013).
+ */
+function scoutSignalLine(signal: ResolvedCapitalSignal): string {
+  const effective =
+    signal.effectiveAt === undefined ? "" : `, 시행일 ${signal.effectiveAt}`;
+  const title = signal.citation.title ?? "(제목 없음)";
+  const domain =
+    signal.citation.domain === undefined ? "" : ` — ${signal.citation.domain}`;
+  return `- [${SIGNAL_TYPE_LABELS[signal.signalType]}] ${signal.statement} (관측일 ${signal.observedAt}${effective}, 출처: ${title}${domain})`;
+}
+
+/**
+ * 스카우트가 고른 주제의 근거를 프롬프트 섹션으로 편다.
+ *
+ * 이 주제는 idea 문자열로 압축돼 하류로 흐르면서 **왜 이것이 기회인가**(자본 신호·날짜·반대
+ * 증거)를 통째로 잃는다. 反이 공격해야 할 대상이 바로 그 판단이므로, 근거가 없으면 비판이
+ * 일반론이 되고 변증법 전체가 헐거워진다. context-hunter의 산출물은 正·反·合 전부에
+ * 주입되므로 여기가 전 하류로 전달하는 가장 짧은 경로다.
+ *
+ * 신호를 **확인된 사실로 제시하지 않는다.** 다른 호출에서 나온 판단이고, 사실로 못박아
+ * 넘기면 이 grounding 호출이 독립적 근거를 만들지 않고 앞 단계의 주장을 승계한다.
+ */
+function formatScoutSection(candidate: Opportunity): string {
+  return [
+    CONTEXT_HUNTER_SCOUT_HEADING,
+    "이 주제는 사용자가 입력한 것이 아니라, 앞 단계가 자본 흐름 신호에서 도출한 것이다.",
+    "아래 신호는 다른 호출에서 나온 판단이며 **검증된 사실이 아니다.**",
+    "",
+    `- 주제: ${candidate.title}`,
+    `- 무엇을 만드나: ${candidate.whatItIs}`,
+    `- 왜 지금인가: ${candidate.whyNow}`,
+    `- 누가 돈을 내나: ${candidate.whoPays}`,
+    `- 시계: ${HORIZON_LABELS[candidate.horizon]}`,
+    "",
+    "### 도출 근거 신호",
+    ...candidate.signals.map(scoutSignalLine),
+    "",
+    "### 반대 증거 (이 주제에 불리한 신호)",
+    scoutSignalLine(candidate.counterSignal),
+    "",
+    "위 신호를 이미 검증된 사실로 취급하지 마라. 웹검색으로 교차 확인하고, 확인되지 않는 신호가 있으면 그 사실을 briefing에 적어라.",
+    "반대 증거를 무시하지 말고 시장 맥락에 그대로 반영하라.",
+  ].join("\n");
+}
+
 export async function runContextHunter(
   deps: ContextHunterDeps,
   idea: string,
   clarifications?: string,
+  scoutContext?: Opportunity,
 ): Promise<ContextHunterResult> {
+  // 스카우트 모드에는 인터뷰 답변이 없다 — 두 모드는 상호배타적이라(createRun이 스카우트 run에
+  // interviewer를 seed하지 않는다) 병합이 아니라 선택이다. 후보의 whyNow·whoPays가 그 자리를
+  // 채워야 소스별 검색어가 확정 주제에 맞게 좁혀진다.
+  const plannerHints =
+    scoutContext === undefined
+      ? clarifications
+      : `이 주제는 자본 흐름 근거로 도출됐다.\n왜 지금인가: ${scoutContext.whyNow}\n누가 돈을 내나: ${scoutContext.whoPays}`;
+
   // 아이디어 원문을 그대로 검색하면 긴 문장이 되어 검색 품질의 하한을 만든다. 인터뷰 답변도
   // 검색어에 반영한다. planner는 실패해도 throw하지 않고 아이디어 원문으로 폴백한다 (ADR-012).
   const queries = await planResearchQueries(
     { gemini: deps.gemini, log: deps.log },
     idea,
-    clarifications,
+    plannerHints,
   );
 
   // Hacker News가 한국어 쿼리를 받으면 에러 없이 조용히 0건이 된다 — 로그가 유일한 관측 수단이다
@@ -166,6 +232,13 @@ export async function runContextHunter(
   // 인터뷰 답변이 있으면 아이디어의 핵심 맥락으로 반영한다 (웹 인터뷰 흐름)
   if (clarifications !== undefined && clarifications.trim().length > 0) {
     prompt += `\n\n## 사용자 추가 설명 (인터뷰 답변)\n${clarifications}\n\n위 사용자 추가 설명을 아이디어의 핵심 맥락으로 반영해 조사하라.`;
+  }
+
+  // 스카우트 근거는 인용을 섞지 않고 프롬프트로만 흐른다 — context.citations는 "이 grounding
+  // 호출이 실제로 검색해 코드가 추출한 것"이라는 단일 의미를 지킨다 (ADR-013). 스카우트 인용은
+  // opportunities 아티팩트에 온전히 남아 있고, 리포트 표시는 별도 섹션이 담당한다.
+  if (scoutContext !== undefined) {
+    prompt += `\n\n${formatScoutSection(scoutContext)}`;
   }
 
   // LLM은 draft(자기보고 sources + 목소리 ID 참조)만 채운다. citations는 코드가 grounding 응답에서

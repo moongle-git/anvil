@@ -5,22 +5,26 @@ import type {
   Citation,
   CommunityVoice,
   MarketContext,
+  Opportunity,
   ResearchSourceId,
   SearchQueries,
   SourceCoverage,
 } from "../types/index.js";
 import {
   CODE_INJECTED_CONTEXT_KEYS,
+  HORIZON_LABELS,
   MarketContextDraftSchema,
   MarketContextObjectSchema,
   RESEARCH_SOURCE_IDS,
   ResearchEvidenceSchema,
   SearchQueriesSchema,
+  SIGNAL_TYPE_LABELS,
   SOURCE_LABELS,
   type MarketContextDraft,
 } from "../types/index.js";
 import {
   CONTEXT_HUNTER_PROMPT_TEMPLATE,
+  CONTEXT_HUNTER_SCOUT_HEADING,
   CONTEXT_HUNTER_THINKING_BUDGET,
   CONTEXT_HUNTER_SYSTEM_PROMPT,
   runContextHunter,
@@ -76,6 +80,59 @@ const NAVER_VOICE: CommunityVoice = {
   url: "https://cafe.naver.com/dog/1",
   text: "펫시터 구하기가 생각보다 어렵네요...",
   extra: "검색 스니펫",
+};
+
+/**
+ * 스카우트가 도출한 주제 — trend-scout이 citationRef를 실제 Citation으로 해소한 뒤의 형태다.
+ * 사용자가 입력한 아이디어가 아니라 **자본 흐름 근거로 조립된 후보**라는 것이 요점이다.
+ */
+const SCOUT_CANDIDATE: Opportunity = {
+  id: "O1",
+  title: "배터리 여권 대응 이력 수집 SaaS",
+  whatItIs:
+    "EU 배터리 여권 의무화에 맞춰 셀 단위 공급망 이력을 자동 수집·제출하는 서비스",
+  signals: [
+    {
+      signalType: "regulation",
+      statement: "EU가 배터리 여권 제출을 의무화하는 시행 규칙을 확정했다",
+      observedAt: "2026-03-11",
+      effectiveAt: "2027-02-18",
+      citation: {
+        uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/A1",
+        title: "EU 배터리 여권 시행 규칙 확정",
+        domain: "europa.eu",
+        kind: "redirect",
+      },
+      figures: [],
+    },
+    {
+      signalType: "funding",
+      statement: "배터리 이력 추적 스타트업이 시리즈B로 4,200만 달러를 유치했다",
+      observedAt: "2026-05-02",
+      citation: {
+        uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/A2",
+        title: "배터리 이력 추적 스타트업 시리즈B",
+        domain: "techcrunch.com",
+        kind: "redirect",
+      },
+      figures: [],
+    },
+  ],
+  counterSignal: {
+    signalType: "incumbent",
+    statement: "기존 ERP 벤더가 같은 기능을 차기 로드맵에 올렸다",
+    observedAt: "2026-06-20",
+    citation: {
+      uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/A3",
+      title: "ERP 벤더 공급망 모듈 로드맵",
+      domain: "sap.com",
+      kind: "redirect",
+    },
+    figures: [],
+  },
+  whyNow: "시행일까지 남은 준비 기간이 짧다",
+  whoPays: "EU에 배터리를 파는 제조사",
+  horizon: "mid",
 };
 
 /** collectAll이 실패를 흡수하므로, 어댑터는 그대로 throw한다 */
@@ -652,6 +709,129 @@ describe("runContextHunter (목소리 ID 해소)", () => {
     const { context } = await runContextHunter(deps, IDEA);
 
     expect(Object.keys(context)).not.toContain("communityVoiceRefs");
+  });
+});
+
+// 스카우트가 고른 주제는 idea 문자열로 압축돼 흐르면서 "왜 이 주제가 선택됐는가"(자본 신호·
+// 날짜·반대 증거)를 잃는다. 反이 공격해야 할 대상이 바로 그 판단이므로, 근거가 없으면 비판이
+// 일반론이 된다. context-hunter의 산출물은 正·反·合 전부에 주입되므로 여기가 가장 짧은 경로다.
+describe("runContextHunter (스카우트 근거 주입)", () => {
+  it("scoutContext가 없으면 스카우트 섹션을 넣지 않는다 (직접 입력 모드 회귀 없음)", async () => {
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA);
+
+    expect(promptOf(generateGrounded)).not.toContain(CONTEXT_HUNTER_SCOUT_HEADING);
+  });
+
+  it("★ 후보의 정체성(title·whatItIs·whyNow·whoPays·horizon)이 프롬프트에 담긴다", async () => {
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA, undefined, SCOUT_CANDIDATE);
+
+    const prompt = promptOf(generateGrounded);
+    expect(prompt).toContain(CONTEXT_HUNTER_SCOUT_HEADING);
+    expect(prompt).toContain(SCOUT_CANDIDATE.title);
+    expect(prompt).toContain(SCOUT_CANDIDATE.whatItIs);
+    expect(prompt).toContain(SCOUT_CANDIDATE.whyNow);
+    expect(prompt).toContain(SCOUT_CANDIDATE.whoPays);
+    expect(prompt).toContain(HORIZON_LABELS[SCOUT_CANDIDATE.horizon]);
+  });
+
+  it("★ 신호의 statement·observedAt·출처가 프롬프트에 담긴다", async () => {
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA, undefined, SCOUT_CANDIDATE);
+
+    const prompt = promptOf(generateGrounded);
+    for (const signal of SCOUT_CANDIDATE.signals) {
+      expect(prompt).toContain(signal.statement);
+      // 날짜가 빠지면 "언제의 자본 흐름인가"가 사라져 시차 판단이 불가능해진다
+      expect(prompt).toContain(signal.observedAt);
+      expect(prompt).toContain(SIGNAL_TYPE_LABELS[signal.signalType]);
+      expect(prompt).toContain(signal.citation.title as string);
+      expect(prompt).toContain(signal.citation.domain as string);
+    }
+    // 규제 시행일은 관측일과 다른 사실이다 — 있으면 함께 넘긴다
+    expect(prompt).toContain(SCOUT_CANDIDATE.signals[0].effectiveAt as string);
+  });
+
+  it("★ counterSignal이 프롬프트에 담긴다 (불리한 증거를 빼면 하류 전체가 낙관으로 기운다)", async () => {
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA, undefined, SCOUT_CANDIDATE);
+
+    const prompt = promptOf(generateGrounded);
+    expect(prompt).toContain(SCOUT_CANDIDATE.counterSignal.statement);
+    expect(prompt).toContain(SCOUT_CANDIDATE.counterSignal.observedAt);
+    expect(prompt).toContain("반대 증거");
+  });
+
+  it("★ 신호를 검증된 사실로 제시하지 않고 교차 확인을 지시한다", async () => {
+    const { deps, generateGrounded } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA, undefined, SCOUT_CANDIDATE);
+
+    // 다른 호출에서 나온 판단이다. 사실로 못박아 넘기면 이 grounding 호출이 독립적 근거를
+    // 만들지 않고 앞 단계의 주장을 그대로 승계한다
+    const prompt = promptOf(generateGrounded);
+    expect(prompt).toContain("검증된 사실");
+    expect(prompt).toContain("교차 확인");
+    expect(prompt).toContain("briefing");
+  });
+
+  it("★ 후보 맥락이 planResearchQueries에 전달된다", async () => {
+    const { deps, generateStructured } = fakeDeps([fakeSource("youtube", [])]);
+
+    await runContextHunter(deps, IDEA, undefined, SCOUT_CANDIDATE);
+
+    // 스카우트 모드에는 인터뷰 답변이 없다 — 그 자리를 후보 맥락이 채워야 검색어가 좁혀진다
+    const plannerPrompt = generateStructured.mock.calls[0][0].prompt as string;
+    expect(plannerPrompt).toContain(SCOUT_CANDIDATE.whyNow);
+    expect(plannerPrompt).toContain(SCOUT_CANDIDATE.whoPays);
+  });
+
+  it("★ 스카우트 인용이 context.citations에 섞이지 않는다", async () => {
+    const { deps } = fakeDeps([fakeSource("youtube", [])]);
+
+    const { context } = await runContextHunter(
+      deps,
+      IDEA,
+      undefined,
+      SCOUT_CANDIDATE,
+    );
+
+    // citations는 "이 grounding 호출이 실제로 검색해 코드가 추출한 것"이라는 단일 의미를
+    // 갖는다 (ADR-013). 다른 호출의 인용을 섞으면 그 계약이 깨지고 "이 시장 맥락은 무엇을
+    // 근거로 하는가"에 두 개의 답이 생긴다. 스카우트 인용은 opportunities 아티팩트에 온전하다
+    expect(context.citations).toEqual(CITATIONS);
+    const scoutUris = [
+      ...SCOUT_CANDIDATE.signals.map((signal) => signal.citation.uri),
+      SCOUT_CANDIDATE.counterSignal.citation.uri,
+    ];
+    for (const uri of scoutUris) {
+      expect(context.citations.map((c) => c.uri)).not.toContain(uri);
+    }
+  });
+
+  it("나머지 산출물은 스카우트 모드에서도 동일하다", async () => {
+    const { deps } = fakeDeps([fakeSource("youtube", [YOUTUBE_VOICE])]);
+
+    const { context } = await runContextHunter(
+      deps,
+      IDEA,
+      undefined,
+      SCOUT_CANDIDATE,
+    );
+
+    expect(context).toEqual(
+      expectedContext(
+        expectedCoverage({
+          youtube: { source: "youtube", status: "collected", count: 1 },
+        }),
+        [YOUTUBE_VOICE],
+      ),
+    );
   });
 });
 

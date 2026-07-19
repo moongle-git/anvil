@@ -317,11 +317,6 @@ export async function runPipeline(
     }
   }
 
-  // 선택된 후보는 자료조사에 그대로 넘어간다 — 후보에는 이미 날짜·출처가 붙은 자본 신호가
-  // 들어 있어, 그것을 버리고 idea 문자열만 넘기면 시장조사가 같은 사실을 다시 찾아 헤맨다.
-  // 실제 인자 전달은 contextHunter의 시그니처가 바뀌는 다음 step의 몫이다.
-  void selectedOpportunity;
-
   // executeStep은 반환값을 그대로 step 산출물로 저장하므로, 수집 증거는 여기서 벗겨내
   // research 아티팩트로 따로 영속화한다 — research는 step 산출물이 아니다 (ADR-013).
   // resume 시 context-hunter가 completed면 run()이 호출되지 않아 research는 재생성되지
@@ -334,6 +329,9 @@ export async function runPipeline(
         { gemini: deps.gemini, sources: deps.sources, log },
         idea,
         clarifications || undefined,
+        // 후보에는 날짜·출처가 붙은 자본 신호와 반대 증거가 들어 있다. 그것을 버리고 idea
+        // 문자열만 넘기면 "왜 이 주제가 기회인가"라는 판단이 사라져 反이 일반론만 쓰게 된다.
+        selectedOpportunity,
       );
       deps.store.saveResearchEvidence(runId, evidence);
       return marketContext;
