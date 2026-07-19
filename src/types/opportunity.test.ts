@@ -15,8 +15,15 @@ import {
   type ScoutConstraints,
 } from "./opportunity.js";
 
-const NOW = new Date("2026-07-19T00:00:00.000Z");
-const WINDOW_START = new Date("2026-01-19T00:00:00.000Z");
+// 시각 성분을 일부러 남긴다. 실제 배선은 `new Date()`(orchestrator)와 그것을 그대로
+// 옮긴 scoutWindowStart라 자정이 아니고, 프롬프트에는 .slice(0,10)으로 날짜만 찍힌다.
+// 자정 픽스처를 쓰면 그 어긋남이 테스트에서 사라진다.
+const NOW = new Date("2026-07-19T14:32:11.000Z");
+const WINDOW_START = new Date("2026-01-19T14:32:11.000Z");
+
+/** 프롬프트가 모델에게 실제로 보여주는 문자열 — 검증은 이것과 같은 기준이어야 한다 */
+const NOW_DAY = NOW.toISOString().slice(0, 10);
+const WINDOW_START_DAY = WINDOW_START.toISOString().slice(0, 10);
 
 const constraints: ScoutConstraints = {
   citationIds: ["C1", "C2", "C3"],
@@ -439,6 +446,109 @@ describe("opportunitiesSchemaFor — (3) 날짜", () => {
       withSignals(candidate.signals, { ...counterSignal, observedAt: "2024-03-01" }),
     );
     expect(result.success).toBe(false);
+  });
+
+  // 프롬프트는 날짜만 보여주는데(.slice(0,10)) 검증이 시각까지 비교하면, 모델이
+  // **광고된 그 경계일을 그대로 써도** 거부된다 — 모델이 고칠 방법이 없는 피드백이다.
+  it("탐색 구간 경계일은 windowStart에 시각이 있어도 통과한다", () => {
+    const result = opportunitiesSchemaFor(constraints).safeParse(
+      withSignals([
+        { ...fundingSignal, observedAt: WINDOW_START_DAY },
+        incumbentSignal,
+      ]),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("오늘 당일은 now에 시각이 있어도 미래가 아니다", () => {
+    const result = opportunitiesSchemaFor(constraints).safeParse(
+      withSignals([{ ...fundingSignal, observedAt: NOW_DAY }, incumbentSignal]),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  // 이번 버그의 핵심. Date.parse("2025-01")은 NaN이 아니라 2025-01-01이라
+  // 형식 문제가 "탐색 구간 밖"으로 둔갑했다. 모델은 형식이 아니라 사실을 옮기려 들고,
+  // 형식은 그대로 남아 재시도가 수렴하지 못한다.
+  it.each(["2026-Q2", "2026-03", "2026", "2026-3-11", "Mar 11, 2026"])(
+    "부분·비ISO 날짜 %s를 형식 오류로 지목한다 (구간 문제로 오진하지 않는다)",
+    (observedAt) => {
+      const message = messageOf(
+        opportunitiesSchemaFor(constraints).safeParse(
+          withSignals([{ ...fundingSignal, observedAt }, incumbentSignal]),
+        ),
+      );
+      expect(message).toContain("YYYY-MM-DD");
+      expect(message).not.toContain("탐색 구간");
+    },
+  );
+
+  it("달력에 없는 날짜를 거부한다 — Date.parse는 조용히 다음 달로 넘긴다", () => {
+    const message = messageOf(
+      opportunitiesSchemaFor(constraints).safeParse(
+        withSignals([{ ...fundingSignal, observedAt: "2026-02-30" }, incumbentSignal]),
+      ),
+    );
+    expect(message).toContain("YYYY-MM-DD");
+  });
+
+  // 구간 밖·미래는 인용 자체가 그렇다면 모델이 만족시킬 방법이 없다. 후보를 빼는 것이
+  // 정당한 답인데(ADR-019) 재시도 시점에 그 선택지가 보이지 않으면 날짜를 지어내게 된다.
+  it.each([
+    ["미래", "2026-09-01"],
+    ["구간 밖", "2024-03-01"],
+  ])("%s 날짜 오류는 후보를 빼도 된다는 탈출구를 알려준다", (_label, observedAt) => {
+    const message = messageOf(
+      opportunitiesSchemaFor(constraints).safeParse(
+        withSignals([{ ...fundingSignal, observedAt }, incumbentSignal]),
+      ),
+    );
+    expect(message).toContain("빼");
+  });
+
+  // 미래 날짜의 1차 해결책은 후보를 버리는 것이 아니다 — 시행 예정 규제라면 effectiveAt이
+  // 제자리이고, 그건 이 파이프라인이 가장 값지게 치는 신호다. 탈출구만 알려주면
+  // 모델이 살릴 수 있는 후보를 버린다.
+  it("미래 날짜에는 effectiveAt이라는 제자리를 먼저 알려준다", () => {
+    const message = messageOf(
+      opportunitiesSchemaFor(constraints).safeParse(
+        withSignals([{ ...fundingSignal, observedAt: "2026-09-01" }, incumbentSignal]),
+      ),
+    );
+    expect(message).toContain("effectiveAt");
+  });
+
+  // 반대로 형식·귀속 오류는 언제나 고칠 수 있다. 여기에 도피처를 주면 모델이
+  // 고치는 대신 버리는 쪽을 택하고, 그건 검증을 약화시킨다.
+  it("형식 오류에는 탈출구를 주지 않는다 — 형식은 언제나 고칠 수 있다", () => {
+    const message = messageOf(
+      opportunitiesSchemaFor(constraints).safeParse(
+        withSignals([{ ...fundingSignal, observedAt: "2026-Q2" }, incumbentSignal]),
+      ),
+    );
+    expect(message).not.toContain("빼");
+  });
+
+  it("수치 귀속 오류에도 탈출구를 주지 않는다", () => {
+    const message = messageOf(
+      opportunitiesSchemaFor(constraints).safeParse(
+        withSignals([
+          { ...fundingSignal, statement: "라운드에 $4.2B가 유입됐다." },
+          incumbentSignal,
+        ]),
+      ),
+    );
+    expect(message).not.toContain("빼");
+  });
+
+  it("effectiveAt도 완전한 ISO 날짜만 받는다", () => {
+    const result = opportunitiesSchemaFor(constraints).safeParse(
+      withSignals([
+        { ...fundingSignal, signalType: "regulation", effectiveAt: "2027-01" },
+        incumbentSignal,
+      ]),
+    );
+    expect(messageOf(result)).toContain("effectiveAt");
   });
 });
 

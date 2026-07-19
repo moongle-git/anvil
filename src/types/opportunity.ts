@@ -262,10 +262,43 @@ function unattributedFigures(
   return [...missing];
 }
 
-/** ISO date/datetime → epoch ms. 파싱 불가면 null (throw하지 않는다 — 검증 결과로 다룬다) */
-function parseDate(value: string): number | null {
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
+/**
+ * 범위(미래·구간 밖) 오류에만 붙인다.
+ *
+ * 검색된 인용이 실제로 구간 밖이면 모델이 그 신호를 만족시킬 방법은 **없다** — 남는 길은
+ * 날짜를 지어내는 것뿐이고, 그러면 재시도 3회가 통째로 낭비된다. `candidates: []`가 정당한
+ * 답이라는 것은 이 파이프라인의 규약인데(ADR-019, 침묵 게이트) 재시도 시점의 모델에게는
+ * 그 선택지가 보이지 않는다. 그래서 만족 불가능한 요구에는 합법적 탈출구를 같이 준다.
+ *
+ * 형식·수치 귀속 오류에는 붙이지 않는다. 그것들은 언제나 고칠 수 있고, 도피처를 주면
+ * 모델이 고치는 대신 버린다.
+ */
+const ESCAPE_HATCH =
+  " 이 구간 안의 근거를 댈 수 없으면 그 신호를 빼라. 남는 신호가 조건을 못 채우면 후보를 통째로 빼도 된다 — 억지로 채운 후보보다 빈 candidates가 낫다";
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 완전한 `YYYY-MM-DD`만 받아 그대로 돌려준다. 파싱 불가면 null (throw하지 않는다 —
+ * 검증 결과로 다룬다).
+ *
+ * `Date.parse`를 그대로 쓰지 않는 이유가 이 함수의 존재 이유다:
+ * - `"2025-01"`·`"2026"`은 NaN이 아니라 **그 달·그 해의 1일**로 파싱된다. 그러면 형식 문제가
+ *   범위 검사까지 흘러가 "탐색 구간 밖"으로 **오진**되고, 모델은 형식이 아니라 사실을 옮기려
+ *   들어 재시도가 수렴하지 못한다. 부분 표기는 반드시 형식 오류로 잡아야 한다.
+ * - `"Jan 5, 2025"`·`"2025-1-5"`는 **로컬 타임존**으로 해석돼 서버 TZ에 따라 답이 달라진다.
+ * - `"2025-02-30"`은 조용히 `03-02`로 넘어간다 — 그래서 round-trip으로 대조한다.
+ *
+ * 반환이 ms가 아니라 문자열인 것도 의도다. `YYYY-MM-DD`의 사전순은 정확히 시간순이고,
+ * **프롬프트가 모델에게 보여주는 문자열과 바이트 단위로 같다** (trendScout.ts의 .slice(0,10)).
+ * ms로 비교하면 시각 성분이 딸려 들어와 경계일이 어긋난다 — 아래 windowStartDay를 보라.
+ */
+function parseDay(value: string): string | null {
+  const text = value.trim();
+  if (!ISO_DAY.test(text)) return null;
+  const ms = Date.parse(`${text}T00:00:00Z`);
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 10) === text ? text : null;
 }
 
 /**
@@ -285,8 +318,12 @@ export function opportunitiesSchemaFor(
     constraints.citationIds.length === 0
       ? "(유효한 인용이 하나도 없다 — 근거를 댈 수 없으면 candidates를 비워라)"
       : constraints.citationIds.join(", ");
-  const nowMs = constraints.now.getTime();
-  const windowStartMs = constraints.windowStart.getTime();
+  // 날(day) 단위로 자른다. 프롬프트는 모델에게 날짜만 보여주므로(trendScout.ts의 .slice(0,10))
+  // 검증도 같은 해상도여야 한다 — 시각까지 비교하면 모델이 **광고된 경계일을 그대로 써도**
+  // `observedAt "2025-01-19"이 탐색 구간(2025-01-19 이후) 밖이다`라는 자기모순 피드백이 나가고,
+  // 그건 모델이 고칠 수 없는 요구라 재시도가 통째로 낭비된다.
+  const nowDay = constraints.now.toISOString().slice(0, 10);
+  const windowStartDay = constraints.windowStart.toISOString().slice(0, 10);
 
   return OpportunitiesDraftSchema.superRefine((draft, ctx) => {
     draft.candidates.forEach((candidate, index) => {
@@ -332,34 +369,38 @@ export function opportunitiesSchemaFor(
 
       // (3) 날짜 — 검색 없이는 채울 수 없는 필드를 만드는 것이 목적이다
       for (const signal of signals) {
-        const observedMs = parseDate(signal.observedAt);
-        if (observedMs === null) {
+        const observedDay = parseDay(signal.observedAt);
+        if (observedDay === null) {
+          // 형식 오류에는 ESCAPE_HATCH를 붙이지 않는다. 표기를 고치는 것은 언제나 가능하고,
+          // 여기에 "빼도 된다"를 주면 모델이 고치는 대신 버려서 검증이 약해진다.
           ctx.addIssue({
             code: "custom",
             path: at("signals"),
-            message: `${candidate.id}: observedAt "${signal.observedAt}"을 날짜로 읽을 수 없다. ISO 날짜(YYYY-MM-DD)로 적어라`,
+            message: `${candidate.id}: observedAt "${signal.observedAt}"을 날짜로 읽을 수 없다. 연·월·일이 다 있는 ISO 날짜(YYYY-MM-DD)로 적어라 — "2026-Q2"·"2026-03" 같은 부분 표기는 받지 않는다`,
           });
-        } else if (observedMs > nowMs) {
+        } else if (observedDay > nowDay) {
           ctx.addIssue({
             code: "custom",
             path: at("signals"),
-            message: `${candidate.id}: observedAt "${signal.observedAt}"이 미래다. 이미 보도·공시된 사실만 신호로 쓸 수 있다`,
+            // effectiveAt을 먼저 가리킨다 — 시행 예정 규제라면 그것이 제자리이고, 버릴
+            // 후보가 아니다. 탈출구만 주면 살릴 수 있는 후보까지 버리게 된다.
+            message: `${candidate.id}: observedAt "${signal.observedAt}"이 미래다(오늘은 ${nowDay}다). observedAt은 보도·공시된 날이다 — 앞으로 일어날 일(시행 예정일 등)이라면 그 날짜는 effectiveAt으로 옮기고 observedAt에는 그 사실이 **보도된** 날을 적어라.${ESCAPE_HATCH}`,
           });
-        } else if (observedMs < windowStartMs) {
+        } else if (observedDay < windowStartDay) {
           ctx.addIssue({
             code: "custom",
             path: at("signals"),
-            message: `${candidate.id}: observedAt "${signal.observedAt}"이 탐색 구간(${constraints.windowStart.toISOString().slice(0, 10)} 이후) 밖이다`,
+            message: `${candidate.id}: observedAt "${signal.observedAt}"이 탐색 구간(${windowStartDay} ~ ${nowDay}) 밖이다.${ESCAPE_HATCH}`,
           });
         }
 
         // effectiveAt은 미래여도 통과한다 — 시행 예정 규제가 가장 가치 있는 신호다.
         // 읽을 수 있는 날짜인지만 본다.
-        if (signal.effectiveAt !== undefined && parseDate(signal.effectiveAt) === null) {
+        if (signal.effectiveAt !== undefined && parseDay(signal.effectiveAt) === null) {
           ctx.addIssue({
             code: "custom",
             path: at("signals"),
-            message: `${candidate.id}: effectiveAt "${signal.effectiveAt}"을 날짜로 읽을 수 없다. ISO 날짜(YYYY-MM-DD)로 적어라`,
+            message: `${candidate.id}: effectiveAt "${signal.effectiveAt}"을 날짜로 읽을 수 없다. 연·월·일이 다 있는 ISO 날짜(YYYY-MM-DD)로 적어라`,
           });
         }
 

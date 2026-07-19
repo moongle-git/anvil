@@ -7,7 +7,7 @@ import type {
   ScoutDossier,
   ScoutQueries,
 } from "../types/index.js";
-import { SCOUT_PLANNER_USAGE_LABEL } from "./scoutPlanner.js";
+import { SCOUT_PLANNER_USAGE_LABEL, scoutWindowStart } from "./scoutPlanner.js";
 import { SCOUT_STRUCTURE_USAGE_LABEL } from "./scoutSearch.js";
 import {
   runTrendScout,
@@ -16,7 +16,9 @@ import {
   type TrendScoutDeps,
 } from "./trendScout.js";
 
-const NOW = new Date("2026-07-19T00:00:00.000Z");
+// 시각 성분을 남긴다 — 실제 배선은 orchestrator의 `new Date()`라 자정이 아니다.
+// 자정 픽스처는 날짜창 경계의 어긋남을 통째로 가린다.
+const NOW = new Date("2026-07-19T14:32:11.000Z");
 
 const QUERIES: ScoutQueries = {
   funding: ["grid storage series B 2026"],
@@ -312,6 +314,48 @@ describe("runTrendScout — 스키마 팩토리 배선 (ADR-017)", () => {
     });
 
     expect(schema.safeParse({ candidates: [stale] }).success).toBe(false);
+  });
+
+  // scoutPlanner → trendScout → opportunitiesSchemaFor 전 경로를 한 번에 묶는다.
+  // 프롬프트는 windowStart를 날짜로만 보여주므로(.slice(0,10)) 모델이 그 경계일을 그대로
+  // 쓰는 것은 정당하다 — 그런데 검증이 시각까지 비교하면 거부되고, 그 피드백은
+  // `"2025-01-19"이 탐색 구간(2025-01-19 이후) 밖이다`라 모델이 고칠 수가 없다.
+  it("★ 프롬프트가 광고한 날짜창 경계일을 그대로 쓰면 통과한다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await runTrendScout(deps, "배터리", NOW);
+
+    const { schema, prompt } = synthesisCall(generateStructured);
+    const boundary = scoutWindowStart(NOW).toISOString().slice(0, 10);
+    const onBoundary = draftCandidate({
+      signals: [
+        { ...draftCandidate().signals[0], observedAt: boundary },
+        draftCandidate().signals[1],
+      ],
+    });
+
+    // 프롬프트가 실제로 그 날짜를 보여준다는 것이 이 테스트의 전제다
+    expect(prompt).toContain(boundary);
+    expect(schema.safeParse({ candidates: [onBoundary] }).success).toBe(true);
+  });
+
+  it("★ 오늘 관측된 신호를 미래로 판정하지 않는다", async () => {
+    const { deps, generateStructured } = fakeDeps();
+
+    await runTrendScout(deps, "배터리", NOW);
+
+    const { schema } = synthesisCall(generateStructured);
+    const today = draftCandidate({
+      signals: [
+        {
+          ...draftCandidate().signals[0],
+          observedAt: NOW.toISOString().slice(0, 10),
+        },
+        draftCandidate().signals[1],
+      ],
+    });
+
+    expect(schema.safeParse({ candidates: [today] }).success).toBe(true);
   });
 });
 
