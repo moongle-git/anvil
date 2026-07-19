@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import type { PipelineStepName, StepState } from "@anvil/types";
 import type { RunDetail } from "@/lib/server/runs";
 import { Button, Card } from "@/components/ui";
@@ -109,13 +110,41 @@ export function ProgressView({
                   ) : null}
                 </div>
                 {visual === "error" ? (
-                  <div className="mt-3 flex flex-col gap-3 rounded-md border border-red-200 bg-red-50 p-3">
+                  <div
+                    // 주제 발굴의 실패는 다른 step의 실패와 다른 종류다 — 아래 주석 참조.
+                    // 훅을 남겨 두 경로가 섞이지 않았음을 테스트가 붙잡을 수 있게 한다.
+                    {...(step.name === "trend-scout"
+                      ? { "data-scout-exhausted": "" }
+                      : {})}
+                    className="mt-3 flex flex-col gap-3 rounded-md border border-red-200 bg-red-50 p-3"
+                  >
                     <p className="text-sm leading-relaxed text-red-700">
                       {step.errorMessage ?? "이 단계에서 오류가 발생했습니다."}
                     </p>
-                    <div>
-                      <Button onClick={onResume}>이어서 실행</Button>
-                    </div>
+                    {step.name === "trend-scout" ? (
+                      // 근거를 못 찾아 후보를 만들지 않은 것은 고장이 아니라 설계된 침묵이다
+                      // (SCOUT_NO_CANDIDATES_MESSAGE). 여기서 "이어서 실행"을 권하면 안 된다 —
+                      // 저장된 빈 결과를 재사용하므로 재검색 없이 같은 자리에서 다시 멈춘다.
+                      // 사용자가 바꿀 수 있는 것은 파이프라인이 아니라 탐색 범위다.
+                      <div className="flex flex-col gap-2">
+                        <p className="text-sm leading-relaxed text-neutral-700">
+                          이어서 실행해도 같은 지점에서 다시 멈춥니다. 탐색 범위를
+                          좁히거나 바꿔서 새 탐색을 시작하세요.
+                        </p>
+                        <div>
+                          <Link
+                            href="/"
+                            className="text-sm font-medium text-blue-700 underline-offset-4 hover:underline"
+                          >
+                            다른 범위로 새 탐색 시작
+                          </Link>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <Button onClick={onResume}>이어서 실행</Button>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>

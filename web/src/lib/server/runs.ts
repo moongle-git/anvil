@@ -15,7 +15,9 @@ import {
   type InterviewQuestions,
   type MarketContext,
   type Opportunities,
+  type Opportunity,
   type RunState,
+  type ScoutOrigin,
   type Solution,
   type Thesis,
   type Verdict,
@@ -81,6 +83,17 @@ export interface RunDetail {
    * 별도 엔드포인트로 빼면 waiting 진입 순간을 클라이언트가 다시 감지해 한 번 더 왕복한다.
    */
   opportunities?: Opportunities;
+  /**
+   * 사람이 고른 주제 하나와 그것이 나온 탐색의 좌표. 리포트 뷰의 "이 주제가 어디서 왔는가"가 쓴다.
+   *
+   * opportunities와 겹쳐 보이지만 서로 다른 질문에 답한다 — opportunities는 "무엇을 고를 수
+   * 있었나"(선택 화면), scoutOrigin은 "무엇을 골랐나"(리포트)다. 파생을 여기서 끝내는 것은
+   * report.md와 같은 것을 보게 하기 위해서다(ScoutOrigin은 renderReport의 인자 타입 그대로다) —
+   * 클라이언트가 selection과 candidates를 다시 맞춰보면 두 번째 진실이 된다.
+   *
+   * 선택 이전에는 자연히 없다. 상태로 조건 걸지 않는 이유가 그것이다.
+   */
+  scoutOrigin?: ScoutOrigin;
   context?: MarketContext;
   thesis?: Thesis;
   criticism?: Criticism;
@@ -107,6 +120,38 @@ function loadOrigin(store: RunStore, rerunOf: string): RunOrigin | null {
   };
 }
 
+/**
+ * 저장된 선택을 후보 목록과 맞춰 리포트용 뷰로 만든다. orchestrator가 report.md에 넘기는 것과
+ * 같은 값이다 (ScoutOrigin — 파생이지 아티팩트가 아니다).
+ *
+ * 선택이 없거나(아직 안 골랐다) 그 id가 후보에 없으면(구 데이터·손상) 조용히 없는 것으로 둔다 —
+ * 고르지 않은 후보를 "이 주제의 출처"라고 보여주는 것보다 아무것도 안 보여주는 편이 정직하다.
+ */
+function scoutOriginOf(
+  store: RunStore,
+  runId: string,
+  opportunities: Opportunities | null,
+): ScoutOrigin | null {
+  if (opportunities === null) {
+    return null;
+  }
+  const selection = store.loadOpportunitySelection(runId);
+  if (selection === null) {
+    return null;
+  }
+  const chosen: Opportunity | undefined = opportunities.candidates.find(
+    (candidate) => candidate.id === selection.candidateId,
+  );
+  if (chosen === undefined) {
+    return null;
+  }
+  return {
+    scope: opportunities.scope,
+    searchedAt: opportunities.searchedAt,
+    opportunity: chosen,
+  };
+}
+
 export function getRunDetail(runId: string): RunDetail | null {
   return withRunStore((store) => {
     // 없는 run·손상된 상태 행은 "없는 run"으로 취급한다 (throw 금지 — API가 404를 낸다)
@@ -127,6 +172,7 @@ export function getRunDetail(runId: string): RunDetail | null {
     const verdict = store.loadStepOutput(runId, "verdict", VerdictSchema);
 
     const origin = rerunOf !== undefined ? loadOrigin(store, rerunOf) : null;
+    const scoutOrigin = scoutOriginOf(store, runId, opportunities);
 
     return {
       state,
@@ -135,6 +181,7 @@ export function getRunDetail(runId: string): RunDetail | null {
       ...(origin !== null ? { origin } : {}),
       ...(questions !== null ? { questions } : {}),
       ...(opportunities !== null ? { opportunities } : {}),
+      ...(scoutOrigin !== null ? { scoutOrigin } : {}),
       ...(context !== null ? { context } : {}),
       ...(thesis !== null ? { thesis } : {}),
       ...(criticism !== null ? { criticism } : {}),

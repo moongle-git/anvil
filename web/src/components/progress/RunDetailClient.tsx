@@ -10,6 +10,7 @@ import {
   RunLineage,
 } from "@/components/ui";
 import { ReportView } from "@/components/report/ReportView";
+import { OpportunityPicker } from "./OpportunityPicker";
 import { ProgressView } from "./ProgressView";
 import { QuestionForm } from "./QuestionForm";
 import { useRunDetail } from "./useRunDetail";
@@ -136,6 +137,17 @@ export function RunDetailClient({ runId }: { runId: string }) {
           detail={detail}
           lineage={lineage}
           rerunControl={<RerunButton onRerun={handleRerun} />}
+          deleteControl={deleteControl}
+        />
+      ) : detail.status === "waiting" && detail.opportunities !== undefined ? (
+        // 후보 선택 대기: 스카우트 run은 인터뷰를 돌지 않으므로(두 번 멈춰 세우지 않는다)
+        // waiting의 의미가 인터뷰 run과 다르다. 판별은 상태가 아니라 실린 아티팩트로 한다 —
+        // 후보 목록이 없으면 그릴 것도 없다.
+        <OpportunityPicker
+          runId={runId}
+          opportunities={detail.opportunities}
+          onSubmitted={restart}
+          lineage={lineage}
           deleteControl={deleteControl}
         />
       ) : detail.status === "waiting" ? (

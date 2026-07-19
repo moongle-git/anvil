@@ -4,6 +4,7 @@ import { Card, type CardAccent } from "@/components/ui";
 import { DialecticSplit } from "./DialecticSplit";
 import { MarketContextSection } from "./MarketContextSection";
 import { ReportHeader } from "./ReportHeader";
+import { ScoutOriginSection } from "./ScoutOriginSection";
 import { SectionNav } from "./SectionNav";
 import { SolutionSection } from "./SolutionSection";
 import { VerdictSection } from "./VerdictSection";
@@ -59,6 +60,13 @@ export function ReportView({
           이 리포트는 이전 버전 형식으로 생성되었습니다. 전체 내용은 report.md
           다운로드로 확인하세요.
         </Card>
+      ) : null}
+
+      {/* 논증보다 먼저 온다 — "이 주제가 왜 여기 있는가"를 모르면 뒤의 5단계를 다시 읽어야 한다.
+          report.md의 배치(step 6)와 같은 자리다. 결론이 아니라 출처이므로 상단 요약 배너 금지
+          (ADR-008)에 걸리지 않는다 — 판정도 점수도 담기지 않는다. */}
+      {detail.scoutOrigin !== undefined ? (
+        <ScoutOriginSection origin={detail.scoutOrigin} />
       ) : null}
 
       <div className="lg:grid lg:grid-cols-[11rem_1fr] lg:gap-10">

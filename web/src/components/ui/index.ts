@@ -6,6 +6,7 @@ export {
   type AccentTone,
   type CardAccent,
 } from "./Card";
+export { CapitalSignalItem, CapitalSignalList } from "./CapitalSignalList";
 export { Collapsible } from "./Collapsible";
 export { DeleteRunButton } from "./DeleteRunButton";
 export { EmptyState } from "./EmptyState";
