@@ -6,6 +6,7 @@ import type { CallUsage } from "../lib/cost.js";
 import {
   DEFAULT_GEMINI_MODEL,
   GeminiService,
+  decodableJsonSchema,
   extractCitations,
   type GeminiServiceOptions,
 } from "./gemini.js";
@@ -252,6 +253,128 @@ describe("GeminiService.generateStructured (구조화 출력 모드)", () => {
         usageLabel: "test",
       }),
     ).rejects.toThrow(/시간 초과/);
+  });
+});
+
+describe("decodableJsonSchema (제약 제거 — Gemini 제약 디코딩 상태 폭발 방지)", () => {
+  it("배열 길이 제한을 벗긴다 — 중첩 배열에서 상태 수가 곱해진다", () => {
+    const schema = z.object({
+      candidates: z.array(z.object({ id: z.string() })).max(5).min(2),
+    });
+
+    const json = decodableJsonSchema(schema);
+    const candidates = (json as Record<string, Record<string, unknown>>)
+      .properties.candidates as Record<string, unknown>;
+
+    expect(candidates.maxItems).toBeUndefined();
+    expect(candidates.minItems).toBeUndefined();
+    expect(candidates.type).toBe("array");
+  });
+
+  it("문자열 길이·패턴·format을 벗긴다", () => {
+    const schema = z.object({
+      ref: z.string().min(1).max(10).regex(/^C\d+$/),
+      at: z.iso.datetime(),
+    });
+
+    const props = (decodableJsonSchema(schema) as Record<string, Record<string, Record<string, unknown>>>)
+      .properties;
+
+    expect(props.ref.minLength).toBeUndefined();
+    expect(props.ref.maxLength).toBeUndefined();
+    expect(props.ref.pattern).toBeUndefined();
+    expect(props.at.format).toBeUndefined();
+    expect(props.ref.type).toBe("string");
+  });
+
+  it("수치 경계를 벗긴다", () => {
+    const schema = z.object({ score: z.number().min(0).max(100) });
+
+    const score = (decodableJsonSchema(schema) as Record<string, Record<string, Record<string, unknown>>>)
+      .properties.score;
+
+    expect(score.minimum).toBeUndefined();
+    expect(score.maximum).toBeUndefined();
+    expect(score.type).toBe("number");
+  });
+
+  it("모양은 남긴다 — 필드·필수·열거값은 모델이 형식을 맞추는 데 필요하다", () => {
+    const schema = z.object({
+      horizon: z.enum(["short", "mid", "long"]),
+      note: z.string().min(1).optional(),
+    });
+
+    const json = decodableJsonSchema(schema) as Record<string, unknown>;
+    const props = (json.properties as Record<string, Record<string, unknown>>);
+
+    expect(props.horizon.enum).toEqual(["short", "mid", "long"]);
+    expect(json.required).toEqual(["horizon"]);
+    expect(json.additionalProperties).toBe(false);
+  });
+
+  it("깊이 중첩된 배열 안쪽까지 재귀한다", () => {
+    const schema = z.object({
+      candidates: z
+        .array(
+          z.object({
+            signals: z
+              .array(z.object({ value: z.string().min(1) }))
+              .min(2),
+          }),
+        )
+        .max(5),
+    });
+
+    // 스카우트 산출물과 같은 3중 중첩 — 여기에 남은 제약 하나가 400을 만든다
+    expect(JSON.stringify(decodableJsonSchema(schema))).not.toMatch(
+      /minItems|maxItems|minLength/,
+    );
+  });
+});
+
+describe("GeminiService.generateStructured (제약 없는 스키마 전송)", () => {
+  const Bounded = z.object({
+    candidates: z.array(z.object({ id: z.string().min(1) })).max(5),
+  });
+
+  it("responseJsonSchema에 길이 제약을 싣지 않는다", async () => {
+    const { client, generateContent } = fakeClient(
+      JSON.stringify({ candidates: [{ id: "O1" }] }),
+    );
+
+    await service(client).generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: Bounded,
+      usageLabel: "test",
+    });
+
+    const sent = JSON.stringify(
+      generateContent.mock.calls[0][0].config.responseJsonSchema,
+    );
+    expect(sent).not.toMatch(/maxItems|minLength/);
+  });
+
+  it("제약은 여전히 zod가 강제한다 — 위반 응답은 재시도로 교정된다", async () => {
+    const tooMany = JSON.stringify({
+      candidates: Array.from({ length: 6 }, (_, index) => ({
+        id: `O${index + 1}`,
+      })),
+    });
+    const { client, generateContent } = fakeClient(
+      tooMany,
+      JSON.stringify({ candidates: [{ id: "O1" }] }),
+    );
+
+    const result = await service(client).generateStructured({
+      systemInstruction: "system",
+      prompt: "prompt",
+      schema: Bounded,
+      usageLabel: "test",
+    });
+
+    expect(result.candidates).toHaveLength(1);
+    expect(generateContent).toHaveBeenCalledTimes(2);
   });
 });
 

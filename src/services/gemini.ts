@@ -274,6 +274,58 @@ export function extractCitations(
   return [...byUri.values()];
 }
 
+/**
+ * Gemini의 제약 디코딩이 감당하지 못하는 JSON Schema 키워드.
+ *
+ * responseJsonSchema는 서버에서 유한 상태 기계로 컴파일되는데, 이 키워드들은 상태 수를
+ * **더하는 게 아니라 곱한다** — 특히 중첩 배열에서. 한도를 넘으면 400 INVALID_ARGUMENT
+ * ("too many states for serving")가 나고, 이건 재시도로 풀리지 않는 요청 자체의 거부다.
+ */
+const UNDECODABLE_KEYWORDS = new Set([
+  // 배열 길이 — 바깥 배열의 상한이 안쪽 서브트리 전체의 상태를 그 수만큼 복제한다
+  "minItems",
+  "maxItems",
+  // 문자열 값 매처
+  "minLength",
+  "maxLength",
+  "pattern",
+  "format",
+  // 수치 경계
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+]);
+
+/**
+ * 스키마에서 디코딩 제약을 벗기고 **모양만** 남긴다 — 필드·타입·required·enum은 그대로다.
+ *
+ * **제약을 버리는 게 아니라 강제하는 자리를 옮기는 것이다.** 검증은 여전히 zod가
+ * safeParse로 하고(generateValidated), 위반은 z.prettifyError를 거쳐 그대로 자가 교정
+ * 프롬프트가 된다 (ADR-004). 즉 제약은 **디코딩 시점이 아니라 검증 시점에** 걸린다.
+ *
+ * 이 분리는 이미 이 코드베이스의 전제이기도 하다: superRefine으로 쓴 규칙(인용 화이트리스트,
+ * 삼각측량, 날짜창)은 애초에 toJSONSchema에 나타나지 않아 늘 재시도 루프가 잡아왔다.
+ * minItems·minLength만 디코더에 남겨둘 이유가 없다 — 그것들이 400을 만든 쪽이다.
+ */
+export function decodableJsonSchema(schema: ZodType): unknown {
+  const strip = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      return node.map(strip);
+    }
+    if (node === null || typeof node !== "object") {
+      return node;
+    }
+    return Object.fromEntries(
+      Object.entries(node)
+        .filter(([key]) => !UNDECODABLE_KEYWORDS.has(key))
+        .map(([key, value]) => [key, strip(value)]),
+    );
+  };
+  return strip(z.toJSONSchema(schema));
+}
+
 export class GeminiService {
   private readonly client: GoogleGenAI;
   private readonly model: string;
@@ -486,7 +538,7 @@ export class GeminiService {
       baseConfig: {
         systemInstruction,
         responseMimeType: "application/json",
-        responseJsonSchema: z.toJSONSchema(schema),
+        responseJsonSchema: decodableJsonSchema(schema),
         ...thinkingConfigOf(thinkingBudget),
       },
       basePrompt: prompt,
