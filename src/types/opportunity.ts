@@ -147,6 +147,22 @@ export const OpportunitiesSchema = z.object({
 });
 export type Opportunities = z.infer<typeof OpportunitiesSchema>;
 
+/**
+ * 리포트 렌더러가 받는 얇은 뷰 — 확정된 주제 하나와 그것이 나온 탐색의 좌표.
+ *
+ * 스키마가 아니라 인터페이스인 것은 이것이 저장되는 아티팩트가 아니라 **파생**이기 때문이다
+ * (LedgerEntry와 같은 자리). 렌더러에 Opportunities를 통째로 넘기면 고르지 않은 후보들까지
+ * 알게 되고, 그러면 리포트가 "왜 이것을 골랐나"를 논증하려 든다 — 그건 판정의 일이다.
+ */
+export interface ScoutOrigin {
+  /** 사용자가 준 범위 힌트. 없으면 "전 범위 탐색" */
+  scope: string;
+  /** ISO datetime. 이 주제가 언제의 자본 흐름에서 나왔는지 */
+  searchedAt: string;
+  /** 사람이 고른 후보 */
+  opportunity: Opportunity;
+}
+
 /** 사람이 제출하는 아티팩트 — 고른 후보가 runs.idea로 확정된다 */
 export const OpportunitySelectionSchema = z.object({
   candidateId: z.string().min(1),

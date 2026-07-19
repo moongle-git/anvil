@@ -24,6 +24,7 @@ import {
   type Opportunity,
   type PipelineStepName,
   type RunState,
+  type ScoutOrigin,
   type StepState,
 } from "../types/index.js";
 
@@ -169,7 +170,9 @@ export async function runPipeline(
   // 성공/실패 이분법에 맞지 않는다.
   //
   // 두 단계는 상호배타적이다 — createRun이 스카우트 run에 interviewer를 seed하지 않는다.
-  let selectedOpportunity: Opportunity | undefined;
+  // 후보와 그것이 나온 탐색의 좌표를 한 값으로 들고 다닌다 — context-hunter 주입과 리포트
+  // 머리말이 같은 것을 봐야 한다. 후보만 따로 들면 scope가 두 번째 진실이 된다.
+  let scoutOrigin: ScoutOrigin | undefined;
   if (state.scout) {
     const step = getStepState(state, "trend-scout");
     const selection = deps.store.loadOpportunitySelection(runId);
@@ -233,18 +236,23 @@ export async function runPipeline(
       return { runId, state, status: "waiting" };
     }
 
-    const chosen = deps.store
-      .loadOpportunities(runId)
-      ?.candidates.find((candidate) => candidate.id === selection.candidateId);
+    const stored = deps.store.loadOpportunities(runId);
+    const chosen = stored?.candidates.find(
+      (candidate) => candidate.id === selection.candidateId,
+    );
     // 첫 후보로 조용히 폴백하지 않는다 — 사용자가 고르지 않은 주제로 파이프라인이 완주해
     // 리포트가 나온다. 조용한 오답이 명시적 실패보다 나쁘다.
-    if (chosen === undefined) {
+    if (stored === null || chosen === undefined) {
       throw scoutFailure(
         `선택된 후보 '${selection.candidateId}'가 저장된 후보 목록에 없다`,
       );
     }
 
-    selectedOpportunity = chosen;
+    scoutOrigin = {
+      scope: stored.scope,
+      searchedAt: stored.searchedAt,
+      opportunity: chosen,
+    };
     // 범위 힌트를 확정 주제로 갈아끼운다. 새 메서드를 만들지 않는다 — saveRun이 이미 idea를
     // UPDATE한다. 같은 선택으로 여러 번 돌아도 같은 값이 되므로 멱등하다.
     idea = scoutTopic(chosen);
@@ -331,7 +339,7 @@ export async function runPipeline(
         clarifications || undefined,
         // 후보에는 날짜·출처가 붙은 자본 신호와 반대 증거가 들어 있다. 그것을 버리고 idea
         // 문자열만 넘기면 "왜 이 주제가 기회인가"라는 판단이 사라져 反이 일반론만 쓰게 된다.
-        selectedOpportunity,
+        scoutOrigin?.opportunity,
       );
       deps.store.saveResearchEvidence(runId, evidence);
       return marketContext;
@@ -369,7 +377,17 @@ export async function runPipeline(
     runVerdict({ gemini: deps.gemini }, idea, context, thesis, criticism, solution),
   );
 
-  const report = renderReport(idea, context, thesis, criticism, solution, verdict);
+  // 스카우트 run은 주제를 사람이 고르지 않았다 — 그 사실과 근거가 리포트 안에 남아야
+  // DB의 opportunities를 볼 수 없는 독자도 출처를 안다 (report.md는 밖에서 읽힌다)
+  const report = renderReport(
+    idea,
+    context,
+    thesis,
+    criticism,
+    solution,
+    verdict,
+    scoutOrigin,
+  );
   deps.store.saveReport(runId, report);
   if (state.completedAt === undefined) {
     state.completedAt = new Date().toISOString();

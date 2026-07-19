@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   DIALECTIC_AXIS_LABELS,
+  HORIZON_LABELS,
   MarketContextSchema,
   RECOMMENDATION_LABELS,
   REMEDY_STRATEGY_LABELS,
   REMEDY_VERDICT_LABELS,
+  SIGNAL_TYPE_LABELS,
   SOURCE_LABELS,
   toPromptContext,
   type Criticism,
   type MarketContext,
+  type ScoutOrigin,
   type Solution,
   type SourceCoverage,
   type Thesis,
@@ -1047,6 +1050,167 @@ describe("renderReport", () => {
       expect(rendered).not.toContain("유령 비판에 대한 해결책");
       // 드롭된 결과 c2는 침묵이 된다 — 렌더러는 검증기가 아니다
       expect(rendered).toContain("*   **[해결책 없음] 무료 대체재**");
+    });
+  });
+
+  // ── 스카우트 머리말 (phase 10): 주제를 사람이 고르지 않았다는 사실이 리포트 안에 남아야 한다 ──
+
+  describe("스카우트 머리말", () => {
+    /** 각 신호가 서로 다른 kind의 인용을 물고 있어야 출처 렌더링 규칙을 한 번에 본다 */
+    const scoutOrigin: ScoutOrigin = {
+      scope: "국내 스마트 농업",
+      searchedAt: "2026-07-19T09:00:00.000Z",
+      opportunity: {
+        id: "O1",
+        title: "실내 원예 생육 데이터 SaaS",
+        whatItIs: "가정 화분의 생육 로그를 모아 화원·종묘사에 파는 서비스",
+        whyNow: "센서 단가가 임계선을 넘었고 원예 구독 시장이 재편되는 중이다",
+        whoPays: "화원 체인과 종묘사",
+        horizon: "mid",
+        signals: [
+          {
+            signalType: "funding",
+            statement:
+              "가정 원예 IoT 스타트업 Sprout가 시리즈B로 4,200만 달러를 조달했다",
+            observedAt: "2026-02-11",
+            citation: ORIGIN_CITATION,
+            figures: [{ value: "4,200만 달러", citation: ORIGIN_CITATION }],
+          },
+          {
+            signalType: "regulation",
+            statement: "EU 식물 검역 규정 개정으로 생육 이력 기록이 의무화된다",
+            observedAt: "2026-04-02",
+            effectiveAt: "2027-01-01",
+            citation: REDIRECT_CITATION,
+            figures: [],
+          },
+        ],
+        counterSignal: {
+          signalType: "incumbent",
+          statement: "대형 원예 체인이 자체 센서를 무상 배포하기 시작했다",
+          observedAt: "2026-05-20",
+          citation: REDIRECT_CITATION_NO_TITLE,
+          figures: [],
+        },
+      },
+    };
+
+    const scouted = renderReport(
+      IDEA,
+      context,
+      thesis,
+      criticism,
+      solution,
+      verdict,
+      scoutOrigin,
+    );
+
+    /** 머리말이 차지하는 구간 — 제목 다음, 1절 앞 */
+    const preamble = scouted.slice(0, scouted.indexOf("## 1. 시장 맥락"));
+
+    it("★ scoutOrigin이 없으면 출력이 지금과 한 글자도 다르지 않다", () => {
+      // 직접 입력 모드는 이 phase가 존재하지 않는 것과 같아야 한다
+      expect(
+        renderReport(IDEA, context, thesis, criticism, solution, verdict, undefined),
+      ).toBe(report);
+      expect(report).not.toContain("자동 탐색");
+    });
+
+    it("★ 머리말이 1절보다 앞에 온다 — 논증을 읽기 전에 주제의 출처를 안다", () => {
+      const heading = scouted.indexOf("### 이 주제의 출처 (자동 탐색)");
+      expect(heading).toBeGreaterThan(-1);
+      expect(heading).toBeLessThan(scouted.indexOf("## 1. 시장 맥락"));
+      // 부록이 아니다 — 리포트 끝이 아니라 앞에 있다
+      expect(heading).toBeLessThan(scouted.indexOf("## 5. 최종 판정"));
+    });
+
+    it("★ 5단계 서사의 섹션 제목과 순서가 그대로다", () => {
+      const headings = [
+        "## 1. 시장 맥락 (Context)",
+        "## 2. 낙관적 가설 (正 / Thesis)",
+        "## 3. 냉정한 비판 (反 / Antithesis)",
+        "## 4. 인사이트 및 재설계 (合 / Synthesis)",
+        "## 5. 최종 판정 (Verdict)",
+      ];
+      let cursor = -1;
+      for (const heading of headings) {
+        const index = scouted.indexOf(heading);
+        expect(index, `누락된 섹션: ${heading}`).toBeGreaterThan(cursor);
+        cursor = index;
+      }
+    });
+
+    it("★ 새 번호 섹션(## 6. 등)이 늘지 않는다 — 순서는 협상 불가다 (PRD)", () => {
+      const topLevel = scouted
+        .split("\n")
+        .filter((line) => line.startsWith("## "));
+      expect(topLevel).toHaveLength(5);
+    });
+
+    it("탐색 범위와 후보의 whyNow·whoPays·horizon을 밝힌다", () => {
+      expect(preamble).toContain(`**탐색 범위:** ${scoutOrigin.scope}`);
+      expect(preamble).toContain(`**왜 지금인가:** ${scoutOrigin.opportunity.whyNow}`);
+      expect(preamble).toContain(`**누가 돈을 내나:** ${scoutOrigin.opportunity.whoPays}`);
+      expect(preamble).toContain(`**시계:** ${HORIZON_LABELS.mid}`);
+    });
+
+    it("신호의 종류·statement·observedAt을 렌더링한다", () => {
+      const [funding, regulation] = scoutOrigin.opportunity.signals;
+      expect(preamble).toContain(
+        `**[${SIGNAL_TYPE_LABELS.funding}]** ${funding.statement}`,
+      );
+      expect(preamble).toContain(`관측 ${funding.observedAt}`);
+      expect(preamble).toContain(
+        `**[${SIGNAL_TYPE_LABELS.regulation}]** ${regulation.statement}`,
+      );
+      expect(preamble).toContain(`관측 ${regulation.observedAt}`);
+    });
+
+    it("effectiveAt이 있는 신호만 시행일을 덧붙인다", () => {
+      expect(preamble).toContain("관측 2026-04-02 · 시행 2027-01-01");
+      expect(preamble).toContain("관측 2026-02-11)");
+    });
+
+    it("★ counterSignal을 별도 소제목으로 반드시 렌더링한다", () => {
+      // 유리한 신호만 남기면 리포트가 자기 홍보물이 된다
+      const counter = scoutOrigin.opportunity.counterSignal;
+      const at = preamble.indexOf("#### 반대 증거");
+      expect(at).toBeGreaterThan(-1);
+      expect(preamble.indexOf(counter.statement)).toBeGreaterThan(at);
+      expect(preamble).toContain(
+        `**[${SIGNAL_TYPE_LABELS.incumbent}]** ${counter.statement}`,
+      );
+    });
+
+    it("★ 출처의 domain을 노출한다 — 통신사인지 블로그인지는 사람이 판단한다", () => {
+      // origin은 링크라 citationItem이 domain을 붙이지 않는다. 머리말에서는 드러낸다
+      expect(preamble).toContain(
+        `[${ORIGIN_CITATION.title}](${ORIGIN_CITATION.uri}) (${ORIGIN_CITATION.domain})`,
+      );
+      expect(preamble).toContain(REDIRECT_CITATION.domain);
+      expect(preamble).toContain(REDIRECT_CITATION_NO_TITLE.domain);
+    });
+
+    it("redirect 인용은 1절과 똑같이 링크를 박탈하고 만료를 고지한다 (ADR-013)", () => {
+      expect(preamble).toContain(
+        `${REDIRECT_CITATION.title} (${REDIRECT_CITATION.domain}) — 만료 가능한 검색 리다이렉트`,
+      );
+      for (const redirect of [REDIRECT_CITATION, REDIRECT_CITATION_NO_TITLE]) {
+        expect(preamble).not.toContain(`](${redirect.uri})`);
+      }
+    });
+
+    it("★ 머리말에 판정·점수·결론이 새지 않는다 (ADR-008)", () => {
+      expect(preamble).not.toContain(verdict.headline);
+      expect(preamble).not.toContain(String(verdict.survivalScore));
+      expect(preamble).not.toContain(RECOMMENDATION_LABELS[verdict.recommendation]);
+      expect(preamble).not.toContain(criticism.verdict);
+    });
+
+    it("순수 함수다 — 같은 입력이면 같은 출력", () => {
+      expect(
+        renderReport(IDEA, context, thesis, criticism, solution, verdict, scoutOrigin),
+      ).toBe(scouted);
     });
   });
 

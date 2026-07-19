@@ -2,11 +2,13 @@ import {
   DIALECTIC_AXES,
   DIALECTIC_AXIS_LABELS,
   fatalLedger,
+  HORIZON_LABELS,
   RECOMMENDATION_LABELS,
   REMEDY_STRATEGY_LABELS,
   REMEDY_VERDICT_LABELS,
   REMEDY_VERDICTS,
   RESEARCH_SOURCE_IDS,
+  SIGNAL_TYPE_LABELS,
   SOURCE_LABELS,
 } from "../types/index.js";
 import type {
@@ -19,6 +21,8 @@ import type {
   LedgerEntry,
   MarketContext,
   ResidualRisk,
+  ResolvedCapitalSignal,
+  ScoutOrigin,
   Solution,
   SourceCoverage,
   Thesis,
@@ -112,6 +116,74 @@ function citationSection(citations: readonly Citation[]): string[] {
     );
   }
   return lines;
+}
+
+/**
+ * 머리말의 출처 줄. citationItem의 규약(origin은 링크, redirect는 링크 박탈 + 만료 고지)을
+ * 그대로 쓰되 origin에도 domain을 덧붙인다 — citationItem은 링크 텍스트가 제목이면 domain을
+ * 감추는데, 출처가 통신사인지 개인 블로그인지는 신호의 무게를 가르는 정보다.
+ * 코드가 도메인으로 걸러내지는 않는다. 판단은 읽는 사람의 몫이고, 코드가 대신 정하면
+ * 조용히 편향이 박힌다.
+ */
+function scoutCitation(citation: Citation): string {
+  const rendered = citationItem(citation);
+  return citation.kind === "origin" && citation.domain !== undefined
+    ? `${rendered} (${citation.domain})`
+    : rendered;
+}
+
+/**
+ * 신호 한 줄. 날짜를 빠뜨리지 않는 것이 핵심이다 — observedAt이 이 주제가 모델의 사전지식이
+ * 아니라 검색된 사실에서 나왔다는 유일한 증거다 (opportunity.ts).
+ */
+function scoutSignalLine(signal: ResolvedCapitalSignal): string {
+  const dates = [`관측 ${signal.observedAt}`];
+  if (signal.effectiveAt !== undefined) {
+    dates.push(`시행 ${signal.effectiveAt}`);
+  }
+  return (
+    `*   **[${SIGNAL_TYPE_LABELS[signal.signalType]}]** ${signal.statement}` +
+    ` (${dates.join(" · ")}) — 출처: ${scoutCitation(signal.citation)}`
+  );
+}
+
+/**
+ * 스카우트 모드의 머리말 — 1절 앞에 오는 머리말이지 새 섹션이 아니다.
+ *
+ * 번호 섹션(`## 6.`)으로 만들지 않는 이유는 5단계 서사의 순서가 협상 불가이기 때문이고(PRD),
+ * 부록으로 뒤에 붙이지 않는 이유는 독자가 1절을 읽기 전에 "이 주제가 어디서 왔는가"를 알아야
+ * 하기 때문이다 — 다 읽고 나서 알면 앞의 논증을 다시 읽어야 한다.
+ *
+ * 담기는 것은 **출처이지 판정이 아니다.** 점수·권고·결론은 5절에만 온다 (ADR-008).
+ * 그래서 이 함수는 verdict를 인자로 받지 않는다 — remedySection과 같은 규율이다.
+ */
+function scoutOriginSection(origin: ScoutOrigin): string[] {
+  const { opportunity } = origin;
+  return [
+    "### 이 주제의 출처 (자동 탐색)",
+    "",
+    "> 이 주제는 사람이 고른 것이 아니라 자본 신호 탐색이 후보로 올린 것이다." +
+      " 아래는 그 근거이며, 유효한지에 대한 판정은 5절에 있다.",
+    "",
+    ...bullets([
+      `**탐색 범위:** ${origin.scope}`,
+      `**탐색 시점:** ${origin.searchedAt}`,
+      `**왜 지금인가:** ${opportunity.whyNow}`,
+      `**누가 돈을 내나:** ${opportunity.whoPays}`,
+      `**시계:** ${HORIZON_LABELS[opportunity.horizon]}`,
+    ]),
+    "",
+    "#### 근거 신호",
+    "",
+    ...opportunity.signals.map(scoutSignalLine),
+    "",
+    // 유리한 신호만 남기면 리포트가 자기 홍보물이 된다. 반대 증거는 후보 스키마가 필수로
+    // 요구한 것이므로(opportunity.ts), 렌더링에서 조용히 빠지면 그 강제가 무의미해진다
+    "#### 반대 증거",
+    "",
+    scoutSignalLine(opportunity.counterSignal),
+    "",
+  ];
 }
 
 /**
@@ -381,6 +453,9 @@ function ledgerSection(
  * 5단계 순차 논증 구조의 마크다운 컨설팅 리포트를 렌더링하는 순수 함수 (ADR-008).
  * 1. 시장 맥락 → 2. 낙관적 가설(正) → 3. 냉정한 비판(反) → 4. 인사이트 및 재설계(合) → 5. 최종 판정.
  * 결론은 마지막에 단 하나만 온다: 수익화는 合의 하위 절이고, 최종 판정은 verdict 에이전트의 몫이다 (ADR-010).
+ *
+ * scoutOrigin은 스카우트 모드에서만 넘어온다. 선택적인 것은 편의가 아니라 계약이다 —
+ * 직접 입력 모드의 report.md는 이 인자가 생기기 전과 바이트 단위로 같아야 한다.
  */
 export function renderReport(
   idea: string,
@@ -389,11 +464,16 @@ export function renderReport(
   criticism: Criticism,
   solution: Solution,
   verdict: Verdict,
+  scoutOrigin?: ScoutOrigin,
 ): string {
   const lines: string[] = [];
 
   lines.push(`# [컨설팅 리포트] ${context.ideaTitle}`, "");
   lines.push(`> 입력 아이디어: ${idea}`, "");
+  // 논증보다 먼저 온다 — "이 주제가 왜 여기 있는가"를 모르면 뒤의 5단계를 다시 읽어야 한다
+  if (scoutOrigin !== undefined) {
+    lines.push(...scoutOriginSection(scoutOrigin));
+  }
 
   // ── 1. 시장 맥락 ──
   lines.push("## 1. 시장 맥락 (Context)", "");
