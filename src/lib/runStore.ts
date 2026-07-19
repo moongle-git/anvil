@@ -19,6 +19,7 @@ import { openDb, type ArtifactKind } from "./db.js";
 
 /** step 산출물이 저장되는 artifacts.kind (ADR-014) */
 export const STEP_ARTIFACT_KINDS: Record<PipelineStepName, ArtifactKind> = {
+  "trend-scout": "opportunities",
   interviewer: "questions",
   "context-hunter": "context",
   thesis: "thesis",
@@ -395,14 +396,17 @@ export class RunStore {
       runId: newRunId(idea, now),
       idea,
       createdAt: nowIso,
-      // interviewer 스텝은 인터뷰가 켜진 run(웹)에서만 seed한다
+      // interviewer 스텝은 인터뷰가 켜진 run(웹)에서만 seed한다.
+      // trend-scout은 아직 어느 경로도 seed하지 않는다 — 주제를 발굴해 run을 만드는 진입점은
+      // 다음 step이 배선한다. 여기서 무조건 seed하면 기존 run 전부가 실행되지 않는 유령 step을 얻는다.
       steps: PIPELINE_STEPS.filter(
-        (name) => name !== "interviewer" || interview,
+        (name) => name !== "trend-scout" && (name !== "interviewer" || interview),
       ).map((name) => ({
         name,
         status: "pending" as const,
       })),
       interview,
+      scout: false,
     };
 
     this.tx(() => {
@@ -441,6 +445,7 @@ export class RunStore {
       createdAt: nowIso,
       steps,
       interview: source.interview,
+      scout: source.scout,
     };
 
     this.tx(() => {

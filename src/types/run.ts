@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const PIPELINE_STEPS = [
+  "trend-scout",
   "interviewer",
   "context-hunter",
   "thesis",
@@ -41,5 +42,13 @@ export const RunStateSchema = z.object({
   completedAt: isoDatetime.optional(),
   // 웹에서 생성된 run만 인터뷰(질문-답변)를 활성화한다. 구 state.json 하위호환을 위해 default(false).
   interview: z.boolean().optional().default(false),
+  /**
+   * 주제 발굴(trend-scout)로 시작한 run인가.
+   *
+   * runs 테이블에 컬럼을 만들지 않는다 — db.ts의 DDL은 전부 CREATE TABLE IF NOT EXISTS라
+   * 기존 DB에 컬럼이 추가되지 않고(usage 추가가 무사했던 것은 통째로 새 테이블이었기 때문이다),
+   * 마이그레이션 러너는 ADR-014가 금지한다. steps에 trend-scout 행이 있는지로 파생한다.
+   */
+  scout: z.boolean().optional().default(false),
 });
 export type RunState = z.infer<typeof RunStateSchema>;

@@ -214,7 +214,16 @@ describe("RunStore", () => {
     it("interview:true면 interviewer 스텝까지 seed하고 interview=true를 기록한다", () => {
       const state = store.createRun("아이디어", { interview: true });
 
-      expect(state.steps.map((s) => s.name)).toEqual([...PIPELINE_STEPS]);
+      // trend-scout은 PIPELINE_STEPS에 있지만 createRun이 seed하지 않는다 —
+      // 주제 발굴로 시작하는 진입점이 아직 없다. 실행되지 않을 step을 seed하면 유령이 된다
+      expect(state.steps.map((s) => s.name)).toEqual([
+        "interviewer",
+        "context-hunter",
+        "thesis",
+        "cold-critic",
+        "solution-designer",
+        "verdict",
+      ]);
       expect(state.steps.every((s) => s.status === "pending")).toBe(true);
       expect(state.interview).toBe(true);
       expect(store.loadRun(state.runId).interview).toBe(true);
@@ -334,6 +343,7 @@ describe("RunStore", () => {
   describe("saveStepOutput / loadStepOutput", () => {
     it("maps each step to its artifact kind", () => {
       expect(STEP_ARTIFACT_KINDS).toEqual({
+        "trend-scout": "opportunities",
         interviewer: "questions",
         "context-hunter": "context",
         thesis: "thesis",

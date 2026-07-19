@@ -1,0 +1,59 @@
+{
+  "project": "anvil",
+  "phase": "10-trend-scout",
+  "steps": [
+    {
+      "step": 0,
+      "name": "scout-types",
+      "status": "completed",
+      "started_at": "2026-07-19T14:25:45+0900",
+      "summary": "src/types/opportunity.ts 신규 — 자본 신호(SIGNAL_TYPES 4종)·후보 draft/최종 분리(citationRef → 해소된 Citation)·선택/검색어/dossier 스키마와, 인용 화이트리스트·삼각측량(타입 2종 ∧ 출처 2개)·observedAt 윈도우·수치 귀속 4제약을 강제하는 스키마 팩토리 opportunitiesSchemaFor. PIPELINE_STEPS 맨 앞에 trend-scout 추가(createRun은 아직 seed하지 않는다) + RunState.scout 파생 필드, ARTIFACT_KINDS/STEP_ARTIFACT_KINDS 키 배선."
+    },
+    {
+      "step": 1,
+      "name": "scout-store",
+      "status": "pending"
+    },
+    {
+      "step": 2,
+      "name": "scout-search",
+      "status": "pending"
+    },
+    {
+      "step": 3,
+      "name": "scout-synthesis",
+      "status": "pending"
+    },
+    {
+      "step": 4,
+      "name": "scout-pipeline",
+      "status": "pending"
+    },
+    {
+      "step": 5,
+      "name": "scout-context-injection",
+      "status": "pending"
+    },
+    {
+      "step": 6,
+      "name": "scout-report",
+      "status": "pending"
+    },
+    {
+      "step": 7,
+      "name": "scout-api",
+      "status": "pending"
+    },
+    {
+      "step": 8,
+      "name": "scout-ui",
+      "status": "pending"
+    },
+    {
+      "step": 9,
+      "name": "scout-docs",
+      "status": "pending"
+    }
+  ],
+  "created_at": "2026-07-19T14:25:45+0900"
+}

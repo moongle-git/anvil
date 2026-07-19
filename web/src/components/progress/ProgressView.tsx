@@ -10,6 +10,7 @@ import { useNow } from "./useNow";
 
 // 내부 step명 → 사용자 언어 (PRD 진행 뷰 번역 표)
 const STEP_LABELS: Record<PipelineStepName, string> = {
+  "trend-scout": "주제 발굴",
   interviewer: "질문 준비",
   "context-hunter": "시장 조사",
   thesis: "낙관적 논제",

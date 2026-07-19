@@ -49,6 +49,10 @@
       "dir": "9-deploy",
       "status": "completed",
       "completed_at": "2026-07-18T18:28:51+0900"
+    },
+    {
+      "dir": "10-trend-scout",
+      "status": "pending"
     }
   ]
 }

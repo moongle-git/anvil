@@ -8,7 +8,10 @@ import {
 
 describe("PIPELINE_STEPS", () => {
   it("파이프라인 step 이름을 정반합 순서대로 담는다", () => {
+    // 배열 순서가 곧 steps.ordinal이다 — trend-scout(주제 발굴)은 아이디어를 확정하는
+    // 단계라 interviewer보다도 앞에 온다
     expect(PIPELINE_STEPS).toEqual([
+      "trend-scout",
       "interviewer",
       "context-hunter",
       "thesis",

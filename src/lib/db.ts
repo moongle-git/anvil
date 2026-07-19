@@ -8,6 +8,8 @@ import { DatabaseSync } from "node:sqlite";
  * content는 JSON 직렬화 문자열이고, "report"만 마크다운 원문이다.
  */
 export const ARTIFACT_KINDS = [
+  "opportunities",
+  "selection",
   "questions",
   "answers",
   "research",

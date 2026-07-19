@@ -368,8 +368,10 @@ describe("getDefaultDbPath", () => {
 });
 
 describe("ARTIFACT_KINDS", () => {
-  it("artifacts.kind의 9개 값을 한곳에서 소유한다", () => {
+  it("artifacts.kind의 11개 값을 한곳에서 소유한다", () => {
     expect([...ARTIFACT_KINDS]).toEqual([
+      "opportunities",
+      "selection",
       "questions",
       "answers",
       "research",
