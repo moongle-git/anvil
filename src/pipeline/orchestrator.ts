@@ -4,6 +4,10 @@ import { runContextHunter } from "../agents/contextHunter.js";
 import { runInterviewer } from "../agents/interviewer.js";
 import { runSolutionDesigner } from "../agents/solutionDesigner.js";
 import { runThesis } from "../agents/thesis.js";
+import {
+  runTrendScout,
+  SCOUT_FULL_SCOPE_LABEL,
+} from "../agents/trendScout.js";
 import { runVerdict } from "../agents/verdict.js";
 import { renderReport } from "../lib/report.js";
 import type { RunStore } from "../lib/runStore.js";
@@ -17,6 +21,7 @@ import {
   verdictSchemaFor,
   type InterviewAnswers,
   type InterviewQuestions,
+  type Opportunity,
   type PipelineStepName,
   type RunState,
   type StepState,
@@ -61,6 +66,23 @@ function formatClarifications(
   return blocks.join("\n\n");
 }
 
+/**
+ * 후보가 0건일 때 trend-scout step에 남기는 에러 메시지.
+ *
+ * 근거 없이 후보를 만들지 않은 것은 **설계된 동작**이지 모델의 실패가 아니다 (침묵 게이트).
+ * 그래서 메시지는 원인을 모델 탓으로 돌리지 않고, 사용자가 다음에 무엇을 할지를 말한다.
+ */
+export const SCOUT_NO_CANDIDATES_MESSAGE =
+  "자본 흐름 근거를 찾지 못해 후보를 만들지 않았다. 탐색 범위를 바꿔 새 run으로 다시 시도하라.";
+
+/**
+ * 선택된 후보 → 하류가 볼 주제 문자열.
+ * 하류 에이전트는 idea만 보고 판단하므로 제목만 넘기면 맥락이 통째로 날아간다.
+ */
+function scoutTopic(candidate: Opportunity): string {
+  return `${candidate.title} — ${candidate.whatItIs}`;
+}
+
 /** step 실패를 runId와 함께 전달해 CLI가 --resume 안내를 할 수 있게 한다 */
 export class PipelineStepError extends Error {
   constructor(
@@ -93,7 +115,10 @@ export async function runPipeline(
     params.resumeRunId !== undefined
       ? deps.store.loadRun(params.resumeRunId)
       : deps.store.createRun(params.idea);
-  const { runId, idea } = state;
+  const { runId } = state;
+  // 스카우트 run의 초기 idea는 주제가 아니라 **범위 힌트**다. 후보가 선택되면 확정 주제로
+  // 갈아끼워지므로 재바인딩 가능해야 한다 (아래 주제 발굴 단계).
+  let idea = state.idea;
 
   // 하네스 패턴 (ADR-004): 순차 실행 + 전이마다 saveRun으로 즉시 persist.
   // 프로세스가 죽어도 runs·steps 행이 남아야 resume이 성립한다 (ADR-014).
@@ -138,10 +163,105 @@ export async function runPipeline(
     }
   }
 
+  // ── 주제 발굴 단계 (스카우트 run만; state.scout으로 구동) ──
+  // 인터뷰 단계와 같은 모양이다 — detached CLI에는 stdin이 없으므로 opportunities·selection
+  // 아티팩트로 pause/resume한다. executeStep으로 감싸지 않는 것도 같은 이유다: pause(waiting)는
+  // 성공/실패 이분법에 맞지 않는다.
+  //
+  // 두 단계는 상호배타적이다 — createRun이 스카우트 run에 interviewer를 seed하지 않는다.
+  let selectedOpportunity: Opportunity | undefined;
+  if (state.scout) {
+    const step = getStepState(state, "trend-scout");
+    const selection = deps.store.loadOpportunitySelection(runId);
+
+    /** step을 error로 못박고 올릴 에러를 만든다. throw는 호출부가 한다(제어 흐름을 숨기지 않는다) */
+    const scoutFailure = (message: string): PipelineStepError => {
+      step.status = "error";
+      step.errorMessage = message;
+      step.failedAt = new Date().toISOString();
+      deps.store.saveRun(state);
+      return new PipelineStepError(runId, "trend-scout", new Error(message));
+    };
+
+    if (selection === null) {
+      // 저장된 후보가 있으면 재사용한다. grounded 검색은 이 파이프라인에서 가장 비싼 종류이고
+      // (ADR-016), 사용자가 답을 늦게 주거나 프로세스가 죽어 resume돼도 다시 검색할 이유가
+      // 없다 — 인터뷰가 questions를 재사용하는 것과 같다.
+      let opportunities = deps.store.loadOpportunities(runId);
+      if (opportunities === null) {
+        step.status = "pending";
+        step.startedAt = new Date().toISOString();
+        delete step.completedAt;
+        delete step.failedAt;
+        delete step.errorMessage;
+        deps.store.saveRun(state);
+        log("[pipeline] trend-scout: 실행 시작");
+        try {
+          opportunities = await runTrendScout(
+            { gemini: deps.gemini, log },
+            // 힌트가 없는 run의 idea는 목록에 보이기 위한 자리표시자이지 범위가 아니다.
+            // 그대로 넘기면 플래너가 "전 범위 탐색"이라는 산업을 검색하려 든다.
+            idea === SCOUT_FULL_SCOPE_LABEL ? undefined : idea,
+            new Date(),
+          );
+        } catch (error) {
+          // 후보 생성 실패는 진짜 에러다 (pause와 구분)
+          step.status = "error";
+          step.errorMessage =
+            error instanceof Error ? error.message : String(error);
+          step.failedAt = new Date().toISOString();
+          deps.store.saveRun(state);
+          throw new PipelineStepError(runId, "trend-scout", error);
+        }
+        deps.store.saveOpportunities(runId, opportunities);
+      }
+
+      // candidates: []는 runTrendScout의 정당한 산출물이지만(근거가 없으면 지어내지 않는다),
+      // 파이프라인 관점에서는 고를 것이 없어 진행할 수 없다. waiting으로 두면 사용자가 영원히
+      // 고를 수 없는 화면 앞에 놓인다. 빈 결과도 저장된 채로 두므로 resume은 재검색 없이
+      // 같은 곳에서 멈춘다 — 재검색을 원하면 새 run을 만드는 것이 맞다.
+      if (opportunities.candidates.length === 0) {
+        throw scoutFailure(SCOUT_NO_CANDIDATES_MESSAGE);
+      }
+
+      // 후보 선택 대기(waiting)로 일시 중지. 에러 아님, completedAt 세팅 안 함.
+      step.status = "waiting";
+      deps.store.saveRun(state);
+      log(
+        `[pipeline] trend-scout: 후보 ${opportunities.candidates.length}건 — 선택 대기로 일시 중지`,
+      );
+      return { runId, state, status: "waiting" };
+    }
+
+    const chosen = deps.store
+      .loadOpportunities(runId)
+      ?.candidates.find((candidate) => candidate.id === selection.candidateId);
+    // 첫 후보로 조용히 폴백하지 않는다 — 사용자가 고르지 않은 주제로 파이프라인이 완주해
+    // 리포트가 나온다. 조용한 오답이 명시적 실패보다 나쁘다.
+    if (chosen === undefined) {
+      throw scoutFailure(
+        `선택된 후보 '${selection.candidateId}'가 저장된 후보 목록에 없다`,
+      );
+    }
+
+    selectedOpportunity = chosen;
+    // 범위 힌트를 확정 주제로 갈아끼운다. 새 메서드를 만들지 않는다 — saveRun이 이미 idea를
+    // UPDATE한다. 같은 선택으로 여러 번 돌아도 같은 값이 되므로 멱등하다.
+    idea = scoutTopic(chosen);
+    state.idea = idea;
+    step.status = "completed";
+    step.completedAt ??= new Date().toISOString();
+    deps.store.saveRun(state);
+    log(`[pipeline] trend-scout: 주제 확정 — ${chosen.title}`);
+  }
+
   // ── 인터뷰 단계 (웹에서 생성된 run만; state.interview로 구동) ──
   // detached CLI에는 stdin이 없으므로 questions·answers 아티팩트로 pause/resume한다.
+  // 스카우트 run에서는 돌지 않는다: 한 run에서 사용자를 두 번(후보 선택 → 질문 답변) 멈춰
+  // 세우게 되고, 후보는 이미 타깃·수익원이 구조화돼 있어 질문이 중복된다 (createRun의 seeding
+  // 규칙과 같은 판단 — 여기서 걸러야 유령 interviewer step이 생기지 않는다).
   let clarifications = "";
-  if (state.interview) {
+  if (state.interview && !state.scout) {
     const step = getStepState(state, "interviewer");
     const answers = deps.store.loadInterviewAnswers(runId);
 
@@ -196,6 +316,11 @@ export async function runPipeline(
       );
     }
   }
+
+  // 선택된 후보는 자료조사에 그대로 넘어간다 — 후보에는 이미 날짜·출처가 붙은 자본 신호가
+  // 들어 있어, 그것을 버리고 idea 문자열만 넘기면 시장조사가 같은 사실을 다시 찾아 헤맨다.
+  // 실제 인자 전달은 contextHunter의 시그니처가 바뀌는 다음 step의 몫이다.
+  void selectedOpportunity;
 
   // executeStep은 반환값을 그대로 step 산출물로 저장하므로, 수집 증거는 여기서 벗겨내
   // research 아티팩트로 따로 영속화한다 — research는 step 산출물이 아니다 (ADR-013).

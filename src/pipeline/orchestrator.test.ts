@@ -3,24 +3,36 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ZodType } from "zod";
-import { RunStore, STEP_ARTIFACT_KINDS } from "../lib/runStore.js";
+import {
+  RunStore,
+  SCOUT_FULL_SCOPE_IDEA,
+  STEP_ARTIFACT_KINDS,
+} from "../lib/runStore.js";
 import type { ResearchSource } from "../research/types.js";
 import type { GeminiService } from "../services/gemini.js";
 import { COLD_CRITIC_USAGE_LABEL } from "../agents/coldCritic.js";
 import { CONTEXT_HUNTER_USAGE_LABEL } from "../agents/contextHunter.js";
 import { INTERVIEWER_USAGE_LABEL } from "../agents/interviewer.js";
 import { RESEARCH_PLANNER_USAGE_LABEL } from "../agents/researchPlanner.js";
+import { SCOUT_PLANNER_USAGE_LABEL } from "../agents/scoutPlanner.js";
+import { SCOUT_SEARCH_USAGE_LABEL } from "../agents/scoutSearch.js";
 import { SOLUTION_DESIGNER_USAGE_LABEL } from "../agents/solutionDesigner.js";
 import { THESIS_USAGE_LABEL } from "../agents/thesis.js";
+import {
+  SCOUT_FULL_SCOPE_LABEL,
+  TREND_SCOUT_USAGE_LABEL,
+} from "../agents/trendScout.js";
 import { VERDICT_USAGE_LABEL } from "../agents/verdict.js";
 import {
   MarketContextSchema,
+  OpportunitiesSchema,
   RESEARCH_SOURCE_IDS,
   SOURCE_LABELS,
   SolutionSchema,
   VerdictSchema,
   solutionSchemaFor,
   verdictSchemaFor,
+  type Citation,
   type CommunityVoice,
   type Criticism,
   type InterviewQuestions,
@@ -175,6 +187,119 @@ const verdict: Verdict = {
   ],
 };
 
+// ── 주제 발굴(trend-scout) 픽스처 ──
+// 날짜창은 now 기준 18개월이라 고정 날짜를 박으면 시간이 지나면서 테스트가 썩는다.
+// opportunitiesSchemaFor가 observedAt을 실제로 검증하므로 상대 날짜로 만든다.
+const OBSERVED_AT = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+
+/** 코드가 grounding 응답에서 추출한 인용. C1·C2 번호는 trendScout이 인덱스로 붙인다 (ADR-013) */
+const scoutCitations: Citation[] = [
+  {
+    uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/A1",
+    title: "EU 배터리 여권 시행 규칙 확정",
+    domain: "europa.eu",
+    kind: "redirect",
+  },
+  {
+    uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/A2",
+    title: "배터리 이력 추적 스타트업 시리즈B",
+    domain: "techcrunch.com",
+    kind: "redirect",
+  },
+];
+
+const scoutDossier = {
+  findings: [
+    {
+      signalType: "regulation",
+      statement: "EU가 배터리 여권 제출을 의무화하는 시행 규칙을 확정했다",
+      observedAt: OBSERVED_AT,
+    },
+  ],
+};
+
+/** LLM이 채우는 draft — 인용은 ID로만 지목한다. 코드가 실체(Citation)로 치환한다 */
+const scoutDraft = {
+  candidates: [
+    {
+      id: "O1",
+      title: "배터리 여권 대응 이력 수집 SaaS",
+      whatItIs:
+        "EU 배터리 여권 의무화에 맞춰 셀 단위 공급망 이력을 자동 수집·제출하는 서비스",
+      signals: [
+        {
+          signalType: "regulation",
+          statement: "EU가 배터리 여권 제출을 의무화하는 시행 규칙을 확정했다",
+          observedAt: OBSERVED_AT,
+          effectiveAt: "2027-02-18",
+          citationRef: "C1",
+          figures: [],
+        },
+        {
+          signalType: "funding",
+          statement: "배터리 이력 추적 스타트업이 시리즈B를 유치했다",
+          observedAt: OBSERVED_AT,
+          citationRef: "C2",
+          figures: [],
+        },
+      ],
+      counterSignal: {
+        signalType: "incumbent",
+        statement: "기존 ERP 벤더가 같은 기능을 로드맵에 올렸다",
+        observedAt: OBSERVED_AT,
+        citationRef: "C2",
+        figures: [],
+      },
+      whyNow: "시행일까지 남은 준비 기간이 짧다",
+      whoPays: "EU에 배터리를 파는 제조사",
+      horizon: "mid",
+    },
+    {
+      id: "O2",
+      title: "폐배터리 잔존가치 평가 API",
+      whatItIs: "회수된 셀의 잔존 수명을 진단해 재사용 등급을 매기는 평가 API",
+      signals: [
+        {
+          signalType: "funding",
+          statement: "폐배터리 재활용 설비에 신규 투자가 집행됐다",
+          observedAt: OBSERVED_AT,
+          citationRef: "C2",
+          figures: [],
+        },
+        {
+          signalType: "regulation",
+          statement: "회수 의무 비율이 상향되는 규칙이 확정됐다",
+          observedAt: OBSERVED_AT,
+          citationRef: "C1",
+          figures: [],
+        },
+      ],
+      counterSignal: {
+        signalType: "incumbent",
+        statement: "대형 재활용사가 자체 진단 설비를 이미 갖췄다",
+        observedAt: OBSERVED_AT,
+        citationRef: "C1",
+        figures: [],
+      },
+      whyNow: "회수량이 임계점을 넘기 시작했다",
+      whoPays: "재활용 사업자",
+      horizon: "long",
+    },
+  ],
+};
+
+/** trend-scout이 실제로 던지는 세 호출의 라벨 (planner → search → 합성) */
+const SCOUT_LABELS = [SCOUT_PLANNER_USAGE_LABEL, TREND_SCOUT_USAGE_LABEL];
+
+const scoutQueries = {
+  funding: ["battery recycling series B"],
+  incumbent: ["battery capex guidance"],
+  regulation: ["EU battery passport effective date"],
+  costCurve: ["battery pack cost per kWh"],
+};
+
 interface FakeGemini {
   gemini: GeminiService;
   generateStructured: ReturnType<typeof vi.fn>;
@@ -206,6 +331,8 @@ function fakeGemini(options?: {
   questions?: InterviewQuestions;
   /** 원장 없는 응답 등, 스키마가 거부해야 할 solution을 주입한다 */
   solution?: unknown;
+  /** []로 주면 침묵 게이트가 작동해 후보 0건이 된다 (trendScout) */
+  scoutCitations?: Citation[];
 }): FakeGemini {
   const generateStructured = vi.fn(
     ({
@@ -231,6 +358,10 @@ function fakeGemini(options?: {
       }
       if (usageLabel === RESEARCH_PLANNER_USAGE_LABEL)
         return respond(searchQueries);
+      if (usageLabel === SCOUT_PLANNER_USAGE_LABEL) return respond(scoutQueries);
+      // 합성 호출의 schema는 opportunitiesSchemaFor다 — 인용 화이트리스트·삼각측량·날짜창을
+      // 실제로 검증하므로, draft가 grounded 인용과 어긋나면 여기서 거부된다 (ADR-017)
+      if (usageLabel === TREND_SCOUT_USAGE_LABEL) return respond(scoutDraft);
       if (usageLabel === THESIS_USAGE_LABEL) return respond(thesis);
       if (usageLabel === COLD_CRITIC_USAGE_LABEL) return respond(criticism);
       if (usageLabel === SOLUTION_DESIGNER_USAGE_LABEL)
@@ -255,6 +386,13 @@ function fakeGemini(options?: {
         return Promise.resolve({
           data: { ...draft, communityVoiceRefs: ["V1"] },
           citations,
+          webSearchQueries: [],
+        });
+      }
+      if (usageLabel === SCOUT_SEARCH_USAGE_LABEL) {
+        return Promise.resolve({
+          data: scoutDossier,
+          citations: options?.scoutCitations ?? scoutCitations,
           webSearchQueries: [],
         });
       }
@@ -645,6 +783,275 @@ describe("runPipeline", () => {
       // skip된 step은 run()이 호출되지 않는다 — 이미 저장돼 있으므로 정상이다
       expect(save).not.toHaveBeenCalled();
       expect(store.loadResearchEvidence(error.runId)).not.toBeNull();
+    });
+  });
+
+  // 인터뷰 블록과 같은 pause/resume 모양이다 — detached CLI에는 stdin이 없으므로
+  // opportunities·selection 아티팩트로 멈추고 이어간다 (ADR-007).
+  describe("주제 발굴 (스카우트 흐름)", () => {
+    const SCOPE = "배터리 산업";
+
+    it("범위 힌트 자리표시자는 저장소와 에이전트가 같은 문자열을 쓴다", () => {
+      // orchestrator가 "힌트 없음"을 이 문자열 비교로 판정한다 — 갈리면 플래너가
+      // "전 범위 탐색"이라는 산업을 검색하려 든다
+      expect(SCOUT_FULL_SCOPE_LABEL).toBe(SCOUT_FULL_SCOPE_IDEA);
+    });
+
+    it("★ 선택 전: 후보를 만들고 waiting으로 일시 중지한다 (하류 미실행)", async () => {
+      const { gemini, generateStructured, generateGrounded } = fakeGemini();
+      const { runId } = store.createRun(SCOPE, { scout: true });
+
+      const result = await runPipeline(makeDeps(gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+
+      expect(result.status).toBe("waiting");
+      expect(result.report).toBeUndefined();
+
+      // 주제 발굴 세 호출만 돌고 정반합은 시작조차 하지 않는다
+      expect(calledLabels(generateStructured)).toEqual(SCOUT_LABELS);
+      expect(calledLabels(generateGrounded)).toEqual([SCOUT_SEARCH_USAGE_LABEL]);
+
+      // 후보가 저장됐고, 인용은 코드가 실체로 치환한 것이다 (ref 문자열이 남지 않는다)
+      const opportunities = store.loadOpportunities(runId);
+      expect(opportunities?.candidates.map((c) => c.id)).toEqual(["O1", "O2"]);
+      expect(opportunities?.candidates[0].signals[0].citation).toEqual(
+        scoutCitations[0],
+      );
+      expect(opportunities?.scope).toBe(SCOPE);
+
+      // waiting은 에러가 아니다 — completedAt을 세팅하지 않는다
+      const saved = store.loadRun(runId);
+      expect(saved.steps.find((s) => s.name === "trend-scout")?.status).toBe(
+        "waiting",
+      );
+      expect(saved.completedAt).toBeUndefined();
+      expect(
+        store.loadStepOutput(runId, "context-hunter", MarketContextSchema),
+      ).toBeNull();
+    });
+
+    it("★ resume(선택 여전히 없음): 저장된 후보를 재사용하고 재검색하지 않는다", async () => {
+      // grounded 검색은 이 파이프라인에서 가장 비싼 호출이다 (ADR-016) —
+      // resume마다 다시 돌면 비용이 조용히 배로 뛴다
+      const first = fakeGemini();
+      const { runId } = store.createRun(SCOPE, { scout: true });
+      await runPipeline(makeDeps(first.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+      const before = store.loadOpportunities(runId);
+
+      const second = fakeGemini();
+      const result = await runPipeline(makeDeps(second.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+
+      expect(result.status).toBe("waiting");
+      expect(calledLabels(second.generateStructured)).toEqual([]);
+      expect(second.generateGrounded).not.toHaveBeenCalled();
+      expect(store.loadOpportunities(runId)).toEqual(before);
+    });
+
+    it("★ 선택 제출 후 resume: 주제를 확정하고 정반합을 완주한다", async () => {
+      const first = fakeGemini();
+      const { runId } = store.createRun(SCOPE, { scout: true });
+      await runPipeline(makeDeps(first.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+
+      // 사용자가 두 번째 후보를 고른다 — 첫 후보 폴백이면 이 테스트가 잡는다
+      store.saveOpportunitySelection(runId, { candidateId: "O2" });
+
+      const second = fakeGemini();
+      const result = await runPipeline(makeDeps(second.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+
+      expect(result.status).toBe("completed");
+      // 주제 발굴은 다시 돌지 않고 자료조사부터 이어진다
+      expect(calledLabels(second.generateStructured)).toEqual([
+        RESEARCH_PLANNER_USAGE_LABEL,
+        THESIS_USAGE_LABEL,
+        COLD_CRITIC_USAGE_LABEL,
+        SOLUTION_DESIGNER_USAGE_LABEL,
+        VERDICT_USAGE_LABEL,
+      ]);
+      expect(calledLabels(second.generateGrounded)).toEqual([
+        CONTEXT_HUNTER_USAGE_LABEL,
+      ]);
+
+      const saved = store.loadRun(runId);
+      expect(saved.steps.map((s) => s.status)).toEqual([
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+        "completed",
+      ]);
+      expect(saved.completedAt).toBeDefined();
+    });
+
+    it("★ 확정된 idea는 후보의 title과 whatItIs를 모두 담는다", async () => {
+      // 하류 에이전트는 idea만 보고 판단한다 — 제목만 넣으면 맥락이 통째로 날아간다
+      const first = fakeGemini();
+      const { runId } = store.createRun(SCOPE, { scout: true });
+      await runPipeline(makeDeps(first.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+      store.saveOpportunitySelection(runId, { candidateId: "O2" });
+
+      const second = fakeGemini();
+      await runPipeline(makeDeps(second.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+
+      const chosen = scoutDraft.candidates[1];
+      const saved = store.loadRun(runId);
+      expect(saved.idea).toContain(chosen.title);
+      expect(saved.idea).toContain(chosen.whatItIs);
+      // 범위 힌트는 확정 주제로 갈아끼워진다 — 목록에 남는 제목이 이 값이다
+      expect(saved.idea).not.toBe(SCOPE);
+
+      // 확정 주제가 실제로 하류 프롬프트까지 흐른다
+      const plannerPrompt = (
+        second.generateStructured.mock.calls[0][0] as { prompt: string }
+      ).prompt;
+      expect(plannerPrompt).toContain(chosen.title);
+    });
+
+    it("★ 후보 0건: waiting이 아니라 error로 종료한다", async () => {
+      // citations 0건이면 침묵 게이트가 합성을 건너뛴다 — 근거 없는 후보를 지어내지 않는
+      // 것은 설계된 동작이지만, 파이프라인은 고를 것이 없어 진행할 수 없다
+      const { gemini } = fakeGemini({ scoutCitations: [] });
+      const { runId } = store.createRun(SCOPE, { scout: true });
+
+      const promise = runPipeline(makeDeps(gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+      await expect(promise).rejects.toBeInstanceOf(PipelineStepError);
+      const error = (await promise.catch((e: unknown) => e)) as PipelineStepError;
+      expect(error.step).toBe("trend-scout");
+
+      const saved = store.loadRun(runId);
+      const step = saved.steps.find((s) => s.name === "trend-scout");
+      expect(step?.status).toBe("error");
+      expect(step?.failedAt).toBeDefined();
+      // 사용자가 다음에 무엇을 할지 알려주는 메시지여야 한다 (모델 탓이 아니다)
+      expect(step?.errorMessage).toContain("탐색 범위");
+      expect(saved.completedAt).toBeUndefined();
+      // 빈 결과도 저장한다 — resume이 같은 곳에서 멈춰야 재검색이 조용히 반복되지 않는다
+      expect(store.loadOpportunities(runId)?.candidates).toEqual([]);
+    });
+
+    it("후보 0건 run을 resume해도 재검색하지 않고 같은 곳에서 멈춘다", async () => {
+      const first = fakeGemini({ scoutCitations: [] });
+      const { runId } = store.createRun(SCOPE, { scout: true });
+      await runPipeline(makeDeps(first.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      }).catch(() => undefined);
+
+      const second = fakeGemini({ scoutCitations: [] });
+      await expect(
+        runPipeline(makeDeps(second.gemini), {
+          idea: SCOPE,
+          resumeRunId: runId,
+        }),
+      ).rejects.toBeInstanceOf(PipelineStepError);
+
+      // 저장된 빈 결과를 버리고 다시 검색하지 않는다 — 가장 비싼 호출이다
+      expect(second.generateGrounded).not.toHaveBeenCalled();
+      expect(calledLabels(second.generateStructured)).toEqual([]);
+    });
+
+    it("★ 존재하지 않는 candidateId: 첫 후보로 폴백하지 않고 error다", async () => {
+      // 조용한 오답이 명시적 실패보다 나쁘다 — 사용자가 고르지 않은 주제로 리포트가 나온다
+      const first = fakeGemini();
+      const { runId } = store.createRun(SCOPE, { scout: true });
+      await runPipeline(makeDeps(first.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+      store.saveOpportunitySelection(runId, { candidateId: "O99" });
+
+      const second = fakeGemini();
+      const promise = runPipeline(makeDeps(second.gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+      await expect(promise).rejects.toBeInstanceOf(PipelineStepError);
+      const error = (await promise.catch((e: unknown) => e)) as PipelineStepError;
+      expect(error.step).toBe("trend-scout");
+
+      const saved = store.loadRun(runId);
+      expect(saved.steps.find((s) => s.name === "trend-scout")?.status).toBe(
+        "error",
+      );
+      // 주제가 확정되지 않았다 — 범위 힌트 그대로다
+      expect(saved.idea).toBe(SCOPE);
+      expect(calledLabels(second.generateStructured)).toEqual([]);
+      expect(store.loadReport(runId)).toBeNull();
+    });
+
+    it("스카우트 run에서는 interviewer를 실행하지 않는다", async () => {
+      // 한 run에서 사용자를 두 번(후보 선택 → 질문 답변) 멈춰 세우지 않는다
+      const { gemini, generateStructured } = fakeGemini({
+        questions: { questions: [{ id: "q1", question: "타깃은?", why: "검증" }] },
+      });
+      const { runId } = store.createRun(SCOPE, { interview: true, scout: true });
+      await runPipeline(makeDeps(gemini), { idea: SCOPE, resumeRunId: runId });
+
+      store.saveOpportunitySelection(runId, { candidateId: "O1" });
+      const result = await runPipeline(makeDeps(gemini), {
+        idea: SCOPE,
+        resumeRunId: runId,
+      });
+
+      expect(result.status).toBe("completed");
+      expect(calledLabels(generateStructured)).not.toContain(
+        INTERVIEWER_USAGE_LABEL,
+      );
+      expect(store.loadInterviewQuestions(runId)).toBeNull();
+      // 유령 step이 생기지 않는다 — 진행 뷰와 resume 판정이 함께 망가진다
+      expect(
+        store.loadRun(runId).steps.map((s) => s.name),
+      ).not.toContain("interviewer");
+    });
+
+    it("범위 힌트가 없으면 플래너에 자리표시자를 범위로 넘기지 않는다", async () => {
+      const { gemini, generateStructured } = fakeGemini();
+      // createRun이 빈 힌트를 SCOUT_FULL_SCOPE_IDEA로 확정한다
+      const { runId, idea } = store.createRun("", { scout: true });
+      expect(idea).toBe(SCOUT_FULL_SCOPE_IDEA);
+
+      await runPipeline(makeDeps(gemini), { idea, resumeRunId: runId });
+
+      // "전 범위 탐색"이라는 산업을 검색하게 두면 안 된다 — 전 범위 모드로 넘어가야 한다
+      const plannerPrompt = (
+        generateStructured.mock.calls[0][0] as { prompt: string }
+      ).prompt;
+      expect(plannerPrompt).toContain("특정 산업으로 좁히지 않는다");
+      // 산출물의 scope 표기는 자리표시자 그대로다
+      expect(store.loadOpportunities(runId)?.scope).toBe(SCOUT_FULL_SCOPE_IDEA);
+    });
+
+    it("후보 산출물은 저장 후에도 스키마를 통과한다 (resume 재사용의 전제)", async () => {
+      const { gemini } = fakeGemini();
+      const { runId } = store.createRun(SCOPE, { scout: true });
+      await runPipeline(makeDeps(gemini), { idea: SCOPE, resumeRunId: runId });
+
+      expect(
+        store.loadStepOutput(runId, "trend-scout", OpportunitiesSchema),
+      ).not.toBeNull();
     });
   });
 
