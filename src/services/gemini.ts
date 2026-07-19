@@ -195,6 +195,30 @@ function extractJsonText(text: string): string {
  * 가장 강한 인용이다(kind: origin) — 같은 uri가 양쪽에 나오면 origin이 이긴다.
  * metadata가 없어도 throw하지 않는다 — grounding이 아무것도 못 찾는 것은 정상이다.
  */
+/**
+ * 조사 기록 — **groundingMetadata에서 출처 원문(source text)을 얻을 수 있는가? 없다.**
+ *
+ * 물어본 이유: 각 신호에 출처에서 그대로 딴 quote를 요구하고, 그 문장이 실제로 검색된 문서에
+ * 있는지 코드가 대조할 수 있으면 환각 방어가 한 겹 늘어난다. @google/genai의 타입 정의를
+ * 전수 확인한 결과(node_modules/@google/genai/dist/genai.d.ts) 우리가 쓰는 googleSearch
+ * 경로에는 그런 필드가 없다:
+ *
+ * - `groundingSupports[].segment.text` — 이름이 가장 그럴듯하지만 **모델 자신의 응답 텍스트**다.
+ *   타입 주석이 "The text corresponding to the segment **from the response**"이고,
+ *   startIndex/endIndex도 응답 Part 안의 바이트 오프셋이다. 즉 이것으로 quote를 대조하면
+ *   모델의 주장을 모델의 주장과 비교하는 순환이 된다. (다만 groundingChunkIndices는 "출력의
+ *   이 구간이 어느 chunk에 귀속되는가"를 말해준다 — 인용 원문이 아니라 귀속 정보다.)
+ * - `groundingChunk.web` — domain·title·uri **뿐**이다. 본문 텍스트가 없다.
+ * - `groundingChunk.retrievedContext.text` — 유일하게 "content of the retrieved data source"인데,
+ *   Vertex AI Search / RAG retrieval tool 전용이다. Gemini API의 googleSearch로는 채워지지 않고,
+ *   이 코드베이스는 retrievedContext chunk를 이미 버린다(아래 web 전용 추출 + 그 테스트).
+ *
+ * **결론: quote는 코드로 대조하지 않는다.** CapitalSignal.quote는 optional로 남고, 검증은
+ * 사람이 UI에서 눈으로 한다. 대조기를 만들어 붙이면 검증하지 않는 것을 검증한 것처럼 보이게
+ * 만드는 것이라 지금보다 나쁘다 — 이 파이프라인이 막으려는 실패가 정확히 그것이다(ADR-013).
+ * 그래서 세그먼트 추출기를 **추가하지 않았다.** 다시 조사하기 전에 이 주석을 먼저 읽어라.
+ */
+
 export function extractCitations(
   responses: readonly GenerateContentResponse[],
 ): GroundingCitation[] {
