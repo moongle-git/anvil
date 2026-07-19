@@ -16,7 +16,7 @@
       "status": "completed",
       "started_at": "2026-07-19T14:35:58+0900",
       "summary": "RunStore에 스카우트 모드 배선 — createRun(idea, {scout})이 trend-scout만 seed하고 interviewer는 seed하지 않으며(사용자를 두 번 멈춰 세우지 않는다), 빈 범위 힌트는 SCOUT_FULL_SCOPE_IDEA(\"전 범위 탐색\")로 확정. state.scout은 컬럼이 아니라 steps의 trend-scout 유무에서 파생(기존 DB 무변경). opportunities(step 산출물)·selection(사람의 아티팩트) 접근자 4종 추가, createRerun은 trend-scout과 두 아티팩트를 명시적으로 걸러 평범한 run으로 포크. 주제 확정은 기존 saveRun 경로 그대로.",
-      "completed_at": "2026-07-19T14:39:30+0900"
+      "completed_at": "2026-07-19T14:39:55+0900"
     },
     {
       "step": 2,
