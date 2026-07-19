@@ -47,7 +47,7 @@
       "name": "scout-context-injection",
       "status": "completed",
       "started_at": "2026-07-19T14:57:36+0900",
-      "completed_at": "2026-07-19T15:03:00+0900",
+      "completed_at": "2026-07-19T15:01:57+0900",
       "summary": "runContextHunter(deps, idea, clarifications?, scoutContext?)로 선택적 4번째 파라미터를 열고 orchestrator가 선택된 후보를 한 줄로 넘긴다(step 4가 남겨둔 void selectedOpportunity 제거). 스카우트 근거는 CONTEXT_HUNTER_SCOUT_HEADING 섹션으로 프롬프트 끝에 붙는다 — 후보의 title·whatItIs·whyNow·whoPays·horizon(HORIZON_LABELS)과 signals[]를 [라벨] statement (관측일·시행일, 출처 title—domain) 줄로 펴고, counterSignal은 '반대 증거' 별도 소제목으로 반드시 싣는다(빼면 시장 맥락부터 낙관으로 기울고 그것이 正·反·合 전부에 주입된다). citation.uri는 싣지 않는다(만료되는 리다이렉트라 판단에 무용 — trendScout의 citationBlock과 같은 규율). 지시문은 신호를 '검증된 사실이 아니다'로 제시하고 웹검색 교차 확인·미확인 시 briefing 기재·반대 증거 반영을 요구해, 이 grounding 호출이 앞 단계의 주장을 승계하지 않고 독립 근거를 만들게 한다. planResearchQueries에는 clarifications 대신 후보의 whyNow·whoPays를 넘긴다(병합이 아니라 선택 — 두 모드는 상호배타적이라 병합 경로는 실행되지 않는다). **스카우트 citations는 context.citations에 병합하지 않는다** — 그 필드는 '이 grounding 호출이 실제로 검색해 코드가 추출한 인용'이라는 단일 의미를 갖고(ADR-013), 스카우트 인용은 opportunities 아티팩트에 온전히 남아 step 6·8이 별도 섹션으로 표시한다. 테스트 9건 추가(contextHunter 8 + orchestrator 1), 변이 2종(counterSignal 제거·배선 제거)으로 검증."
     },
     {
