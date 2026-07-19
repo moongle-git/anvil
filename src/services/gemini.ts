@@ -98,6 +98,18 @@ export interface GenerateGroundedParams<T> {
   useUrlContext?: boolean;
   /** thinking 토큰 상한. 0이면 thinking을 끈다. 생략하면 모델 기본값 (ADR-016) */
   thinkingBudget?: number;
+  /**
+   * 인용 0건일 때 **같은 요청을 그대로** 다시 보낼 최대 횟수. 기본 0(재검색 없음).
+   *
+   * groundingChunks는 비결정적이다 — 실측 8회 중 4회가 chunk 0건이었고, 그 4회도
+   * webSearchQueries는 정상이었다(검색은 실재했고 귀속만 안 붙었다). 프롬프트 형태로는
+   * 재현되지 않는다: 같은 스카우트 프롬프트가 한 번은 0건, 한 번은 11건을 냈다.
+   *
+   * 그래서 이것은 형식 재시도가 아니라 **전송 재시도와 같은 성격**이다(같은 것을 그대로
+   * 다시 묻는다). 인용을 필수로 요구하는 호출만 켠다 — context-hunter는 0건이어도
+   * 진행하므로 켜지 않는다.
+   */
+  citationRetries?: number;
 }
 
 /**
@@ -119,6 +131,39 @@ export interface GroundedResult<T> {
   data: T;
   citations: GroundingCitation[];
   /** 모델이 실제로 검색한 쿼리 — 관측용. 산출물 스키마에는 넣지 않는다 */
+  webSearchQueries: string[];
+}
+
+/**
+ * 산문 grounding 호출의 파라미터. schema가 없다 — 그것이 이 메서드의 존재 이유다.
+ *
+ * **왜 JSON을 요구하지 않는가.** JSON만 출력하라고 지시하면 groundingChunks가 사라진다.
+ * 실측: 산문 응답은 4/4로 chunk가 붙었고(6~16건), 같은 프롬프트에 JSON 지시만 얹으면
+ * 1/7로 떨어졌다(그 6회는 chunk·support가 통째로 0이고 webSearchQueries만 정상이었다 —
+ * 검색은 실재했으나 귀속이 안 붙은 것이다). JSON 지시가 붙으면 모델이 검색을 더 많이 하고
+ * (실측 2건 → 8건) 그 결과를 종합해버리는데, 귀속은 그 과정에서 떨어져 나간다.
+ *
+ * 그래서 검색과 구조화를 **호출 단위로** 가른다: 여기서는 산문으로 받아 인용을 지키고,
+ * 구조화는 non-grounded generateStructured가 한다. 파이프라인이 검색·종합을 step으로
+ * 나눈 것과 같은 이유이고, 같은 규율이 한 단계 더 내려간 것이다.
+ */
+export interface GenerateGroundedTextParams {
+  systemInstruction: string;
+  prompt: string;
+  /** 어느 에이전트의 호출인가 (usage 집계용) */
+  usageLabel: string;
+  /** 경쟁사 공식 페이지를 모델이 직접 읽게 한다 (ADR-012). 기본 false */
+  useUrlContext?: boolean;
+  /** thinking 토큰 상한 (ADR-016) */
+  thinkingBudget?: number;
+  /** 인용 0건일 때 같은 요청을 다시 보낼 최대 횟수. 기본 0 */
+  citationRetries?: number;
+}
+
+export interface GroundedTextResult {
+  /** 모델이 쓴 산문 그대로. 구조화는 호출부가 별도 호출로 한다 */
+  text: string;
+  citations: GroundingCitation[];
   webSearchQueries: string[];
 }
 
@@ -554,8 +599,77 @@ export class GeminiService {
   }
 
   /**
+   * 산문 grounding 호출 — 인용을 지키는 경로다 (GenerateGroundedTextParams의 실측 근거를 보라).
+   *
+   * 검증 루프가 없다. 스키마가 없으니 교정할 형식도 없고, `[교정 요청]`으로 다시 물으면
+   * 모델이 새로 검색하지 않아 그 응답에는 grounding metadata가 아예 없다. 여기서 필요한
+   * 재시도는 "형식을 고쳐라"가 아니라 "인용이 붙을 때까지 같은 것을 다시 물어라"뿐이다.
+   */
+  async generateGroundedText(
+    params: GenerateGroundedTextParams,
+  ): Promise<GroundedTextResult> {
+    const {
+      systemInstruction,
+      prompt,
+      usageLabel,
+      useUrlContext = false,
+      thinkingBudget,
+      citationRetries = 0,
+    } = params;
+
+    const config: GenerateContentConfig = {
+      systemInstruction,
+      tools: useUrlContext
+        ? [{ googleSearch: {} }, { urlContext: {} }]
+        : [{ googleSearch: {} }],
+      ...thinkingConfigOf(thinkingBudget),
+    };
+
+    const responses: GenerateContentResponse[] = [];
+    for (let attempt = 1; ; attempt++) {
+      const response = await this.callWithTransportRetry(
+        { model: this.model, contents: prompt, config },
+        this.groundedTimeoutMs,
+      );
+      responses.push(response);
+      this.reportUsage(response, { usageLabel, grounded: true, attempt });
+
+      if (extractCitations(responses).length > 0 || attempt > citationRetries) {
+        break;
+      }
+      this.log?.(
+        `[gemini] 인용 0건 — 같은 요청으로 재검색한다 (${attempt}/${citationRetries})`,
+      );
+    }
+
+    // 인용은 채택된 응답이 아니라 이 호출 전체의 기록이다 (ADR-013). 본문은 마지막 응답을
+    // 쓴다 — 재검색은 인용을 위한 것이지만 그 응답도 같은 질문에 대한 온전한 답이다.
+    const text = responses[responses.length - 1]?.text ?? "";
+    if (text.trim() === "") {
+      throw new Error("Gemini 산문 grounding 응답이 비어 있다");
+    }
+
+    return {
+      text,
+      citations: extractCitations(responses),
+      webSearchQueries: [
+        ...new Set(
+          responses.flatMap(
+            (response) =>
+              response.candidates?.[0]?.groundingMetadata?.webSearchQueries ??
+              [],
+          ),
+        ),
+      ],
+    };
+  }
+
+  /**
    * Google Search grounding(+urlContext) 모드. 산출물과 함께 코드가 추출한 인용을 돌려준다.
    * grounding과 responseSchema는 동시 사용이 불가하므로 자유 텍스트로 받아 JSON을 추출한다.
+   *
+   * **인용이 필요한 호출은 generateGroundedText를 쓰라.** JSON을 강제하면 groundingChunks가
+   * 사라진다 — 이 메서드는 인용이 없어도 진행하는 호출(context-hunter)을 위해 남아 있다.
    */
   async generateGrounded<T>(
     params: GenerateGroundedParams<T>,
@@ -567,20 +681,24 @@ export class GeminiService {
       usageLabel,
       useUrlContext = true,
       thinkingBudget,
+      citationRetries = 0,
     } = params;
 
     const tools = useUrlContext
       ? [{ googleSearch: {} }, { urlContext: {} }]
       : [{ googleSearch: {} }];
 
-    const { data, responses } = await this.generateValidated({
+    const baseConfig: GenerateContentConfig = {
       // googleSearch·urlContext 도구와 thinkingConfig는 병용 가능하다
-      baseConfig: {
-        systemInstruction,
-        tools,
-        ...thinkingConfigOf(thinkingBudget),
-      },
-      basePrompt: `${prompt}\n\n${JSON_ONLY_INSTRUCTION}`,
+      systemInstruction,
+      tools,
+      ...thinkingConfigOf(thinkingBudget),
+    };
+    const basePrompt = `${prompt}\n\n${JSON_ONLY_INSTRUCTION}`;
+
+    const { data, responses } = await this.generateValidated({
+      baseConfig,
+      basePrompt,
       schema,
       maxRetries: this.groundedMaxRetries,
       timeoutMs: this.groundedTimeoutMs,
@@ -589,6 +707,35 @@ export class GeminiService {
       usageLabel,
       label: "grounding 응답",
     });
+
+    // ── 인용 0건 재검색 ──
+    // 산출물(data)은 이미 확보했다. 여기서 다시 묻는 것은 **인용뿐**이라 검증 재시도를 붙이지
+    // 않는다 — 응답이 검증에 실패해도 그 시도의 검색은 실재하고, extractCitations는 모든
+    // 응답을 함께 읽으므로 인용만 건져낸다.
+    //
+    // 시간 예산: 검증 루프 최악 2×180초 + 재검색 2×180초 = 12분으로, runStore의
+    // STALLED_THRESHOLD_MS(15분) 안에 남는다. 재검색을 늘리려면 이 계산을 다시 하라 —
+    // 넘기면 웹 UI가 정상 실행 중인 run을 "중단됨"으로 오탐한다.
+    for (
+      let retry = 1;
+      retry <= citationRetries && extractCitations(responses).length === 0;
+      retry++
+    ) {
+      this.log?.(
+        `[gemini] 인용 0건 — 같은 요청으로 재검색한다 (${retry}/${citationRetries})`,
+      );
+      const response = await this.callWithTransportRetry(
+        { model: this.model, contents: basePrompt, config: baseConfig },
+        this.groundedTimeoutMs,
+      );
+      responses.push(response);
+      // 재검색도 grounding 정액 요금이 붙는다 (ADR-016)
+      this.reportUsage(response, {
+        usageLabel,
+        grounded: true,
+        attempt: this.groundedMaxRetries + retry,
+      });
+    }
 
     return {
       data,

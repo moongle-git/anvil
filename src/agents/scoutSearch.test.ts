@@ -7,6 +7,8 @@ import {
   type ScoutQueries,
 } from "../types/index.js";
 import {
+  SCOUT_SEARCH_CITATION_RETRIES,
+  SCOUT_SEARCH_MAX_QUERIES_PER_AXIS,
   SCOUT_SEARCH_PROMPT_TEMPLATE,
   SCOUT_SEARCH_SYSTEM_PROMPT,
   SCOUT_SEARCH_THINKING_BUDGET,
@@ -44,7 +46,7 @@ const CITATIONS: GroundingCitation[] = [
 
 interface FakeDeps {
   deps: ScoutSearchDeps;
-  generateGrounded: ReturnType<typeof vi.fn>;
+  generateGroundedText: ReturnType<typeof vi.fn>;
   generateStructured: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
 }
@@ -54,68 +56,120 @@ function fakeDeps(
     data?: ScoutDossier;
     citations?: GroundingCitation[];
     webSearchQueries?: string[];
+    text?: string;
   } = {},
 ): FakeDeps {
-  const generateGrounded = vi.fn().mockResolvedValue({
-    data: result.data ?? DOSSIER,
+  const generateGroundedText = vi.fn().mockResolvedValue({
+    text: result.text ?? "관측된 사실 산문",
     citations: result.citations ?? CITATIONS,
     webSearchQueries: result.webSearchQueries ?? ["grid storage series B 2026"],
   });
-  const generateStructured = vi.fn();
+  const generateStructured = vi.fn().mockResolvedValue(result.data ?? DOSSIER);
   const log = vi.fn();
 
   return {
     deps: {
       gemini: {
-        generateGrounded,
+        generateGroundedText,
         generateStructured,
       } as unknown as GeminiService,
       log,
     },
-    generateGrounded,
+    generateGroundedText,
     generateStructured,
     log,
   };
 }
 
-function paramsOf(generateGrounded: ReturnType<typeof vi.fn>): {
+function paramsOf(mock: ReturnType<typeof vi.fn>): {
   prompt: string;
   schema: unknown;
   useUrlContext?: boolean;
   thinkingBudget?: number;
+  citationRetries?: number;
   usageLabel: string;
   systemInstruction: string;
 } {
-  return generateGrounded.mock.calls[0][0];
+  return mock.mock.calls[0][0];
 }
 
 describe("searchCapitalSignals", () => {
-  it("★ generateGrounded에 ScoutDossierSchema를 전달한다 — 후보가 아니라 사실 목록이다", async () => {
-    const { deps, generateGrounded } = fakeDeps();
+  it("★ 검색은 산문으로 받는다 — JSON을 강제하면 인용 귀속이 사라진다", async () => {
+    const { deps, generateGroundedText } = fakeDeps();
 
     await searchCapitalSignals(deps, QUERIES);
 
-    expect(generateGrounded).toHaveBeenCalledTimes(1);
-    const params = paramsOf(generateGrounded);
-    expect(params.schema).toBe(ScoutDossierSchema);
+    expect(generateGroundedText).toHaveBeenCalledTimes(1);
+    const params = paramsOf(generateGroundedText);
+    // 산문 경로에는 스키마가 없다. 구조화는 뒤따르는 non-grounded 호출의 일이다
+    expect(params.schema).toBeUndefined();
     expect(params.systemInstruction).toBe(SCOUT_SEARCH_SYSTEM_PROMPT);
     expect(params.usageLabel).toBe(SCOUT_SEARCH_USAGE_LABEL);
   });
 
-  it("★ useUrlContext: false — 사전에 읽을 대상 URL이 없어 왕복만 늘어난다", async () => {
-    const { deps, generateGrounded } = fakeDeps();
+  it("★ 산문을 non-grounded 호출로 ScoutDossier에 담는다", async () => {
+    const { deps, generateStructured } = fakeDeps({ text: "관측 산문 본문" });
+
+    const result = await searchCapitalSignals(deps, QUERIES);
+
+    expect(generateStructured).toHaveBeenCalledTimes(1);
+    const params = paramsOf(generateStructured);
+    expect(params.schema).toBe(ScoutDossierSchema);
+    // 구조화 호출은 검색한 산문만 보고 옮겨 적는다 — 새 사실을 만들 여지를 주지 않는다
+    expect(params.prompt).toContain("관측 산문 본문");
+    expect(result.dossier).toEqual(DOSSIER);
+  });
+
+  it("★ 축마다 검색어를 상한까지만 싣는다 — 검색이 넓어지면 인용 귀속이 사라진다", async () => {
+    const { deps, generateGroundedText } = fakeDeps();
+
+    await searchCapitalSignals(deps, {
+      funding: ["f1", "f2", "f3", "f4"],
+      incumbent: ["i1", "i2", "i3"],
+      regulation: ["r1"],
+      costCurve: ["c1", "c2"],
+    });
+
+    const { prompt } = paramsOf(generateGroundedText);
+    expect(prompt).toContain("f1");
+    expect(prompt).toContain("f2");
+    // 상한을 넘은 검색어는 프롬프트에 실리지 않는다
+    expect(prompt).not.toContain("f3");
+    expect(prompt).not.toContain("f4");
+    expect(prompt).not.toContain("i3");
+    // 상한 미만인 축은 그대로 간다
+    expect(prompt).toContain("r1");
+    expect(prompt).toContain("c2");
+    expect(SCOUT_SEARCH_MAX_QUERIES_PER_AXIS).toBe(2);
+  });
+
+  it("★ citationRetries를 켠다 — 인용 0건이면 스카우트는 후보를 하나도 못 만든다", async () => {
+    const { deps, generateGroundedText } = fakeDeps();
 
     await searchCapitalSignals(deps, QUERIES);
 
-    expect(paramsOf(generateGrounded).useUrlContext).toBe(false);
+    // groundingChunks는 비결정적이라 같은 요청이 다음 번에 인용을 싣는다.
+    // 이 호출만 인용이 필수다 — context-hunter는 0건이어도 진행한다.
+    expect(paramsOf(generateGroundedText).citationRetries).toBe(
+      SCOUT_SEARCH_CITATION_RETRIES,
+    );
+    expect(SCOUT_SEARCH_CITATION_RETRIES).toBeGreaterThan(0);
+  });
+
+  it("★ useUrlContext: false — 사전에 읽을 대상 URL이 없어 왕복만 늘어난다", async () => {
+    const { deps, generateGroundedText } = fakeDeps();
+
+    await searchCapitalSignals(deps, QUERIES);
+
+    expect(paramsOf(generateGroundedText).useUrlContext).toBe(false);
   });
 
   it("thinkingBudget 4096 — contextHunter(8192)보다 가볍고 planner(0)보다 무겁다", async () => {
-    const { deps, generateGrounded } = fakeDeps();
+    const { deps, generateGroundedText } = fakeDeps();
 
     await searchCapitalSignals(deps, QUERIES);
 
-    expect(paramsOf(generateGrounded).thinkingBudget).toBe(
+    expect(paramsOf(generateGroundedText).thinkingBudget).toBe(
       SCOUT_SEARCH_THINKING_BUDGET,
     );
     expect(SCOUT_SEARCH_THINKING_BUDGET).toBe(4096);
@@ -146,11 +200,11 @@ describe("searchCapitalSignals", () => {
   });
 
   it("★ 네 축 검색어가 전부 프롬프트에 들어간다 — 빠진 축은 조사되지 않는다", async () => {
-    const { deps, generateGrounded } = fakeDeps();
+    const { deps, generateGroundedText } = fakeDeps();
 
     await searchCapitalSignals(deps, QUERIES);
 
-    const { prompt } = paramsOf(generateGrounded);
+    const { prompt } = paramsOf(generateGroundedText);
     for (const axis of SIGNAL_TYPES) {
       for (const query of QUERIES[axis]) {
         expect(prompt).toContain(query);
@@ -174,26 +228,35 @@ describe("searchCapitalSignals", () => {
   });
 
   it("검색된 쿼리가 0건이어도, log가 없어도 throw하지 않는다", async () => {
-    const generateGrounded = vi.fn().mockResolvedValue({
-      data: DOSSIER,
-      citations: [],
+    const generateGroundedText = vi.fn().mockResolvedValue({
+      text: "본문",
+      citations: CITATIONS,
       webSearchQueries: [],
     });
+    const generateStructured = vi.fn().mockResolvedValue(DOSSIER);
 
     await expect(
       searchCapitalSignals(
-        { gemini: { generateGrounded } as unknown as GeminiService },
+        {
+          gemini: {
+            generateGroundedText,
+            generateStructured,
+          } as unknown as GeminiService,
+        },
         QUERIES,
       ),
     ).resolves.toMatchObject({ dossier: DOSSIER });
   });
 
-  it("non-grounded 경로를 쓰지 않는다 — 이 단계가 실제 검색이다", async () => {
-    const { deps, generateStructured } = fakeDeps();
+  it("★ 인용 0건이면 구조화 호출을 건너뛴다 — 근거 없는 관측은 하류가 전부 버린다", async () => {
+    const { deps, generateStructured } = fakeDeps({ citations: [] });
 
-    await searchCapitalSignals(deps, QUERIES);
+    const result = await searchCapitalSignals(deps, QUERIES);
 
+    // 침묵 게이트가 어차피 버릴 findings를 만드느라 토큰을 쓰지 않는다 (ADR-019)
     expect(generateStructured).not.toHaveBeenCalled();
+    expect(result.dossier.findings).toEqual([]);
+    expect(result.citations).toEqual([]);
   });
 });
 

@@ -18,7 +18,10 @@ import {
 import { INTERVIEWER_USAGE_LABEL } from "../agents/interviewer.js";
 import { RESEARCH_PLANNER_USAGE_LABEL } from "../agents/researchPlanner.js";
 import { SCOUT_PLANNER_USAGE_LABEL } from "../agents/scoutPlanner.js";
-import { SCOUT_SEARCH_USAGE_LABEL } from "../agents/scoutSearch.js";
+import {
+  SCOUT_SEARCH_USAGE_LABEL,
+  SCOUT_STRUCTURE_USAGE_LABEL,
+} from "../agents/scoutSearch.js";
 import { SOLUTION_DESIGNER_USAGE_LABEL } from "../agents/solutionDesigner.js";
 import { THESIS_USAGE_LABEL } from "../agents/thesis.js";
 import {
@@ -294,7 +297,13 @@ const scoutDraft = {
 };
 
 /** trend-scout이 실제로 던지는 세 호출의 라벨 (planner → search → 합성) */
-const SCOUT_LABELS = [SCOUT_PLANNER_USAGE_LABEL, TREND_SCOUT_USAGE_LABEL];
+// non-grounded 호출 세 개다 — 검색어 설계, 산문 dossier의 구조화, 후보 합성.
+// grounded 호출(scout-search)은 산문 경로라 여기 없다.
+const SCOUT_LABELS = [
+  SCOUT_PLANNER_USAGE_LABEL,
+  SCOUT_STRUCTURE_USAGE_LABEL,
+  TREND_SCOUT_USAGE_LABEL,
+];
 
 const scoutQueries = {
   funding: ["battery recycling series B"],
@@ -307,6 +316,7 @@ interface FakeGemini {
   gemini: GeminiService;
   generateStructured: ReturnType<typeof vi.fn>;
   generateGrounded: ReturnType<typeof vi.fn>;
+  generateGroundedText: ReturnType<typeof vi.fn>;
 }
 
 /** researchPlanner 산출물 — pipeline step이 아니라 context-hunter 내부 호출이다 (ADR-012) */
@@ -362,6 +372,9 @@ function fakeGemini(options?: {
       if (usageLabel === RESEARCH_PLANNER_USAGE_LABEL)
         return respond(searchQueries);
       if (usageLabel === SCOUT_PLANNER_USAGE_LABEL) return respond(scoutQueries);
+      // 검색은 산문으로 받고, 구조화만 non-grounded로 따로 돈다 (인용 귀속 보존)
+      if (usageLabel === SCOUT_STRUCTURE_USAGE_LABEL)
+        return respond(scoutDossier);
       // 합성 호출의 schema는 opportunitiesSchemaFor다 — 인용 화이트리스트·삼각측량·날짜창을
       // 실제로 검증하므로, draft가 grounded 인용과 어긋나면 여기서 거부된다 (ADR-017)
       if (usageLabel === TREND_SCOUT_USAGE_LABEL) return respond(scoutDraft);
@@ -392,9 +405,20 @@ function fakeGemini(options?: {
           webSearchQueries: [],
         });
       }
+      return Promise.reject(
+        new Error(`예상하지 못한 usageLabel: ${usageLabel}`),
+      );
+    },
+  );
+
+  const generateGroundedText = vi.fn(
+    ({ usageLabel }: { usageLabel: string }): Promise<unknown> => {
+      if (usageLabel === options?.failOn) {
+        return Promise.reject(new Error("Gemini 호출 실패"));
+      }
       if (usageLabel === SCOUT_SEARCH_USAGE_LABEL) {
         return Promise.resolve({
-          data: scoutDossier,
+          text: "관측된 사실 산문",
           citations: options?.scoutCitations ?? scoutCitations,
           webSearchQueries: [],
         });
@@ -406,9 +430,14 @@ function fakeGemini(options?: {
   );
 
   return {
-    gemini: { generateStructured, generateGrounded } as unknown as GeminiService,
+    gemini: {
+      generateStructured,
+      generateGrounded,
+      generateGroundedText,
+    } as unknown as GeminiService,
     generateStructured,
     generateGrounded,
+    generateGroundedText,
   };
 }
 
@@ -801,7 +830,8 @@ describe("runPipeline", () => {
     });
 
     it("★ 선택 전: 후보를 만들고 waiting으로 일시 중지한다 (하류 미실행)", async () => {
-      const { gemini, generateStructured, generateGrounded } = fakeGemini();
+      const { gemini, generateStructured, generateGrounded, generateGroundedText } =
+        fakeGemini();
       const { runId } = store.createRun(SCOPE, { scout: true });
 
       const result = await runPipeline(makeDeps(gemini), {
@@ -812,9 +842,13 @@ describe("runPipeline", () => {
       expect(result.status).toBe("waiting");
       expect(result.report).toBeUndefined();
 
-      // 주제 발굴 세 호출만 돌고 정반합은 시작조차 하지 않는다
+      // 주제 발굴 호출만 돌고 정반합은 시작조차 하지 않는다
       expect(calledLabels(generateStructured)).toEqual(SCOUT_LABELS);
-      expect(calledLabels(generateGrounded)).toEqual([SCOUT_SEARCH_USAGE_LABEL]);
+      // 검색은 산문 grounding 경로다 — generateGrounded는 context-hunter 전용으로 남았다
+      expect(calledLabels(generateGroundedText)).toEqual([
+        SCOUT_SEARCH_USAGE_LABEL,
+      ]);
+      expect(generateGrounded).not.toHaveBeenCalled();
 
       // 후보가 저장됐고, 인용은 코드가 실체로 치환한 것이다 (ref 문자열이 남지 않는다)
       const opportunities = store.loadOpportunities(runId);

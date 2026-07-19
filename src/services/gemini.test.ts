@@ -378,6 +378,99 @@ describe("GeminiService.generateStructured (제약 없는 스키마 전송)", ()
   });
 });
 
+describe("GeminiService.generateGroundedText (산문 grounding 모드)", () => {
+  const CHUNK = { web: { uri: "https://a.example", title: "A" } };
+
+  function grounding(client: GoogleGenAI): GeminiService {
+    return new GeminiService({ apiKey: "test-key" }, client);
+  }
+
+  it("JSON 강제 지시를 프롬프트에 넣지 않는다 — 그것이 인용 귀속을 죽인다", async () => {
+    const { client, generateContent } = fakeClient(
+      grounded("자본이 이렇게 움직였다", { chunks: [CHUNK], queries: ["q"] }),
+    );
+
+    await grounding(client).generateGroundedText({
+      systemInstruction: "system",
+      prompt: "prompt",
+      usageLabel: "test",
+    });
+
+    const request = generateContent.mock.calls[0][0];
+    expect(request.contents).toBe("prompt");
+    expect(request.contents).not.toContain("JSON");
+    expect(request.config.responseJsonSchema).toBeUndefined();
+    expect(request.config.responseMimeType).toBeUndefined();
+    expect(request.config.tools).toEqual([{ googleSearch: {} }]);
+  });
+
+  it("본문과 인용·검색어를 함께 돌려준다", async () => {
+    const { client } = fakeClient(
+      grounded("관측된 사실들", { chunks: [CHUNK], queries: ["q1", "q2"] }),
+    );
+
+    const result = await grounding(client).generateGroundedText({
+      systemInstruction: "system",
+      prompt: "prompt",
+      usageLabel: "test",
+    });
+
+    expect(result.text).toBe("관측된 사실들");
+    expect(result.citations).toHaveLength(1);
+    expect(result.webSearchQueries).toEqual(["q1", "q2"]);
+  });
+
+  it("인용 0건이면 재검색한다", async () => {
+    const { client, generateContent } = fakeClient(
+      grounded("본문", { chunks: [], queries: ["q"] }),
+      grounded("본문", { chunks: [CHUNK], queries: ["q"] }),
+    );
+
+    const result = await grounding(client).generateGroundedText({
+      systemInstruction: "system",
+      prompt: "prompt",
+      usageLabel: "test",
+      citationRetries: 2,
+    });
+
+    expect(result.citations).toHaveLength(1);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("응답이 비면 던진다 — 검증할 스키마가 없어도 본문은 있어야 한다", async () => {
+    const { client } = fakeClient(grounded("", { chunks: [CHUNK] }));
+
+    await expect(
+      grounding(client).generateGroundedText({
+        systemInstruction: "system",
+        prompt: "prompt",
+        usageLabel: "test",
+      }),
+    ).rejects.toThrow(/비어/);
+  });
+
+  it("토큰을 usage로 흘려보낸다 (ADR-016)", async () => {
+    const usages: CallUsage[] = [];
+    const { client } = fakeClient({
+      ...grounded("본문", { chunks: [CHUNK] }),
+      usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 22 },
+    });
+
+    await new GeminiService(
+      { apiKey: "test-key", onUsage: (u) => usages.push(u) },
+      client,
+    ).generateGroundedText({
+      systemInstruction: "system",
+      prompt: "prompt",
+      usageLabel: "scout-search",
+    });
+
+    expect(usages).toHaveLength(1);
+    expect(usages[0].grounded).toBe(true);
+    expect(usages[0].outputTokens).toBe(22);
+  });
+});
+
 describe("GeminiService.generateGrounded (grounding 모드)", () => {
   function grounding(client: GoogleGenAI, maxRetries = 2): GeminiService {
     return new GeminiService(
@@ -422,6 +515,115 @@ describe("GeminiService.generateGrounded (grounding 모드)", () => {
     expect(generateContent.mock.calls[0][0].config.tools).toEqual([
       { googleSearch: {} },
     ]);
+  });
+
+  // groundingChunks는 비결정적이다 — 같은 요청이 어떤 때는 chunk를 싣고 어떤 때는 안 싣는다
+  // (실측 8회 중 4회가 0건). 인용 0건은 검색이 없었다는 뜻이 아니라 귀속이 안 붙었다는 뜻이다.
+  describe("citationRetries (인용 0건 재검색)", () => {
+    const CHUNK = { web: { uri: "https://a.example", title: "A" } };
+
+    it("인용 0건이면 같은 요청을 다시 보내 인용을 확보한다", async () => {
+      const { client, generateContent } = fakeClient(
+        grounded(VALID_JSON, { chunks: [], queries: ["q"] }),
+        grounded(VALID_JSON, { chunks: [CHUNK], queries: ["q"] }),
+      );
+
+      const result = await grounding(client).generateGrounded({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "test",
+        citationRetries: 2,
+      });
+
+      expect(result.citations).toHaveLength(1);
+      expect(result.citations[0].uri).toBe("https://a.example");
+      expect(generateContent).toHaveBeenCalledTimes(2);
+      // 산출물은 첫 시도에서 이미 확보했다 — 재검색은 인용만을 위한 것이다
+      expect(result.data).toEqual({ title: "아이디어", score: 42 });
+    });
+
+    it("인용이 이미 있으면 재검색하지 않는다", async () => {
+      const { client, generateContent } = fakeClient(
+        grounded(VALID_JSON, { chunks: [CHUNK], queries: ["q"] }),
+      );
+
+      const result = await grounding(client).generateGrounded({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "test",
+        citationRetries: 2,
+      });
+
+      expect(result.citations).toHaveLength(1);
+      expect(generateContent).toHaveBeenCalledTimes(1);
+    });
+
+    it("citationRetries가 없으면 0건이어도 그대로 돌려준다", async () => {
+      const { client, generateContent } = fakeClient(
+        grounded(VALID_JSON, { chunks: [], queries: ["q"] }),
+      );
+
+      const result = await grounding(client).generateGrounded({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "test",
+      });
+
+      expect(result.citations).toHaveLength(0);
+      expect(generateContent).toHaveBeenCalledTimes(1);
+    });
+
+    it("끝내 0건이면 재검색 횟수만큼만 시도하고 포기한다", async () => {
+      const { client, generateContent } = fakeClient(
+        grounded(VALID_JSON, { chunks: [], queries: ["q"] }),
+        grounded(VALID_JSON, { chunks: [], queries: ["q"] }),
+        grounded(VALID_JSON, { chunks: [], queries: ["q"] }),
+      );
+
+      const result = await grounding(client).generateGrounded({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "test",
+        citationRetries: 2,
+      });
+
+      expect(result.citations).toHaveLength(0);
+      expect(generateContent).toHaveBeenCalledTimes(3);
+    });
+
+    it("재검색한 호출의 토큰도 usage로 흘려보낸다 (ADR-016)", async () => {
+      const usages: CallUsage[] = [];
+      const { client } = fakeClient(
+        {
+          ...grounded(VALID_JSON, { chunks: [], queries: ["q"] }),
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+        },
+        {
+          ...grounded(VALID_JSON, { chunks: [CHUNK], queries: ["q"] }),
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 7 },
+        },
+      );
+
+      await new GeminiService(
+        { apiKey: "test-key", onUsage: (u) => usages.push(u) },
+        client,
+      ).generateGrounded({
+        systemInstruction: "system",
+        prompt: "prompt",
+        schema: TestSchema,
+        usageLabel: "scout-search",
+        citationRetries: 1,
+      });
+
+      // 재검색도 grounding 정액 요금이 붙는다 — 장부에서 사라지면 안 된다
+      expect(usages).toHaveLength(2);
+      expect(usages.every((u) => u.grounded)).toBe(true);
+      expect(usages.map((u) => u.outputTokens)).toEqual([5, 7]);
+    });
   });
 
   it("data·citations·webSearchQueries를 함께 반환한다", async () => {

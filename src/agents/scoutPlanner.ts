@@ -55,7 +55,7 @@ export const SCOUT_PLANNER_SYSTEM_PROMPT = `당신은 자본의 이동 흔적을
 - 검색 엔진이 실제로 매칭할 짧은 키워드구를 써라. 긴 서술문은 결과를 0건으로 만든다.
 - 날짜창을 검색어에 박아라(연도·분기 등). 날짜가 없으면 검색 결과가 과거로 흘러간다.
 - funding·incumbent·costCurve는 1차 사료가 대개 영어다 — 영어 검색어를 우선하라. regulation은 대상 관할에 맞는 언어를 써라.
-- 축마다 1~3개씩 만들어라. 한 축이 비면 그 축은 조사되지 않는다.
+- 축마다 1~2개씩 만들어라. 한 축이 비면 그 축은 조사되지 않는다. **넘게 만들어도 뒤 단계가 2개까지만 쓴다** — 검색이 넓어지면 grounding이 인용 귀속을 떨어뜨려 그 축의 관측이 통째로 버려진다.
 
 ## 출력 형식
 { "funding": ["검색어"], "incumbent": ["검색어"], "regulation": ["검색어"], "costCurve": ["검색어"] }`;
@@ -67,7 +67,7 @@ export const SCOUT_PLANNER_PROMPT_TEMPLATE = `## 탐색 범위
 {windowStart} ~ {now} (오늘은 {now}다)
 
 ## 지시사항
-1. 위 탐색 범위 안에서, 네 신호 축(funding·incumbent·regulation·costCurve) 각각에 대해 검색어를 1~3개씩 설계하라.
+1. 위 탐색 범위 안에서, 네 신호 축(funding·incumbent·regulation·costCurve) 각각에 대해 검색어를 1~2개씩 설계하라.
 2. 검색어에 날짜창을 반영하라 — 위 구간 안의 자료가 잡혀야 한다. 그 이전의 자료는 이미 시장이 반응을 끝낸 것이다.
 3. regulation 축에 가장 공을 들여라. 시행일이 확정됐고 아직 그 날짜가 오지 않은 규제를 겨냥하라.
 4. "무엇이 뜨고 있는가"가 아니라 "돈이 어디로 들어갔는데 아직 물건이 없는가"를 겨냥하라.`;

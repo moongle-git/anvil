@@ -8,6 +8,7 @@ import type {
   ScoutQueries,
 } from "../types/index.js";
 import { SCOUT_PLANNER_USAGE_LABEL } from "./scoutPlanner.js";
+import { SCOUT_STRUCTURE_USAGE_LABEL } from "./scoutSearch.js";
 import {
   runTrendScout,
   TREND_SCOUT_THINKING_BUDGET,
@@ -97,7 +98,7 @@ function draftCandidate(
 interface FakeDeps {
   deps: TrendScoutDeps;
   generateStructured: ReturnType<typeof vi.fn>;
-  generateGrounded: ReturnType<typeof vi.fn>;
+  generateGroundedText: ReturnType<typeof vi.fn>;
   log: ReturnType<typeof vi.fn>;
 }
 
@@ -113,11 +114,15 @@ function fakeDeps(
       if (params.usageLabel === SCOUT_PLANNER_USAGE_LABEL) {
         return QUERIES;
       }
+      if (params.usageLabel === SCOUT_STRUCTURE_USAGE_LABEL) {
+        return options.dossier ?? DOSSIER;
+      }
       return options.draft ?? { candidates: [draftCandidate()] };
     },
   );
-  const generateGrounded = vi.fn().mockResolvedValue({
-    data: options.dossier ?? DOSSIER,
+  // 검색은 산문으로 받고 구조화는 별도 non-grounded 호출이 한다 (인용 귀속 보존)
+  const generateGroundedText = vi.fn().mockResolvedValue({
+    text: "관측된 사실 산문",
     citations: options.citations ?? CITATIONS,
     webSearchQueries: ["grid storage series B 2026"],
   });
@@ -125,11 +130,14 @@ function fakeDeps(
 
   return {
     deps: {
-      gemini: { generateStructured, generateGrounded } as unknown as GeminiService,
+      gemini: {
+        generateStructured,
+        generateGroundedText,
+      } as unknown as GeminiService,
       log,
     },
     generateStructured,
-    generateGrounded,
+    generateGroundedText,
     log,
   };
 }
@@ -403,14 +411,19 @@ describe("runTrendScout — ID → 실체 치환 (ADR-013)", () => {
 });
 
 describe("runTrendScout — 단계 배선", () => {
-  it("planner → grounded 검색 → 합성 순으로 세 호출이 각자의 라벨로 남는다 (ADR-016)", async () => {
-    const { deps, generateStructured, generateGrounded } = fakeDeps();
+  it("planner → grounded 검색 → 구조화 → 합성 순으로 각자의 라벨로 남는다 (ADR-016)", async () => {
+    const { deps, generateStructured, generateGroundedText } = fakeDeps();
 
     await runTrendScout(deps, "배터리", NOW);
 
-    expect(generateGrounded).toHaveBeenCalledTimes(1);
+    // grounded는 산문 검색 1회뿐이다 — 구조화는 non-grounded라 정액 요금을 다시 태우지 않는다
+    expect(generateGroundedText).toHaveBeenCalledTimes(1);
     const labels = generateStructured.mock.calls.map((args) => args[0].usageLabel);
-    expect(labels).toEqual([SCOUT_PLANNER_USAGE_LABEL, TREND_SCOUT_USAGE_LABEL]);
+    expect(labels).toEqual([
+      SCOUT_PLANNER_USAGE_LABEL,
+      SCOUT_STRUCTURE_USAGE_LABEL,
+      TREND_SCOUT_USAGE_LABEL,
+    ]);
   });
 
   it("log가 없어도 throw하지 않는다", async () => {
