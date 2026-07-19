@@ -39,7 +39,8 @@
       "name": "scout-pipeline",
       "status": "completed",
       "started_at": "2026-07-19T14:51:08+0900",
-      "summary": "orchestrator에 스카우트 분기 추가 — context-hunter 앞, 인터뷰 블록과 나란히(상호배타). selection이 없으면 저장된 opportunities를 재사용하고(없을 때만 runTrendScout 실행 → saveOpportunities) status: \"waiting\"으로 pause한다(completedAt 미세팅, executeStep 바깥 — pause는 성공/실패 이분법에 안 맞는다). candidates: []는 waiting이 아니라 error다(SCOUT_NO_CANDIDATES_MESSAGE — 모델 탓이 아니라 '탐색 범위를 바꿔 새 run으로'를 말한다). 빈 결과도 저장된 채 남아 resume이 재검색 없이 같은 곳에서 멈춘다. 선택 제출 후에는 candidateId로 후보를 찾아(못 찾으면 첫 후보 폴백 없이 error) idea를 title — whatItIs로 확정하고 saveRun으로 persist, step을 completed로 기록한다. 힌트 없는 run의 idea(SCOUT_FULL_SCOPE_LABEL)는 범위가 아니라 자리표시자라 플래너에 undefined로 넘긴다. 인터뷰 블록 조건을 state.interview && !state.scout으로 좁혀 유령 interviewer step을 막았다. 선택된 Opportunity는 변수로만 들고 있다(contextHunter 배선은 step 5). 테스트 11건 추가(변이 2종으로 검증)."
+      "summary": "orchestrator에 스카우트 분기 추가 — context-hunter 앞, 인터뷰 블록과 나란히(상호배타). selection이 없으면 저장된 opportunities를 재사용하고(없을 때만 runTrendScout 실행 → saveOpportunities) status: \"waiting\"으로 pause한다(completedAt 미세팅, executeStep 바깥 — pause는 성공/실패 이분법에 안 맞는다). candidates: []는 waiting이 아니라 error다(SCOUT_NO_CANDIDATES_MESSAGE — 모델 탓이 아니라 '탐색 범위를 바꿔 새 run으로'를 말한다). 빈 결과도 저장된 채 남아 resume이 재검색 없이 같은 곳에서 멈춘다. 선택 제출 후에는 candidateId로 후보를 찾아(못 찾으면 첫 후보 폴백 없이 error) idea를 title — whatItIs로 확정하고 saveRun으로 persist, step을 completed로 기록한다. 힌트 없는 run의 idea(SCOUT_FULL_SCOPE_LABEL)는 범위가 아니라 자리표시자라 플래너에 undefined로 넘긴다. 인터뷰 블록 조건을 state.interview && !state.scout으로 좁혀 유령 interviewer step을 막았다. 선택된 Opportunity는 변수로만 들고 있다(contextHunter 배선은 step 5). 테스트 11건 추가(변이 2종으로 검증).",
+      "completed_at": "2026-07-19T14:57:36+0900"
     },
     {
       "step": 5,
