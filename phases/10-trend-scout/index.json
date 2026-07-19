@@ -23,7 +23,7 @@
       "name": "scout-search",
       "status": "completed",
       "started_at": "2026-07-19T14:39:55+0900",
-      "completed_at": "2026-07-19T14:45:19+0900",
+      "completed_at": "2026-07-19T14:46:01+0900",
       "summary": "검색어 설계(scoutPlanner)와 grounded 검색(scoutSearch)을 두 호출로 분리 — planScoutQueries는 non-grounded·thinkingBudget 0으로 축별(funding·incumbent·regulation·costCurve) 검색어를 만들고, 실패해도 throw 없이 축별 기본 검색어로 폴백한다(researchPlanner와 같은 fail-soft). SCOUT_LOOKBACK_MONTHS(18)와 scoutWindowStart로 날짜창을 프롬프트에 박고, 인기·화제성 대신 자본과 제품 사이의 시차를 겨냥하며 regulation에 비중을 싣는다. searchCapitalSignals는 ScoutDossierSchema(후보가 아니라 사실 목록)로 generateGrounded를 호출하되 useUrlContext: false(읽을 대상 URL이 사전에 없어 왕복만 늘어난다)·thinkingBudget 4096이고, citations를 그대로 실어 step 3에 넘긴다. citations 0건도 정상 상태로 통과시킨다. **groundingSupports 조사 결론: 출처 원문(source text)은 얻을 수 없다 — quote를 코드로 대조하지 마라.** @google/genai 타입 전수 확인 결과 (1) groundingSupports[].segment.text는 출처가 아니라 **모델 자신의 응답 텍스트**이고(타입 주석 \"from the response\", offset도 응답 Part 기준) 그것으로 대조하면 모델의 주장을 모델의 주장과 비교하는 순환이 되며, (2) groundingChunk.web은 domain·title·uri뿐이라 본문이 없고, (3) 본문을 담는 groundingChunk.retrievedContext.text는 Vertex AI Search/RAG 전용이라 googleSearch 경로에서는 채워지지 않는다. 따라서 세그먼트 추출기를 추가하지 않았고 extractCitations도 손대지 않았다(주석으로만 기록 — src/services/gemini.ts). step 3은 CapitalSignal.quote를 optional로 두고 **코드 대조 없이** 사람의 눈 검증(step 8 UI)에 맡겨야 한다. 귀속 강제는 quote가 아니라 citationRef 화이트리스트(opportunitiesSchemaFor)가 담당한다."
     },
     {
