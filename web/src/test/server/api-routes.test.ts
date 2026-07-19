@@ -11,7 +11,8 @@ import { POST as postAnswers } from "@/app/api/runs/[id]/answers/route";
 import { GET as getReport } from "@/app/api/runs/[id]/report/route";
 import { POST as postRerun } from "@/app/api/runs/[id]/rerun/route";
 import { POST as postResume } from "@/app/api/runs/[id]/resume/route";
-import { MarketContextSchema } from "@anvil/types";
+import { POST as postSelection } from "@/app/api/runs/[id]/selection/route";
+import { MarketContextSchema, type Opportunities } from "@anvil/types";
 import { withRunStore } from "@/lib/server/runs";
 import { spawnConsult } from "@/lib/server/spawnConsult";
 import {
@@ -38,6 +39,67 @@ const SIXTEEN_MINUTES_MS = 16 * 60 * 1000;
 
 function params(id: string): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id }) };
+}
+
+const SCOUT_OPPORTUNITIES: Opportunities = {
+  scope: "기후 기술",
+  searchedAt: "2026-07-19T00:00:00.000Z",
+  candidates: [
+    {
+      id: "O1",
+      title: "산업용 폐열 회수 최적화 에이전트",
+      whatItIs: "공장 폐열 데이터를 읽어 회수 설비 운전을 자동 조정한다.",
+      whyNow: "규제 시행일이 확정되면서 설비 투자가 앞당겨졌다.",
+      whoPays: "중견 제조사의 설비 운영팀",
+      horizon: "mid",
+      signals: [
+        {
+          signalType: "funding",
+          statement: "폐열 회수 스타트업이 시리즈B로 $42M을 조달했다.",
+          observedAt: "2026-05-02",
+          citation: { uri: "https://example.com/funding", kind: "origin" },
+          figures: [],
+        },
+        {
+          signalType: "regulation",
+          statement: "배출 규제가 2027년부터 시행된다.",
+          observedAt: "2026-04-11",
+          effectiveAt: "2027-01-01",
+          citation: { uri: "https://example.com/reg", kind: "redirect" },
+          figures: [],
+        },
+      ],
+      counterSignal: {
+        signalType: "incumbent",
+        statement: "대형 설비사가 같은 기능을 번들로 무상 제공한다고 밝혔다.",
+        observedAt: "2026-06-01",
+        citation: { uri: "https://example.com/incumbent", kind: "origin" },
+        figures: [],
+      },
+    },
+  ],
+};
+
+/**
+ * 후보 선택을 기다리는 스카우트 run을 만든다 — step 4가 pause시킨 상태의 재현이다.
+ * 파일 fixture가 아니라 RunStore로 직접 만드는 이유: 스카우트는 파일 저장 시대 이후의 기능이라
+ * 이송기(migrateRuns)가 옮길 원본이 애초에 없다.
+ */
+function seedScoutWaitingRun(scope = ""): string {
+  return withRunStore((store) => {
+    const { runId } = store.createRun(scope, { scout: true });
+    store.saveOpportunities(runId, SCOUT_OPPORTUNITIES);
+    const state = store.loadRun(runId);
+    store.saveRun({
+      ...state,
+      steps: state.steps.map((step) =>
+        step.name === "trend-scout"
+          ? { ...step, status: "waiting" as const }
+          : step,
+      ),
+    });
+    return runId;
+  });
 }
 
 let dbPath: string;
@@ -146,6 +208,36 @@ describe("POST /api/runs", () => {
 
     expect(res.status).toBe(400);
     expect(spawnConsult).not.toHaveBeenCalled();
+  });
+
+  it("mode:scout은 scope 없이도 201이고 trend-scout run을 만든다", async () => {
+    const res = await post({ mode: "scout" });
+
+    expect(res.status).toBe(201);
+    const { runId } = await res.json();
+    expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(runId);
+
+    const stored = withRunStore((store) => store.loadRun(runId));
+    expect(stored.scout).toBe(true);
+    expect(stored.steps[0]?.name).toBe("trend-scout");
+    // 범위 없는 전 범위 탐색이 이 기능의 기본 사용법이다 — 400이 아니다
+    expect(stored.idea).toBe("전 범위 탐색");
+    // 스카우트는 사용자를 두 번 멈춰 세우지 않는다 (step 1)
+    expect(stored.steps.some((s) => s.name === "interviewer")).toBe(false);
+  });
+
+  it("mode:scout의 scope는 run의 idea가 된다", async () => {
+    const res = await post({ mode: "scout", scope: "B2B SaaS" });
+
+    expect(res.status).toBe(201);
+    const { runId } = await res.json();
+    expect(withRunStore((store) => store.loadRun(runId)).idea).toBe("B2B SaaS");
+  });
+
+  it("mode도 idea도 없으면 400이고 spawn하지 않는다", async () => {
+    expect((await post({ mode: "bogus" })).status).toBe(400);
+    expect(spawnConsult).not.toHaveBeenCalled();
+    expect(withRunStore((store) => store.listRuns())).toEqual([]);
   });
 });
 
@@ -546,5 +638,115 @@ describe("POST /api/runs/[id]/answers", () => {
 
     expect(res.status).toBe(400);
     expect(spawnConsult).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/runs/[id]/selection", () => {
+  function selection(id: string, body: unknown): Promise<Response> {
+    return postSelection(
+      new Request(`http://localhost/api/runs/${id}/selection`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      params(id),
+    );
+  }
+
+  it("waiting run은 선택을 기록하고 spawn 후 202", async () => {
+    const runId = seedScoutWaitingRun();
+
+    const res = await selection(runId, { candidateId: "O1" });
+
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ runId });
+    expect(spawnConsult).toHaveBeenCalledExactlyOnceWith(runId);
+    expect(
+      withRunStore((store) => store.loadOpportunitySelection(runId)),
+    ).toEqual({ candidateId: "O1" });
+  });
+
+  it("없는 run은 404이고 spawn하지 않는다", async () => {
+    const res = await selection("nope", { candidateId: "O1" });
+
+    expect(res.status).toBe(404);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+
+  it("waiting이 아닌 run은 409이고 spawn하지 않는다", async () => {
+    seedFixtureRun(COMPLETED_RUN_ID);
+
+    const res = await selection(COMPLETED_RUN_ID, { candidateId: "O1" });
+
+    expect(res.status).toBe(409);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+
+  it("저장된 후보에 없는 candidateId는 400이고 저장·spawn하지 않는다", async () => {
+    const runId = seedScoutWaitingRun();
+
+    const res = await selection(runId, { candidateId: "O99" });
+
+    // spawnConsult는 stdio:"ignore"라 CLI 안의 에러가 사용자에게 닿지 못한다.
+    // API가 동기적으로 거절하지 않으면 run이 조용히 죽는다 (ADR-018과 같은 함정)
+    expect(res.status).toBe(400);
+    expect(spawnConsult).not.toHaveBeenCalled();
+    expect(withRunStore((store) => store.loadOpportunitySelection(runId))).toBe(
+      null,
+    );
+  });
+
+  it("selection 형식이 잘못되면 400이고 spawn하지 않는다", async () => {
+    const runId = seedScoutWaitingRun();
+
+    expect((await selection(runId, { candidateId: "" })).status).toBe(400);
+    expect((await selection(runId, {})).status).toBe(400);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+
+  it("본문이 JSON이 아니면 400", async () => {
+    const runId = seedScoutWaitingRun();
+
+    const res = await postSelection(
+      new Request(`http://localhost/api/runs/${runId}/selection`, {
+        method: "POST",
+        body: "oops",
+      }),
+      params(runId),
+    );
+
+    expect(res.status).toBe(400);
+    expect(spawnConsult).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/runs/[id] — 스카우트 후보 노출", () => {
+  it("스카우트 run은 opportunities를 실어 보낸다", async () => {
+    const runId = seedScoutWaitingRun("기후 기술");
+
+    const res = await getRunById(
+      new Request(`http://localhost/api/runs/${runId}`),
+      params(runId),
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe("waiting");
+    expect(body.opportunities).toEqual(SCOUT_OPPORTUNITIES);
+  });
+
+  it("비-스카우트 run은 opportunities 없이도 응답 형태가 깨지지 않는다", async () => {
+    seedFixtureRun(COMPLETED_RUN_ID);
+
+    const res = await getRunById(
+      new Request(`http://localhost/api/runs/${COMPLETED_RUN_ID}`),
+      params(COMPLETED_RUN_ID),
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.opportunities).toBeUndefined();
+    expect(body.state.runId).toBe(COMPLETED_RUN_ID);
+    expect(body.hasReport).toBe(true);
   });
 });

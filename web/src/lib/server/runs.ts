@@ -14,6 +14,7 @@ import {
   type Criticism,
   type InterviewQuestions,
   type MarketContext,
+  type Opportunities,
   type RunState,
   type Solution,
   type Thesis,
@@ -69,6 +70,17 @@ export interface RunDetail {
   /** rerunOf가 가리키는 원본을 조회한 결과. 계보 UI는 이것만 보면 된다 */
   origin?: RunOrigin;
   questions?: InterviewQuestions;
+  /**
+   * 스카우트 run의 후보 목록. waiting일 때는 선택 UI가, 완료된 뒤에는 리포트 뷰의
+   * "이 주제가 어디서 왔는가"가 쓴다 — 그래서 상태로 조건 걸지 않는다.
+   *
+   * 이 엔드포인트는 2초마다 폴링되므로 실어 보내는 것마다 크기를 따져야 한다(hasReport가
+   * 본문 대신 유무만 묻는 이유). 후보는 최대 5개이고 각각 신호 2~3건 + 짧은 산문이라
+   * 수 KB 수준이다 — context(실측 52KB)와 같은 자리에 두면 과한 것이지만, 후보 목록은
+   * 그 100분의 1이고 진행 뷰가 **선택을 렌더하려면 반드시 필요한 값**이다.
+   * 별도 엔드포인트로 빼면 waiting 진입 순간을 클라이언트가 다시 감지해 한 번 더 왕복한다.
+   */
+  opportunities?: Opportunities;
   context?: MarketContext;
   thesis?: Thesis;
   criticism?: Criticism;
@@ -107,6 +119,7 @@ export function getRunDetail(runId: string): RunDetail | null {
     // loadStepOutput은 스키마 검증 실패 시 null을 반환한다. 구버전 run(평탄화 이전 criticism 등)은
     // 해당 필드만 생략되고 UI가 빈 상태를 보여준다 — run 하나가 목록·상세 전체를 죽이지 않는다 (ADR-011).
     const questions = store.loadInterviewQuestions(runId);
+    const opportunities = store.loadOpportunities(runId);
     const context = store.loadStepOutput(runId, "context-hunter", MarketContextSchema);
     const thesis = store.loadStepOutput(runId, "thesis", ThesisSchema);
     const criticism = store.loadStepOutput(runId, "cold-critic", CriticismSchema);
@@ -121,6 +134,7 @@ export function getRunDetail(runId: string): RunDetail | null {
       ...(rerunOf !== undefined ? { rerunOf } : {}),
       ...(origin !== null ? { origin } : {}),
       ...(questions !== null ? { questions } : {}),
+      ...(opportunities !== null ? { opportunities } : {}),
       ...(context !== null ? { context } : {}),
       ...(thesis !== null ? { thesis } : {}),
       ...(criticism !== null ? { criticism } : {}),
