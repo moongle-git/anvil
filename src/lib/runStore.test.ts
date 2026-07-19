@@ -14,6 +14,8 @@ import {
   type InterviewAnswers,
   type InterviewQuestions,
   type MarketContext,
+  type Opportunities,
+  type OpportunitySelection,
   type ResearchEvidence,
   type RunState,
   type Solution,
@@ -23,6 +25,7 @@ import { openDb } from "./db.js";
 import {
   RunNotFoundError,
   RunStore,
+  SCOUT_FULL_SCOPE_IDEA,
   STEP_ARTIFACT_KINDS,
   deriveRunStatus,
 } from "./runStore.js";
@@ -116,6 +119,55 @@ const evidence: ResearchEvidence = {
     { source: "naver", status: "unconfigured", count: 0 },
   ],
 };
+
+const opportunities: Opportunities = {
+  scope: "기후 기술",
+  searchedAt: "2026-07-19T00:00:00.000Z",
+  candidates: [
+    {
+      id: "O1",
+      title: "산업용 폐열 회수 최적화 에이전트",
+      whatItIs: "공장 폐열 데이터를 읽어 회수 설비 운전을 자동 조정한다.",
+      whyNow: "규제 시행일이 확정되면서 설비 투자가 앞당겨졌다.",
+      whoPays: "중견 제조사의 설비 운영팀",
+      horizon: "mid",
+      signals: [
+        {
+          signalType: "funding",
+          statement: "폐열 회수 스타트업이 시리즈B로 $42M을 조달했다.",
+          observedAt: "2026-05-02",
+          citation: {
+            uri: "https://example.com/funding",
+            kind: "origin",
+          },
+          figures: [
+            {
+              value: "$42M",
+              citation: { uri: "https://example.com/funding", kind: "origin" },
+            },
+          ],
+        },
+        {
+          signalType: "regulation",
+          statement: "배출 규제가 2027년부터 시행된다.",
+          observedAt: "2026-04-11",
+          effectiveAt: "2027-01-01",
+          citation: { uri: "https://example.com/reg", kind: "redirect" },
+          figures: [],
+        },
+      ],
+      counterSignal: {
+        signalType: "incumbent",
+        statement: "대형 설비사가 같은 기능을 번들로 무상 제공한다고 밝혔다.",
+        observedAt: "2026-06-01",
+        citation: { uri: "https://example.com/incumbent", kind: "origin" },
+        figures: [],
+      },
+    },
+  ],
+};
+
+const selection: OpportunitySelection = { candidateId: "O1" };
 
 /** Gemini 호출 한 번의 사용량. label 외에는 전부 기본값을 쓴다 */
 function usage(overrides: Partial<CallUsage> & { label: string }): CallUsage {
@@ -214,8 +266,7 @@ describe("RunStore", () => {
     it("interview:true면 interviewer 스텝까지 seed하고 interview=true를 기록한다", () => {
       const state = store.createRun("아이디어", { interview: true });
 
-      // trend-scout은 PIPELINE_STEPS에 있지만 createRun이 seed하지 않는다 —
-      // 주제 발굴로 시작하는 진입점이 아직 없다. 실행되지 않을 step을 seed하면 유령이 된다
+      // 직접 입력 run은 주제가 이미 확정돼 있다 — trend-scout을 seed하면 유령 step이 된다
       expect(state.steps.map((s) => s.name)).toEqual([
         "interviewer",
         "context-hunter",
@@ -227,6 +278,73 @@ describe("RunStore", () => {
       expect(state.steps.every((s) => s.status === "pending")).toBe(true);
       expect(state.interview).toBe(true);
       expect(store.loadRun(state.runId).interview).toBe(true);
+    });
+
+    it("아무 옵션도 없으면 trend-scout도 interviewer도 seed하지 않는다", () => {
+      const state = store.createRun("아이디어");
+
+      expect(state.steps.map((s) => s.name)).not.toContain("trend-scout");
+      expect(state.steps.map((s) => s.name)).not.toContain("interviewer");
+      expect(state.scout).toBe(false);
+      expect(store.loadRun(state.runId).scout).toBe(false);
+    });
+
+    // 한 run에서 사용자를 두 번(후보 선택 → 질문 답변) 멈춰 세우지 않는다.
+    // 스카우트 후보는 이미 타깃·페인포인트·수익원이 구조화돼 있어 인터뷰가 메울 공백이 없다.
+    it("scout:true면 trend-scout을 seed하고 interviewer는 seed하지 않는다", () => {
+      const state = store.createRun("기후 기술", { scout: true });
+
+      expect(state.steps.map((s) => s.name)).toEqual([
+        "trend-scout",
+        "context-hunter",
+        "thesis",
+        "cold-critic",
+        "solution-designer",
+        "verdict",
+      ]);
+      expect(state.steps.every((s) => s.status === "pending")).toBe(true);
+    });
+
+    it("scout:true는 interview:true와 함께 와도 interviewer를 seed하지 않는다", () => {
+      const state = store.createRun("기후 기술", {
+        scout: true,
+        interview: true,
+      });
+
+      expect(state.steps.map((s) => s.name)).not.toContain("interviewer");
+    });
+
+    // scout은 컬럼이 아니라 steps에서 파생된다 (ADR-014 — 기존 DB에 컬럼을 추가할 수 없다)
+    it("로드한 state.scout이 trend-scout step 유무와 일치한다", () => {
+      const scouted = store.createRun("기후 기술", { scout: true });
+      const direct = store.createRun("확정된 아이디어");
+
+      expect(scouted.scout).toBe(true);
+      expect(store.loadRun(scouted.runId).scout).toBe(true);
+      expect(store.loadRunRecord(scouted.runId)?.state.scout).toBe(true);
+      expect(store.loadRun(direct.runId).scout).toBe(false);
+    });
+
+    it("스카우트 run의 idea는 사용자가 준 범위 힌트다", () => {
+      const state = store.createRun("기후 기술", { scout: true });
+
+      expect(state.idea).toBe("기후 기술");
+      expect(store.loadRun(state.runId).idea).toBe("기후 기술");
+    });
+
+    // 힌트가 없어도 목록에 뜨는 값이므로 의미 없는 sentinel을 넣지 않는다
+    it("범위 힌트가 비어 있으면 idea가 '전 범위 탐색'이다", () => {
+      const state = store.createRun("", { scout: true });
+
+      expect(state.idea).toBe(SCOUT_FULL_SCOPE_IDEA);
+      expect(state.idea).toBe("전 범위 탐색");
+      expect(store.loadRun(state.runId).idea).toBe(SCOUT_FULL_SCOPE_IDEA);
+    });
+
+    it("공백뿐인 범위 힌트도 '전 범위 탐색'이다", () => {
+      expect(store.createRun("   ", { scout: true }).idea).toBe(
+        SCOUT_FULL_SCOPE_IDEA,
+      );
     });
 
     it("generates unique runIds for repeated calls", () => {
@@ -481,6 +599,90 @@ describe("RunStore", () => {
       writeRawArtifact(runId, "answers", "{ not json");
 
       expect(store.loadInterviewAnswers(runId)).toBeNull();
+    });
+  });
+
+  describe("opportunities / selection (주제 발굴 — ADR-014)", () => {
+    it("saveOpportunities는 opportunities 아티팩트에 저장하고 왕복한다", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+
+      store.saveOpportunities(runId, opportunities);
+
+      expect(artifactKinds(runId)).toEqual(["opportunities"]);
+      expect(store.loadOpportunities(runId)).toEqual(opportunities);
+    });
+
+    it("opportunities는 trend-scout의 step 산출물이다", () => {
+      expect(STEP_ARTIFACT_KINDS["trend-scout"]).toBe("opportunities");
+    });
+
+    it("후보가 없는 산출물도 왕복한다 (침묵할 수 있어야 지어내지 않는다)", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+      const empty: Opportunities = { ...opportunities, candidates: [] };
+
+      store.saveOpportunities(runId, empty);
+
+      expect(store.loadOpportunities(runId)).toEqual(empty);
+    });
+
+    it("loadOpportunities는 아티팩트가 없으면 null을 반환한다", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+
+      expect(store.loadOpportunities(runId)).toBeNull();
+    });
+
+    it("loadOpportunities는 손상된 JSON이면 null을 반환한다 (throw 아님)", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+      writeRawArtifact(runId, "opportunities", "{ not json");
+
+      expect(store.loadOpportunities(runId)).toBeNull();
+    });
+
+    it("saveOpportunitySelection은 selection 아티팩트에 저장하고 왕복한다", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+
+      store.saveOpportunitySelection(runId, selection);
+
+      expect(artifactKinds(runId)).toEqual(["selection"]);
+      expect(store.loadOpportunitySelection(runId)).toEqual(selection);
+    });
+
+    // answers와 같은 취급이다 — 사람이 제출하는 아티팩트이지 step 산출물이 아니다
+    it("selection은 step 산출물이 아니다 (STEP_ARTIFACT_KINDS에 없다)", () => {
+      expect(Object.values(STEP_ARTIFACT_KINDS)).not.toContain("selection");
+    });
+
+    it("loadOpportunitySelection은 아티팩트가 없으면 null을 반환한다", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+
+      expect(store.loadOpportunitySelection(runId)).toBeNull();
+    });
+
+    it("loadOpportunitySelection은 손상된 JSON이면 null을 반환한다 (throw 아님)", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+      writeRawArtifact(runId, "selection", "{ not json");
+
+      expect(store.loadOpportunitySelection(runId)).toBeNull();
+    });
+
+    it("loadOpportunitySelection은 스키마 검증에 실패하면 null을 반환한다", () => {
+      const { runId } = store.createRun("기후 기술", { scout: true });
+      writeRawArtifact(runId, "selection", JSON.stringify({ candidateId: "" }));
+
+      expect(store.loadOpportunitySelection(runId)).toBeNull();
+    });
+
+    // 주제 확정에 전용 메서드를 만들지 않는다 — saveRun이 이미 idea를 UPDATE한다.
+    // 쓰기 경로가 둘이 되면 updated_at 갱신 규약이 갈라진다
+    it("saveRun으로 idea를 갈아끼우면 확정된 주제가 저장된다", () => {
+      const state = store.createRun("기후 기술", { scout: true });
+
+      store.saveRun({ ...state, idea: "산업용 폐열 회수 최적화 에이전트" });
+
+      expect(store.loadRun(state.runId).idea).toBe(
+        "산업용 폐열 회수 최적화 에이전트",
+      );
+      expect(store.listRuns()[0]?.idea).toBe("산업용 폐열 회수 최적화 에이전트");
     });
   });
 
@@ -964,6 +1166,49 @@ describe("RunStore", () => {
     });
   });
 
+  // 이 phase 이전에 만들어진 DB 파일이 그대로 열리고 기존 run이 정상 로드되어야 한다.
+  // DDL이 전부 CREATE TABLE IF NOT EXISTS라 기존 DB에는 새 컬럼이 생기지 않는다 (ADR-014)
+  describe("구 DB 호환 (scout은 컬럼이 아니라 파생값이다)", () => {
+    it("runs 테이블에 scout 컬럼을 추가하지 않는다", () => {
+      const columns = (
+        raw.prepare("PRAGMA table_info(runs)").all() as { name: string }[]
+      ).map((row) => row.name);
+
+      expect(columns).toEqual([
+        "run_id",
+        "idea",
+        "created_at",
+        "updated_at",
+        "completed_at",
+        "interview",
+        "rerun_of",
+      ]);
+    });
+
+    it("scout을 모르고 쓰인 구 run 행이 그대로 로드되고 scout=false다", () => {
+      const nowIso = new Date().toISOString();
+      raw
+        .prepare(
+          `INSERT INTO runs (run_id, idea, created_at, updated_at, interview)
+           VALUES (?, ?, ?, ?, 0)`,
+        )
+        .run("legacy-run", "구버전 아이디어", nowIso, nowIso);
+      raw
+        .prepare(
+          `INSERT INTO steps (run_id, name, ordinal, status)
+           VALUES ('legacy-run', 'context-hunter', 0, 'completed')`,
+        )
+        .run();
+
+      const state = store.loadRun("legacy-run");
+
+      expect(state.idea).toBe("구버전 아이디어");
+      expect(state.scout).toBe(false);
+      expect(state.steps.map((s) => s.name)).toEqual(["context-hunter"]);
+      expect(store.listRuns().map((r) => r.runId)).toContain("legacy-run");
+    });
+  });
+
   describe("deleteRun", () => {
     it("run·steps·artifacts를 CASCADE로 함께 지운다 (ADR-015)", () => {
       const { runId } = store.createRun("아이디어");
@@ -1104,6 +1349,31 @@ describe("RunStore", () => {
       expect(
         fork.steps.find((s) => s.name === "interviewer")?.status,
       ).toBe("pending");
+    });
+
+    // 완료된 스카우트 run은 주제가 이미 확정돼 있다. 포크는 평범한 run이고 자료조사부터 돈다
+    it("스카우트 run을 포크하면 trend-scout이 없고 발굴 아티팩트도 복사되지 않는다", () => {
+      const source = store.createRun("기후 기술", { scout: true });
+      store.saveOpportunities(source.runId, opportunities);
+      store.saveOpportunitySelection(source.runId, selection);
+      store.saveRun({ ...source, idea: "산업용 폐열 회수 최적화 에이전트" });
+
+      const fork = store.createRerun(source.runId);
+
+      expect(fork.steps.map((s) => s.name)).toEqual([
+        "context-hunter",
+        "thesis",
+        "cold-critic",
+        "solution-designer",
+        "verdict",
+      ]);
+      expect(fork.scout).toBe(false);
+      expect(store.loadRun(fork.runId).scout).toBe(false);
+      expect(artifactKinds(fork.runId)).toEqual([]);
+      expect(store.loadOpportunities(fork.runId)).toBeNull();
+      expect(store.loadOpportunitySelection(fork.runId)).toBeNull();
+      // 확정된 주제는 그대로 이어받는다
+      expect(fork.idea).toBe("산업용 폐열 회수 최적화 에이전트");
     });
 
     it("CLI run(interview=false)은 interviewer 없이 포크된다", () => {

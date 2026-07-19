@@ -4,11 +4,15 @@ import type { z } from "zod";
 import {
   InterviewAnswersSchema,
   InterviewQuestionsSchema,
+  OpportunitiesSchema,
+  OpportunitySelectionSchema,
   PIPELINE_STEPS,
   ResearchEvidenceSchema,
   RunStateSchema,
   type InterviewAnswers,
   type InterviewQuestions,
+  type Opportunities,
+  type OpportunitySelection,
   type PipelineStepName,
   type ResearchEvidence,
   type RunState,
@@ -28,13 +32,23 @@ export const STEP_ARTIFACT_KINDS: Record<PipelineStepName, ArtifactKind> = {
   verdict: "verdict",
 };
 
-// 아래 셋은 step 산출물이 아니므로 STEP_ARTIFACT_KINDS에 넣지 않는다 —
+// 아래 넷은 step 산출물이 아니므로 STEP_ARTIFACT_KINDS에 넣지 않는다 —
 // 넣으면 PipelineStepName과의 1:1 대응이 깨져 resume 판정·웹 진행 뷰까지 파급된다.
-// answers는 사람이 제출하는 아티팩트고, research는 context-hunter의 부산물이며(ADR-013),
+// answers·selection은 사람이 제출하는 아티팩트고, research는 context-hunter의 부산물이며(ADR-013),
 // report는 파이프라인 종료 후 렌더링된 결과물이다.
 const ANSWERS_KIND: ArtifactKind = "answers";
+const SELECTION_KIND: ArtifactKind = "selection";
 const RESEARCH_KIND: ArtifactKind = "research";
 const REPORT_KIND: ArtifactKind = "report";
+
+/**
+ * 범위 힌트 없이 시작한 스카우트 run의 idea.
+ *
+ * sentinel(빈 문자열·"__scout__")을 쓰지 않는 이유는 이 값이 run 목록에 그대로 표시되기 때문이다 —
+ * 의미 없는 자리표시자보다 "무엇을 탐색 중인가"가 보이는 편이 정확하다.
+ * RunStateSchema.idea가 min(1)이라 어차피 빈 문자열은 저장할 수도 없다.
+ */
+export const SCOUT_FULL_SCOPE_IDEA = "전 범위 탐색";
 
 // runs.updated_at이 이 시간보다 오래 갱신되지 않으면 실행 프로세스가 죽은 것으로 간주한다
 // (PRD "run 상태 파생 규칙"). executeStep은 step 실행 중에 아무것도 쓰지 않으므로, 이 값은
@@ -195,6 +209,12 @@ function toRawState(run: RunRow, steps: StepRow[]): unknown {
     idea: run.idea,
     createdAt: run.created_at,
     interview: run.interview !== 0,
+    // scout은 컬럼이 아니라 파생값이다 — DDL이 전부 IF NOT EXISTS라 기존 DB에는 컬럼이 생기지
+    // 않고, 마이그레이션 러너는 ADR-014가 금지한다. createRun이 이 step을 조건부로 seed하므로
+    // (스카우트 모드일 때만) 이 파생은 항상 정확하다.
+    // interview는 반대로 컬럼으로 남는다 — 인터뷰가 켜졌는데 질문이 0개라 interviewer가
+    // 건너뛰어지는 경우가 있어 두 값이 일치하지 않는다. 일관성을 이유로 합치지 마라.
+    scout: steps.some((step) => step.name === "trend-scout"),
     steps: steps.map((step) => {
       const rawStep: Record<string, unknown> = {
         name: step.name,
@@ -387,26 +407,44 @@ export class RunStore {
 
   // ── public API ──
 
-  createRun(idea: string, opts?: { interview?: boolean }): RunState {
+  /**
+   * scout:true면 주제가 아직 없는 run이다 — idea에는 사용자가 준 범위 힌트가 들어가고,
+   * 확정된 주제는 trend-scout이 끝난 뒤 orchestrator가 saveRun으로 갈아끼운다.
+   *
+   * 부작용 하나: newRunId가 slug를 **생성 시점의** idea로 만들므로, 스카우트 run의 run_id에는
+   * 확정 주제가 아니라 초기 힌트가 남는다. run_id는 다른 곳에서 불투명 식별자로만 쓰이므로
+   * 동작 문제는 없다. 선택 시점에 run_id를 바꾸려 들지 마라 — PK이고 steps·artifacts·usage가
+   * FK로 물고 있다.
+   */
+  createRun(
+    idea: string,
+    opts?: { interview?: boolean; scout?: boolean },
+  ): RunState {
     const interview = opts?.interview ?? false;
+    const scout = opts?.scout ?? false;
     const now = new Date();
     const nowIso = now.toISOString();
+    const initialIdea =
+      scout && idea.trim() === "" ? SCOUT_FULL_SCOPE_IDEA : idea;
 
     const state: RunState = {
-      runId: newRunId(idea, now),
-      idea,
+      runId: newRunId(initialIdea, now),
+      idea: initialIdea,
       createdAt: nowIso,
-      // interviewer 스텝은 인터뷰가 켜진 run(웹)에서만 seed한다.
-      // trend-scout은 아직 어느 경로도 seed하지 않는다 — 주제를 발굴해 run을 만드는 진입점은
-      // 다음 step이 배선한다. 여기서 무조건 seed하면 기존 run 전부가 실행되지 않는 유령 step을 얻는다.
-      steps: PIPELINE_STEPS.filter(
-        (name) => name !== "trend-scout" && (name !== "interviewer" || interview),
-      ).map((name) => ({
+      // 실행되지 않을 step은 seed하지 않는다 — 유령 step은 진행 뷰와 resume 판정을 함께 망친다.
+      // 스카우트 모드가 interviewer를 seed하지 않는 것은 의도된 것이다: 후보는 이미 타깃·
+      // 페인포인트·수익원이 구조화된 산출물이라 인터뷰가 메울 공백이 없고, 무엇보다 한 run에서
+      // 사용자를 두 번(후보 선택 → 질문 답변) 멈춰 세우는 것은 "알아서 찾아줘"와 정면으로 충돌한다.
+      steps: PIPELINE_STEPS.filter((name) => {
+        if (name === "trend-scout") return scout;
+        if (name === "interviewer") return interview && !scout;
+        return true;
+      }).map((name) => ({
         name,
         status: "pending" as const,
       })),
       interview,
-      scout: false,
+      scout,
     };
 
     this.tx(() => {
@@ -433,11 +471,17 @@ export class RunStore {
     // 질문이 실제로 있을 때만 interviewer를 완료로 둔다. 질문이 없는데 완료로 표시하면
     // orchestrator가 답변 없이 진행한다(인터뷰 도중 실패한 run을 포크하는 경우).
     const interviewerDone = questions !== null;
-    const steps: StepState[] = source.steps.map((step) =>
-      step.name === "interviewer" && interviewerDone
-        ? { name: step.name, status: "completed", completedAt: nowIso }
-        : { name: step.name, status: "pending" },
-    );
+    // 완료된 스카우트 run은 주제가 이미 확정돼 있다(source.idea가 그 결과다). 포크는
+    // trend-scout이 없는 평범한 run이고 자료조사부터 돈다 — ADR-015의 재실행 정의 그대로다.
+    // PIPELINE_STEPS를 순회하는 것이 아니라 원본의 step 집합을 따르므로, 여기서 명시적으로
+    // 거르지 않으면 스카우트 step이 포크에 딸려 들어와 주제 발굴이 한 번 더 돈다.
+    const steps: StepState[] = source.steps
+      .filter((step) => step.name !== "trend-scout")
+      .map((step) =>
+        step.name === "interviewer" && interviewerDone
+          ? { name: step.name, status: "completed", completedAt: nowIso }
+          : { name: step.name, status: "pending" },
+      );
 
     const state: RunState = {
       runId: newRunId(source.idea, now),
@@ -445,7 +489,8 @@ export class RunStore {
       createdAt: nowIso,
       steps,
       interview: source.interview,
-      scout: source.scout,
+      // opportunities·selection도 복사하지 않는다 (아래 upsert 목록 참조) — 그래서 파생값도 false다
+      scout: false,
     };
 
     this.tx(() => {
@@ -572,6 +617,30 @@ export class RunStore {
     return parseArtifact(
       this.readArtifact(runId, ANSWERS_KIND),
       InterviewAnswersSchema,
+    );
+  }
+
+  /** trend-scout의 step 산출물 — questions와 같은 취급이다 */
+  saveOpportunities(runId: string, opportunities: Opportunities): void {
+    this.saveStepOutput(runId, "trend-scout", opportunities);
+  }
+
+  loadOpportunities(runId: string): Opportunities | null {
+    return this.loadStepOutput(runId, "trend-scout", OpportunitiesSchema);
+  }
+
+  /** 사용자가 고른 후보 — answers와 같은 취급이다(step 산출물이 아닌 사람의 아티팩트) */
+  saveOpportunitySelection(
+    runId: string,
+    selection: OpportunitySelection,
+  ): void {
+    this.saveArtifact(runId, SELECTION_KIND, JSON.stringify(selection, null, 2));
+  }
+
+  loadOpportunitySelection(runId: string): OpportunitySelection | null {
+    return parseArtifact(
+      this.readArtifact(runId, SELECTION_KIND),
+      OpportunitySelectionSchema,
     );
   }
 
