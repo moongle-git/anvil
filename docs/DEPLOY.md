@@ -419,12 +419,32 @@ systemd 기본값은 `KillMode=control-group`이다 — stop/restart 시 그 서
 **배포할 때마다 진행 중이던 consult run이 조용히 죽는다.** run 하나는 Gemini 실비를 태우며
 최악 6분까지 도는 작업이다(ADR-012, ADR-016).
 
-`KillMode=process`는 메인 프로세스(`next start`)에만 시그널을 보내고 자식은 살려둔다.
+`KillMode=process`는 systemd가 아는 **메인 프로세스에만** 시그널을 보내고 나머지는 살려둔다.
 살아남은 CLI는 자기 일을 마치고 DB에 결과를 쓰며, `runs`·`steps` 테이블이 단일 진실 공급원이므로(ADR-014)
 웹이 재시작해도 브라우저의 폴링이 그대로 이어진다. **배포 중에도 진행 중인 run이 살아남는다.**
 
 (`scripts/deploy.sh`의 2단계 `pgrep` 게이트는 이것과 다른 것을 막는다 — 재시작이 아니라 **빌드**가
 실행 중인 run의 소스를 갈아엎는 것. 두 겹이 각각 다른 사고를 막는다.)
+
+#### 그 대가: 고아 `next-server`
+
+`KillMode=process`는 consult만 살려주지 않는다. **웹 서버 자신도 살려버린다.**
+
+`ExecStart`가 `/usr/bin/npm run start -w web`이라 systemd가 아는 메인 프로세스는 **`npm` 래퍼**다.
+`:3000`을 실제로 bind하는 `next-server`는 그 자식이므로 시그널을 받지 않는다. 재시작하면
+npm만 사라지고 next-server는 고아로 남아 포트를 계속 쥔다. 새 인스턴스는 `EADDRINUSE`로 죽고
+`Restart=on-failure`가 5초마다 무한 재시도한다.
+
+**이 실패는 조용하다.** 고아가 옛 코드로 정상 응답하므로 사이트는 멀쩡히 뜬다. 증상은
+"배포했는데 새 기능이 없다" 하나뿐이다. 게다가 디스크의 `.next`는 새 빌드로 갈린 뒤라
+옛 BUILD_ID의 청크가 404가 되고, 브라우저 캐시가 걷히는 순간 페이지가 통째로 깨진다
+(`This page couldn't load`). 실제로 재시작 카운터가 417까지 올라간 적이 있다.
+
+`scripts/deploy.sh` 6단계가 재시작 **직전에** `:3000` 점유 프로세스를 정리해서 이것을 막는다.
+`stop`/`start`로 나누지 않고 `restart`를 유지하는 이유는 sudoers다 — 배포 사용자에게 허용된
+sudo는 §5.2의 한 줄뿐이고, next-server와 배포 사용자가 둘 다 `anvil`이라 `kill`에는 sudo가 필요 없다.
+8단계는 `is-active` 대신 **실제 HTTP 응답**을 기다린다. 크래시 루프 중인 유닛은 재시작 사이에
+`activating`을 지나므로 `is-active`만으로는 죽어가는 서비스가 검사를 통과한다.
 
 ---
 
@@ -611,6 +631,41 @@ cd /opt/anvil && ./scripts/deploy.sh
 ---
 
 ## 9. 트러블슈팅
+
+### 배포했는데 새 기능이 화면에 없다
+
+먼저 코드가 서버에 도착했는지부터 가른다. 여기서 갈리면 원인 절반이 잘려나간다.
+
+```bash
+cd /opt/anvil && git rev-parse --short HEAD    # 기대하는 커밋인가
+```
+
+커밋이 맞는데도 기능이 없다면 **옛 `next-server`가 살아남아 `:3000`을 쥐고 옛 코드로 응답하고
+있는 것이다** (§5.3 "그 대가"). 서비스는 그 뒤에서 크래시 루프를 돌고 있다.
+
+```bash
+systemctl is-active anvil-web                       # activating 이면 루프 중이다
+systemctl show anvil-web -p NRestarts --value       # 수백이면 확정이다
+ss -lptn 'sport = :3000'                            # 포트를 쥔 PID
+```
+
+`journalctl -u anvil-web`에 `EADDRINUSE`와 `Found left-over process ... in control group`이
+함께 보이면 같은 원인이다. 해소는 포트를 비우고 재시작:
+
+```bash
+kill <PID>          # 안 죽으면 kill -9. next-server 이므로 sudo 불필요
+sudo systemctl restart anvil-web
+curl -sI localhost:3000/ | head -1                  # 200 이어야 한다
+```
+
+`scripts/deploy.sh`가 6단계에서 이것을 자동으로 처리하므로, 스크립트로 배포했다면 재발하지
+않아야 한다. 그런데도 났다면 6단계 출력을 확인하라 — `ss`가 없거나 포트를 쥔 것이 다른
+사용자 소유면 PID를 못 뽑는다.
+
+> **화면에 `This page couldn't load`가 뜬다면** 같은 원인의 다음 단계다. 옛 서버가 참조하는
+> `/_next/static` 청크가 새 빌드로 갈리면서 사라져 404가 난 것이다. 브라우저 캐시를 지우면
+> 증상이 "기능이 없다"에서 "페이지가 안 뜬다"로 **악화되는데, 이는 정상이다** — 캐시가 가리고
+> 있던 진짜 상태가 드러난 것이므로 위 절차를 그대로 따르면 된다.
 
 ### run이 `pending`에서 넘어가지 않는다 (에러도 로그도 없다)
 
